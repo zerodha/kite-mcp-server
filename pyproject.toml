@@ -1,0 +1,13 @@
+[project]
+name = "kite-mcp-server"
+version = "0.1.0"
+description = "Kite MCP Server"
+readme = "README.md"
+dependencies = [
+    "mcp[cli]",
+    "httpx",
+    "kiteconnect",
+]
+
+[tool.uv]
+dev-dependencies = []
