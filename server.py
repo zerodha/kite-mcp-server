@@ -1,3 +1,4 @@
+import os
 from kiteconnect import KiteConnect
 from typing import Any, Optional, List, Dict, Union
 from enum import Enum
@@ -6,10 +7,14 @@ import httpx
 from datetime import datetime
 from mcp.server.fastmcp import FastMCP
 
+# ENV VARS
+API_KEY = os.getenv("KITE_API_KEY")
+API_SECRET = os.getenv("KITE_API_SECRET")
+
 # Initialize FastMCP server
 mcp = FastMCP("zerodha-kite")
 
-kite = KiteConnect(api_key="", debug=True)
+kite = KiteConnect(api_key=API_KEY, debug=True)
 
 # Enums for order parameters
 class OrderVariety(str, Enum):
@@ -67,6 +72,16 @@ class GTTStatus(str, Enum):
     REJECTED = "rejected"
     DELETED = "deleted"
 
+class ChartInterval(str, Enum):
+    MINUTE = "minute"
+    DAY = "day"
+    MINUTE_3 = "3minute"
+    MINUTE_5 = "5minute"
+    MINUTE_10 = "10minute"
+    MINUTE_15 = "15minute"
+    MINUTE_30 = "30minute"
+    MINUTE_60 = "60minute"
+
 # Request model for place_order
 class PlaceOrderRequest(BaseModel):
     variety: OrderVariety = Field(..., description="Order variety (regular, co, amo, iceberg, auction)")
@@ -86,6 +101,9 @@ class PlaceOrderRequest(BaseModel):
     auction_number: Optional[int] = Field(None, description="Auction number for auction orders")
     tag: Optional[str] = Field(None, description="Custom tag for order")
 
+    class Config:
+        use_enum_values = True
+
 # Additional Request Models
 class ModifyOrderRequest(BaseModel):
     variety: OrderVariety
@@ -98,6 +116,9 @@ class ModifyOrderRequest(BaseModel):
     validity: Optional[Validity] = None
     disclosed_quantity: Optional[int] = None
 
+    class Config:
+        use_enum_values = True
+
 class ConvertPositionRequest(BaseModel):
     exchange: Exchange
     tradingsymbol: str
@@ -107,12 +128,18 @@ class ConvertPositionRequest(BaseModel):
     old_product: ProductType
     new_product: ProductType
 
+    class Config:
+        use_enum_values = True
+
 class GTTOrderParams(BaseModel):
     transaction_type: TransactionType
     quantity: int
     order_type: OrderType
     product: ProductType
     price: float
+
+    class Config:
+        use_enum_values = True
 
 class PlaceGTTRequest(BaseModel):
     trigger_type: GTTType
@@ -122,56 +149,65 @@ class PlaceGTTRequest(BaseModel):
     last_price: float
     orders: List[GTTOrderParams]
 
+    class Config:
+        use_enum_values = True
+
 class ModifyGTTRequest(PlaceGTTRequest):
     trigger_id: str
+
+    class Config:
+        use_enum_values = True
 
 class BasketMarginRequest(BaseModel):
     orders: List[PlaceOrderRequest]
     consider_positions: bool = True
     mode: Optional[str] = None
 
+    class Config:
+        use_enum_values = True
+
 # Resource Endpoints
-@mcp.resource("kite://orders")
+@mcp.tool()
 async def get_orders() -> List[Dict]:
     """Get list of orders."""
     return kite.orders()
 
-@mcp.resource("kite://trades")
+@mcp.tool()
 async def get_trades() -> List[Dict]:
     """Get list of trades."""
     return kite.trades()
 
-@mcp.resource("kite://positions")
+@mcp.tool()
 async def get_positions() -> Dict:
     """Get user's positions."""
     return kite.positions()
 
-@mcp.resource("kite://holdings")
+@mcp.tool()
 async def get_holdings() -> List[Dict]:
     """Get user's holdings."""
     return kite.holdings()
 
-@mcp.resource("kite://margins/{segment}")
+@mcp.tool()
 async def get_margins(segment: Optional[str] = None) -> Dict:
     """Get user's margins."""
     return kite.margins(segment)
 
-@mcp.resource("kite://profile")
+@mcp.tool()
 async def get_profile() -> Dict:
     """Get user's profile."""
     return kite.profile()
 
 # Tools
 @mcp.tool()
-async def login_url(api_key: str) -> str:
+async def login_url() -> str:
     """Get login URL for Zerodha KiteConnect."""
-    kite.api_key = api_key
+    kite.api_key = API_KEY
     return kite.login_url()
 
 @mcp.tool()
-async def set_access_token(request_token: str, api_secret: str) -> str:
+async def set_access_token(request_token: str) -> str:
     """Set access token for Zerodha KiteConnect."""
-    data = kite.generate_session(request_token, api_secret)
+    data = kite.generate_session(request_token, API_SECRET)
     kite.set_access_token(data["access_token"])
     return "Access token set successfully."
 
@@ -183,7 +219,7 @@ async def place_order(request: PlaceOrderRequest) -> str:
         order_id = kite.place_order(**order_params)
         return f"Order placed successfully. Order ID: {order_id}"
     except Exception as e:
-        raise Exception(f"Failed to place order: {str(e)}")
+        raise Exception(f"Failed to place order {order_params}: {str(e)}")
 
 @mcp.tool()
 async def modify_order(request: ModifyOrderRequest) -> str:
@@ -311,7 +347,7 @@ async def get_historical_data(
     instrument_token: int,
     from_date: datetime,
     to_date: datetime,
-    interval: str,
+    interval: ChartInterval,
     continuous: bool = False,
     oi: bool = False
 ) -> List[Dict]:
@@ -330,4 +366,5 @@ async def get_historical_data(
 
 if __name__ == "__main__":
     print("Starting Zerodha Kite MCP server...")
+    # TODO: split into two modes sse and stdio.
     mcp.run(transport='stdio')
