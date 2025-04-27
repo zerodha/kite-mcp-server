@@ -74,6 +74,10 @@ func (*InstrumentsSearchTool) Tool() mcp.Tool {
 			mcp.Description("Search query"),
 			mcp.Required(),
 		),
+		mcp.WithString("filter_on",
+			mcp.Description("Filter on a specific field. (Optional). [id(default)=exch:tradingsymbol, name=nice name of the instrument, tradingsymbol=used to trade in a specific exchange, isin=universal identifier for an instrument across exchanges]"),
+			mcp.Enum("id", "name", "isin", "tradingsymbol"),
+		),
 	)
 }
 
@@ -82,11 +86,23 @@ func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFun
 		args := request.Params.Arguments
 
 		query := assertString(args["query"])
+		filterOn := assertString(args["filter_on"])
 
 		manager.Instruments.UpdateInstruments()
 
 		instruments := manager.Instruments.Filter(func(instrument instruments.Instrument) bool {
-			return strings.Contains(strings.ToLower(instrument.ID), strings.ToLower(query))
+			switch filterOn {
+			case "name":
+				return strings.Contains(strings.ToLower(instrument.Name), strings.ToLower(query))
+			case "tradingsymbol":
+				return strings.Contains(strings.ToLower(instrument.Tradingsymbol), strings.ToLower(query))
+			case "isin":
+				return strings.Contains(strings.ToLower(instrument.ISIN), strings.ToLower(query))
+			case "id":
+				return strings.Contains(strings.ToLower(instrument.ID), strings.ToLower(query))
+			default:
+				return strings.Contains(strings.ToLower(instrument.ID), strings.ToLower(query))
+			}
 		})
 
 		v, err := json.Marshal(instruments)

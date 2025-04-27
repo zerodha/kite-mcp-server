@@ -21,7 +21,30 @@ func (*LoginTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		sess := server.ClientSessionFromContext(ctx)
 
-		url := manager.SessionLoginURL(sess.SessionID())
+		sessID := sess.SessionID()
+
+		session, err := manager.GetSession(sessID)
+		if err == nil {
+			// Double check by getting the profile.
+			profile, err := session.Kite.Client.GetUserProfile()
+			if err != nil {
+				return nil, err
+			}
+
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("You are already logged in as %s", profile.UserName),
+					},
+				},
+			}, nil
+		}
+
+		url, err := manager.SessionLoginURL(sessID)
+		if err != nil {
+			return nil, err
+		}
 
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{

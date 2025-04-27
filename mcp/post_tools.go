@@ -88,7 +88,7 @@ func (*PlaceOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 
 		kc, err := manager.GetSession(sess.SessionID())
 		if err != nil {
-			log.Println("error getting orders", err)
+			log.Println("error getting session", err)
 			return nil, err
 		}
 
@@ -183,7 +183,7 @@ func (*ModifyOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 
 		kc, err := manager.GetSession(sess.SessionID())
 		if err != nil {
-			log.Println("error getting orders", err)
+			log.Println("error getting session", err)
 			return nil, err
 		}
 
@@ -249,7 +249,7 @@ func (*CancelOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 
 		kc, err := manager.GetSession(sess.SessionID())
 		if err != nil {
-			log.Println("error getting orders", err)
+			log.Println("error getting session", err)
 			return nil, err
 		}
 

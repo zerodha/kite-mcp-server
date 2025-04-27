@@ -234,7 +234,7 @@ func (*OrdersTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 
 		kc, err := manager.GetSession(sess.SessionID())
 		if err != nil {
-			log.Println("error getting orders", err)
+			log.Println("error getting session", err)
 			return nil, err
 		}
 

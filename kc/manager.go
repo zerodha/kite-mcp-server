@@ -9,7 +9,8 @@ import (
 )
 
 var (
-	ErrSessionNotFound = errors.New("session not found, try to login again")
+	ErrSessionNotFound  = errors.New("session not found, try to login again")
+	ErrInvalidSessionID = errors.New("invalid session id, please try logging in again")
 )
 
 type SessionData struct {
@@ -37,6 +38,10 @@ func NewManager(apiKey, apiSecret string) *Manager {
 }
 
 func (m *Manager) GetSession(sessionID string) (*SessionData, error) {
+	if sessionID == "" {
+		return nil, ErrSessionNotFound
+	}
+
 	kc, ok := m.Sessions[sessionID]
 	if !ok {
 		return nil, ErrSessionNotFound
@@ -45,7 +50,11 @@ func (m *Manager) GetSession(sessionID string) (*SessionData, error) {
 	return kc, nil
 }
 
-func (m *Manager) SessionLoginURL(sessionID string) string {
+func (m *Manager) SessionLoginURL(sessionID string) (string, error) {
+	if sessionID == "" {
+		return "", ErrInvalidSessionID
+	}
+
 	kc := NewKiteConnect(m.apiKey)
 	m.Sessions[sessionID] = &SessionData{
 		Kite: kc,
@@ -53,10 +62,14 @@ func (m *Manager) SessionLoginURL(sessionID string) string {
 
 	redirectParams := url.QueryEscape("session_id=" + sessionID) // TODO: maybe we can hash/salt this for added security
 
-	return kc.Client.GetLoginURL() + "&redirect_params=" + redirectParams
+	return kc.Client.GetLoginURL() + "&redirect_params=" + redirectParams, nil
 }
 
 func (m *Manager) GenerateSession(sessionID, requestToken string) error {
+	if sessionID == "" {
+		return ErrInvalidSessionID
+	}
+
 	// check if session exists else return an error
 	sess, ok := m.Sessions[sessionID]
 	if !ok {
