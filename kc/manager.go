@@ -1,0 +1,74 @@
+package kc
+
+import (
+	"errors"
+	"fmt"
+	"net/url"
+
+	"github.com/zerodha/kite-mcp-server/kc/instruments"
+)
+
+var (
+	ErrSessionNotFound = errors.New("session not found, try to login again")
+)
+
+type SessionData struct {
+	Kite *KiteConnect
+}
+
+type Manager struct {
+	apiKey    string
+	apiSecret string
+
+	Instruments *instruments.Manager
+
+	Sessions map[string]*SessionData
+}
+
+func NewManager(apiKey, apiSecret string) *Manager {
+	return &Manager{
+		apiKey:    apiKey,
+		apiSecret: apiSecret,
+
+		Instruments: instruments.NewManager(),
+
+		Sessions: make(map[string]*SessionData),
+	}
+}
+
+func (m *Manager) GetSession(sessionID string) (*SessionData, error) {
+	kc, ok := m.Sessions[sessionID]
+	if !ok {
+		return nil, ErrSessionNotFound
+	}
+
+	return kc, nil
+}
+
+func (m *Manager) SessionLoginURL(sessionID string) string {
+	kc := NewKiteConnect(m.apiKey)
+	m.Sessions[sessionID] = &SessionData{
+		Kite: kc,
+	}
+
+	redirectParams := url.QueryEscape("session_id=" + sessionID) // TODO: maybe we can hash/salt this for added security
+
+	return kc.Client.GetLoginURL() + "&redirect_params=" + redirectParams
+}
+
+func (m *Manager) GenerateSession(sessionID, requestToken string) error {
+	// check if session exists else return an error
+	sess, ok := m.Sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+
+	userSess, err := sess.Kite.Client.GenerateSession(requestToken, m.apiSecret)
+	if err != nil {
+		return fmt.Errorf("failed to generate session: %w", err)
+	}
+
+	sess.Kite.Client.SetAccessToken(userSess.AccessToken)
+
+	return nil
+}
