@@ -9,6 +9,8 @@ import (
 	"github.com/zerodha/kite-mcp-server/kc"
 )
 
+// TODO: add destructive, openworld and readonly hints where applicable.
+
 var (
 	ToolList []Tool = []Tool{ // TODO: this does not need to be global, it could be moved inside the function that calls RegisterTools
 		// Tools for setting up the client
@@ -21,6 +23,7 @@ var (
 		&PositionsTool{},
 		&TradesTool{},
 		&OrdersTool{},
+		&GTTOrdersTool{},
 
 		// Tools for market data
 		&QuotesTool{},
@@ -30,6 +33,9 @@ var (
 		&PlaceOrderTool{},
 		&ModifyOrderTool{},
 		&CancelOrderTool{},
+		&PlaceGTTOrderTool{},
+		&ModifyGTTOrderTool{},
+		&DeleteGTTOrderTool{},
 	}
 )
 

@@ -28,6 +28,8 @@ func (*LoginTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			// Double check by getting the profile.
 			profile, err := session.Kite.Client.GetUserProfile()
 			if err != nil {
+				// If we are still getting an error, lets call clear session.
+				manager.ClearSession(sessID)
 				return nil, err
 			}
 

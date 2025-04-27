@@ -261,3 +261,45 @@ func (*OrdersTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}, nil
 	}
 }
+
+type GTTOrdersTool struct{}
+
+func (*GTTOrdersTool) Tool() mcp.Tool {
+	return mcp.NewTool("get_gtts",
+		mcp.WithDescription("Get all active GTT orders"),
+	)
+}
+
+func (*GTTOrdersTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		sess := server.ClientSessionFromContext(ctx)
+
+		kc, err := manager.GetSession(sess.SessionID())
+		if err != nil {
+			log.Println("error getting session", err)
+			return nil, err
+		}
+
+		gttBook, err := kc.Kite.Client.GetGTTs()
+		if err != nil {
+			log.Println("error getting GTT book", err)
+			return nil, err
+		}
+
+		v, err := json.Marshal(gttBook)
+		if err != nil {
+			log.Println("error marshalling GTT book", err)
+			return nil, err
+		}
+
+		gttBookJSON := string(v)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: gttBookJSON,
+				},
+			},
+		}, nil
+	}
+}

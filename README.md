@@ -38,7 +38,7 @@ go run main.go
 ```json
 {
   "mcpServers": {
-    "remote-example": {
+    "kite": {
       "command": "npx",
       "args": ["mcp-remote", "http://localhost:8081/sse"]
     }
@@ -51,7 +51,7 @@ If you want to use the hosted version, you can use the following config:
 ```json
 {
   "mcpServers": {
-    "remote-example": {
+    "kite": {
       "command": "npx",
       "args": ["mcp-remote", "http://api.kite.trade/sse"]
     }

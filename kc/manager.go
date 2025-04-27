@@ -50,6 +50,17 @@ func (m *Manager) GetSession(sessionID string) (*SessionData, error) {
 	return kc, nil
 }
 
+func (m *Manager) ClearSession(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+
+	if sess, ok := m.Sessions[sessionID]; ok {
+		sess.Kite.Client.InvalidateAccessToken()
+		delete(m.Sessions, sessionID)
+	}
+}
+
 func (m *Manager) SessionLoginURL(sessionID string) (string, error) {
 	if sessionID == "" {
 		return "", ErrInvalidSessionID
