@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -76,8 +77,8 @@ func (*InstrumentsSearchTool) Tool() mcp.Tool {
 			mcp.Required(),
 		),
 		mcp.WithString("filter_on",
-			mcp.Description("Filter on a specific field. (Optional). [id(default)=exch:tradingsymbol, name=nice name of the instrument, tradingsymbol=used to trade in a specific exchange, isin=universal identifier for an instrument across exchanges]"),
-			mcp.Enum("id", "name", "isin", "tradingsymbol"),
+			mcp.Description("Filter on a specific field. (Optional). [id(default)=exch:tradingsymbol, name=nice name of the instrument, tradingsymbol=used to trade in a specific exchange, isin=universal identifier for an instrument across exchanges], underlying=[query=underlying instrument, result=futures and options. note=query format -> exch:tradingsymbol where NSE/BSE:PNB converted to -> NFO/BFO:PNB for query since futures and options available under them]"),
+			mcp.Enum("id", "name", "isin", "tradingsymbol", "underlying"),
 		),
 	)
 }
@@ -90,23 +91,51 @@ func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFun
 		filterOn := assertString(args["filter_on"])
 
 		manager.Instruments.UpdateInstruments()
+		out := []instruments.Instrument{}
 
-		instruments := manager.Instruments.Filter(func(instrument instruments.Instrument) bool {
-			switch filterOn {
-			case "name":
-				return strings.Contains(strings.ToLower(instrument.Name), strings.ToLower(query))
-			case "tradingsymbol":
-				return strings.Contains(strings.ToLower(instrument.Tradingsymbol), strings.ToLower(query))
-			case "isin":
-				return strings.Contains(strings.ToLower(instrument.ISIN), strings.ToLower(query))
-			case "id":
-				return strings.Contains(strings.ToLower(instrument.ID), strings.ToLower(query))
-			default:
-				return strings.Contains(strings.ToLower(instrument.ID), strings.ToLower(query))
+		switch filterOn {
+		case "underlying":
+			// query needs to be split by `:` into exch and underlying.
+			if strings.Contains(query, ":") {
+				parts := strings.Split(query, ":")
+				if len(parts) != 2 {
+					return nil, errors.New("invalid query format, specify exch:underlying, where exchange is BFO/NFO")
+				}
+
+				exch := parts[0]
+				underlying := parts[1]
+
+				instruments, _ := manager.Instruments.GetAllByUnderlying(exch, underlying)
+				out = instruments
+			} else {
+				// Assume query is just the underlying symbol and try. Just to save prompt calls.
+				exch := "NFO"
+				underlying := query
+
+				instruments, _ := manager.Instruments.GetAllByUnderlying(exch, underlying)
+				out = instruments
 			}
-		})
+		default:
 
-		v, err := json.Marshal(instruments)
+			instruments := manager.Instruments.Filter(func(instrument instruments.Instrument) bool {
+				switch filterOn {
+				case "name":
+					return strings.Contains(strings.ToLower(instrument.Name), strings.ToLower(query))
+				case "tradingsymbol":
+					return strings.Contains(strings.ToLower(instrument.Tradingsymbol), strings.ToLower(query))
+				case "isin":
+					return strings.Contains(strings.ToLower(instrument.ISIN), strings.ToLower(query))
+				case "id":
+					return strings.Contains(strings.ToLower(instrument.ID), strings.ToLower(query))
+				default:
+					return strings.Contains(strings.ToLower(instrument.ID), strings.ToLower(query))
+				}
+			})
+
+			out = instruments
+		}
+
+		v, err := json.Marshal(out)
 		if err != nil {
 			log.Println("error marshalling instruments", err)
 			return nil, err

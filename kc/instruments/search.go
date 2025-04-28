@@ -68,3 +68,20 @@ func (m *Manager) Filter(filter func(Instrument) bool) []Instrument {
 
 	return out
 }
+
+// GetAllByUnderlying returns a list of F&O instruments associated with the underlying tradingsymbol.
+func (m *Manager) GetAllByUnderlying(exchange, underlying string) ([]Instrument, error) {
+	out := []Instrument{}
+
+	for _, ins := range m.tokenToInstrument {
+		if ins.Exchange == exchange && ins.Name == underlying {
+			out = append(out, *ins)
+		}
+	}
+
+	if len(out) == 0 {
+		return []Instrument{}, ErrInstrumentNotFound
+	}
+
+	return out, nil
+}

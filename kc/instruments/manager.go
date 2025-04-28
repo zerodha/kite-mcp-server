@@ -215,23 +215,6 @@ func (m *Manager) Count() int {
 	return len(m.tokenToInstrument)
 }
 
-// GetAllByUnderlying returns a list of F&O instruments associated with the underlying tradingsymbol.
-func (m *Manager) GetAllByUnderlying(exchange, underlying string) ([]Instrument, error) {
-	out := []Instrument{}
-
-	for _, ins := range m.tokenToInstrument {
-		if ins.Exchange == exchange && ins.Name == underlying {
-			out = append(out, *ins)
-		}
-	}
-
-	if len(out) == 0 {
-		return []Instrument{}, ErrInstrumentNotFound
-	}
-
-	return out, nil
-}
-
 // GetSegmentID returns the segment ID for the instrument token.
 func GetSegmentID(instToken uint32) uint32 {
 	return instToken & 0xFF
