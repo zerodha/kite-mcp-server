@@ -126,9 +126,9 @@ func setupTemplates() (map[string]*template.Template, error) {
 
 func (m *Manager) HandleKiteCallback() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		requestToken := r.URL.Query()["request_token"][0]
-		sessionID := r.URL.Query()["session_id"][0] // TODO: think of hashing this with some secret so that it cant be tampered.
-
+		qVals := r.URL.Query()
+		requestToken := qVals.Get("request_token")
+		sessionID := qVals.Get("session_id")
 		if sessionID == "" || requestToken == "" {
 			log.Println("missing session_id or request_token")
 			http.Error(w, "missing session_id or request_token", http.StatusBadRequest)
