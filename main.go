@@ -21,12 +21,24 @@ func main() {
 		KITE_API_KEY    = os.Getenv("KITE_API_KEY")
 		KITE_API_SECRET = os.Getenv("KITE_API_SECRET")
 		APP_MODE        = os.Getenv("APP_MODE")
+		APP_PORT        = os.Getenv("APP_PORT")
+		APP_HOST        = os.Getenv("APP_HOST")
 	)
 
 	// Set default mode if not specified
 	if APP_MODE == "" {
 		APP_MODE = APP_MODE_SSE
 	}
+
+	if APP_PORT == "" {
+		APP_PORT = "8080"
+	}
+
+	if APP_HOST == "" {
+		APP_HOST = "localhost"
+	}
+
+	addr, port := APP_HOST, APP_PORT
 
 	// Check if API KEY or SECRET is missing
 	if KITE_API_KEY == "" || KITE_API_SECRET == "" {
@@ -48,14 +60,13 @@ func main() {
 	mcp.RegisterTools(s, kcManager)
 
 	// Start the server for receiving callbacks
-	log.Println("Starting kite connect callback server")
-	port := ":8080"
-	srv := &http.Server{Addr: port} // TODO: make this configurable and optional
+	url := addr + ":" + port
+	srv := &http.Server{Addr: url}
 
 	switch APP_MODE {
 	case APP_MODE_SSE:
-		log.Println("Starting SSE MCP server... ", port)
-		sse := server.NewSSEServer(s, server.WithBaseURL("http://localhost"+port))
+		log.Println("Starting SSE MCP server...", url)
+		sse := server.NewSSEServer(s, server.WithBaseURL(url))
 
 		mux := http.NewServeMux()
 		mux.HandleFunc("/callback", kcManager.HandleKiteCallback())
