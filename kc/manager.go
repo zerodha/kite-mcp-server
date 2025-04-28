@@ -3,11 +3,13 @@ package kc
 import (
 	"errors"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"net/url"
 
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
+	"github.com/zerodha/kite-mcp-server/kc/templates"
 )
 
 var (
@@ -23,19 +25,26 @@ type Manager struct {
 	apiKey    string
 	apiSecret string
 
-	Instruments *instruments.Manager
+	templates map[string]*template.Template
 
-	Sessions map[string]*SessionData
+	Instruments *instruments.Manager
+	Sessions    map[string]*SessionData
 }
 
 func NewManager(apiKey, apiSecret string) *Manager {
+	templates, err := setupTemplates()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	return &Manager{
 		apiKey:    apiKey,
 		apiSecret: apiSecret,
 
-		Instruments: instruments.NewManager(),
+		templates: templates,
 
-		Sessions: make(map[string]*SessionData),
+		Instruments: instruments.NewManager(),
+		Sessions:    make(map[string]*SessionData),
 	}
 }
 
@@ -99,6 +108,22 @@ func (m *Manager) GenerateSession(sessionID, requestToken string) error {
 	return nil
 }
 
+func setupTemplates() (map[string]*template.Template, error) {
+	out := map[string]*template.Template{}
+
+	templateList := []string{"index.html"}
+
+	for _, templateName := range templateList {
+		templ, err := template.ParseFS(templates.FS, templateName)
+		if err != nil {
+			return out, fmt.Errorf("error parsing %s: %w", templateName, err)
+		}
+		out[templateName] = templ
+	}
+
+	return out, nil
+}
+
 func (m *Manager) HandleKiteCallback() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		requestToken := r.URL.Query()["request_token"][0]
@@ -116,7 +141,20 @@ func (m *Manager) HandleKiteCallback() func(w http.ResponseWriter, r *http.Reque
 			return
 		}
 
-		w.Write([]byte("login successful!"))
+		templ, ok := m.templates["index.html"]
+		if !ok {
+			log.Println("template not found")
+			http.Error(w, "template not found", http.StatusInternalServerError)
+			return
+		}
+
+		err := templ.Execute(w, nil)
+		if err != nil {
+			log.Println("error executing template", err)
+			http.Error(w, "error executing template", http.StatusInternalServerError)
+			return
+		}
+
 		return
 	}
 }
