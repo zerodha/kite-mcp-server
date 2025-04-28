@@ -3,6 +3,8 @@ package kc
 import (
 	"errors"
 	"fmt"
+	"log"
+	"net/http"
 	"net/url"
 
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
@@ -95,4 +97,26 @@ func (m *Manager) GenerateSession(sessionID, requestToken string) error {
 	sess.Kite.Client.SetAccessToken(userSess.AccessToken)
 
 	return nil
+}
+
+func (m *Manager) HandleKiteCallback() func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		requestToken := r.URL.Query()["request_token"][0]
+		sessionID := r.URL.Query()["session_id"][0] // TODO: think of hashing this with some secret so that it cant be tampered.
+
+		if sessionID == "" || requestToken == "" {
+			log.Println("missing session_id or request_token")
+			http.Error(w, "missing session_id or request_token", http.StatusBadRequest)
+			return
+		}
+
+		if err := m.GenerateSession(sessionID, requestToken); err != nil {
+			log.Println("error generating session", err)
+			http.Error(w, "error generating session", http.StatusInternalServerError)
+			return
+		}
+
+		w.Write([]byte("login successful!"))
+		return
+	}
 }

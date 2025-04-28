@@ -56,7 +56,7 @@ If you want to use the hosted version, you can use the following config:
 }
 ```
 
-## ## Kite Connect API Integration Status
+## Kite Connect API Integration Status
 
 | API Method                   | Integration Status | Remarks                                         |
 | ---------------------------- | ------------------ | ----------------------------------------------- |

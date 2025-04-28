@@ -49,39 +49,30 @@ func main() {
 
 	// Start the server for receiving callbacks
 	log.Println("Starting kite connect callback server")
-	srv := &http.Server{Addr: ":8080"}                                                         // TODO: make this configurable and optional
-	http.HandleFunc("/api/user/callback/kite/", func(w http.ResponseWriter, r *http.Request) { // TODO: The handler needs to be configurable
-		requestToken := r.URL.Query()["request_token"][0]
-		sessionID := r.URL.Query()["session_id"][0] // TODO: think of hashing this with some secret so that it cant be tampered.
-
-		if sessionID == "" || requestToken == "" {
-			log.Println("missing session_id or request_token")
-			http.Error(w, "missing session_id or request_token", http.StatusBadRequest)
-			return
-		}
-
-		if err := kcManager.GenerateSession(sessionID, requestToken); err != nil {
-			log.Println("error generating session", err)
-			http.Error(w, "error generating session", http.StatusInternalServerError)
-			return
-		}
-
-		w.Write([]byte("login successful!"))
-		return
-	})
-	go srv.ListenAndServe()
+	port := ":8080"
+	srv := &http.Server{Addr: port} // TODO: make this configurable and optional
 
 	switch APP_MODE {
 	case APP_MODE_SSE:
-		port := ":8081"
 		log.Println("Starting SSE MCP server... ", port)
 		sse := server.NewSSEServer(s, server.WithBaseURL("http://localhost"+port))
-		if err := sse.Start(port); err != nil {
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/callback", kcManager.HandleKiteCallback())
+		mux.HandleFunc("/sse", sse.ServeHTTP)
+		mux.HandleFunc("/message", sse.ServeHTTP)
+		srv.Handler = mux
+
+		if err := srv.ListenAndServe(); err != nil {
 			log.Fatalf("Server error: %v", err)
 		}
 	case APP_MODE_STDIO:
 		log.Println("Starting STDIO MCP server...")
 		stdio := server.NewStdioServer(s)
+
+		http.HandleFunc("/callback", kcManager.HandleKiteCallback())
+
+		go srv.ListenAndServe()
 
 		if err := stdio.Listen(context.Background(), os.Stdin, os.Stdout); err != nil {
 			log.Fatalf("Server error: %v", err)
