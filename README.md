@@ -50,7 +50,7 @@ If you want to use the hosted version, you can use the following config:
   "mcpServers": {
     "kite": {
       "command": "npx",
-      "args": ["mcp-remote", "http://api.kite.trade/sse"]
+      "args": ["mcp-remote", "http://mcp.kite.trade/sse"]
     }
   }
 }
