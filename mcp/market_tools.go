@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -117,6 +118,111 @@ func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFun
 				mcp.TextContent{
 					Type: "text",
 					Text: instrumentsJSON,
+				},
+			},
+		}, nil
+	}
+}
+
+type HistoricalDataTool struct{}
+
+func (*HistoricalDataTool) Tool() mcp.Tool {
+	return mcp.NewTool("get_historical_data",
+		mcp.WithDescription("Get historical price data for an instrument"),
+		mcp.WithNumber("instrument_token",
+			mcp.Description("Instrument token (can be obtained from search_instruments tool)"),
+			mcp.Required(),
+		),
+		mcp.WithString("from_date",
+			mcp.Description("From date in YYYY-MM-DD HH:MM:SS format"),
+			mcp.Required(),
+		),
+		mcp.WithString("to_date",
+			mcp.Description("To date in YYYY-MM-DD HH:MM:SS format"),
+			mcp.Required(),
+		),
+		mcp.WithString("interval",
+			mcp.Description("Candle interval"),
+			mcp.Required(),
+			mcp.Enum("minute", "day", "3minute", "5minute", "10minute", "15minute", "30minute", "60minute"),
+		),
+		mcp.WithBoolean("continuous",
+			mcp.Description("Get continuous data (for futures and options)"),
+			mcp.DefaultBool(false),
+		),
+		mcp.WithBoolean("oi",
+			mcp.Description("Include open interest data"),
+			mcp.DefaultBool(false),
+		),
+	)
+}
+
+func (*HistoricalDataTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		sess := server.ClientSessionFromContext(ctx)
+
+		kc, err := manager.GetSession(sess.SessionID())
+		if err != nil {
+			log.Println("error getting session", err)
+			return nil, err
+		}
+
+		args := request.Params.Arguments
+
+		// Parse instrument token
+		instrumentToken := assertInt(args["instrument_token"])
+
+		// Parse from_date and to_date
+		fromDate, err := time.Parse("2006-01-02 15:04:05", assertString(args["from_date"]))
+		if err != nil {
+			log.Println("error parsing from_date", err)
+			return nil, err
+		}
+
+		toDate, err := time.Parse("2006-01-02 15:04:05", assertString(args["to_date"]))
+		if err != nil {
+			log.Println("error parsing to_date", err)
+			return nil, err
+		}
+
+		// Get other parameters
+		interval := assertString(args["interval"])
+		continuous := false
+		if args["continuous"] != nil {
+			continuous = assertBool(args["continuous"])
+		}
+		oi := false
+		if args["oi"] != nil {
+			oi = assertBool(args["oi"])
+		}
+
+		// Get historical data
+		historicalData, err := kc.Kite.Client.GetHistoricalData(
+			instrumentToken,
+			interval,
+			fromDate,
+			toDate,
+			continuous,
+			oi,
+		)
+		if err != nil {
+			log.Println("error getting historical data", err)
+			return nil, err
+		}
+
+		// Convert to JSON
+		v, err := json.Marshal(historicalData)
+		if err != nil {
+			log.Println("error marshalling historical data", err)
+			return nil, err
+		}
+
+		historicalDataJSON := string(v)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: historicalDataJSON,
 				},
 			},
 		}, nil

@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+// TODO: maybe this needs to be under a mutex
+
 const (
 	instrumentsURL = "https://api.kite.trade/instruments.json"
 	segIndices     = "INDICES"

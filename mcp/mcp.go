@@ -28,6 +28,7 @@ var (
 		// Tools for market data
 		&QuotesTool{},
 		&InstrumentsSearchTool{},
+		&HistoricalDataTool{},
 
 		// Tools that post data to Kite Connect
 		&PlaceOrderTool{},
@@ -109,4 +110,25 @@ func assertStringArray(v any) []string {
 	}
 
 	return out
+}
+
+func assertBool(v any) bool {
+	if v == nil {
+		return false
+	}
+
+	b, ok := v.(bool)
+	if !ok {
+		// Check if it is a string and convert it to bool
+		s := assertString(v)
+		if s == "true" {
+			return true
+		} else if s == "false" {
+			return false
+		}
+
+		return false
+	}
+
+	return b
 }
