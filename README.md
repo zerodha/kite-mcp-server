@@ -106,7 +106,7 @@ If you want to use the hosted version, you can use the following config:
 | `PlaceMFSIP()`               | [ ]                | Not yet implemented                             |
 | `ModifyMFSIP()`              | [ ]                | Not yet implemented                             |
 | `CancelMFSIP()`              | [ ]                | Not yet implemented                             |
-| `GetMFHoldings()`            | [ ]                | Not yet implemented                             |
+| `GetMFHoldings()`            | [x]                | Implemented as `get_mf_holdings` tool           |
 | `GetMFHoldingInfo()`         | [ ]                | Not yet implemented                             |
 | `GetMFInstruments()`         | [ ]                | Not yet implemented                             |
 | `GetMFOrdersByDate()`        | [ ]                | Not yet implemented                             |

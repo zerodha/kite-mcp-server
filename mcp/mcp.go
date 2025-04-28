@@ -24,6 +24,7 @@ var (
 		&TradesTool{},
 		&OrdersTool{},
 		&GTTOrdersTool{},
+		&MFHoldingsTool{},
 
 		// Tools for market data
 		&QuotesTool{},
