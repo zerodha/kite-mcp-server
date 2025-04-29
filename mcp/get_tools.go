@@ -98,7 +98,13 @@ type HoldingsTool struct{}
 
 func (*HoldingsTool) Tool() mcp.Tool {
 	return mcp.NewTool("get_holdings",
-		mcp.WithDescription("Get holdings"),
+		mcp.WithDescription("Get holdings for the current user."),
+		mcp.WithNumber("from",
+			mcp.Description("from is the index from which to show the holdings. (not required unless you have a large payload issue)"),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("limit is the maximum number of holdings to show. (not required unless you have a large payload issue)"),
+		),
 	)
 }
 
@@ -116,6 +122,23 @@ func (*HoldingsTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		if err != nil {
 			log.Println("error getting holdings", err)
 			return nil, err
+		}
+
+		args := request.Params.Arguments
+		// Set defaults for pagination
+		from := assertInt(args["from"])
+		limit := assertInt(args["limit"])
+
+		// Apply pagination only if there are holdings and limit is specified
+		if len(holdings) > 0 && limit > 0 {
+			// Ensure from is within bounds
+			from = min(max(from, 0), len(holdings))
+
+			// Calculate end index (from + limit) but don't exceed holdings length
+			end := min(from+limit, len(holdings))
+
+			// Slice the holdings based on pagination
+			holdings = holdings[from:end]
 		}
 
 		v, err := json.Marshal(holdings)
