@@ -89,6 +89,7 @@ func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFun
 
 		query := assertString(args["query"])
 		filterOn := assertString(args["filter_on"])
+		// TODO: maybe we can add some pagination here.
 
 		manager.Instruments.UpdateInstruments()
 		out := []instruments.Instrument{}
