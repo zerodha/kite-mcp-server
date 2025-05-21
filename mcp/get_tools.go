@@ -124,7 +124,7 @@ func (*HoldingsTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			return nil, err
 		}
 
-		args := request.Params.Arguments
+		args := request.GetArguments()
 		// Set defaults for pagination
 		from := assertInt(args["from"])
 		limit := assertInt(args["limit"])

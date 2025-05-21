@@ -1,4 +1,4 @@
 .env
 oldpy
 instruments.json
-mcp.bin
+*.bin
