@@ -12,8 +12,7 @@ Linux: `~/.config/Claude/claude_desktop_config.json`
 {
   "mcpServers": {
     "kite": {
-      "command": "go",
-      "args": ["run", "<ABSOLUTE_PATH>/main.go"],
+      "command": "<ABSOLUTE_PATH>/run-kite-mcp.sh",
       "env": {
         "APP_MODE": "stdio",
         "KITE_API_KEY": "<your_api_key>",
