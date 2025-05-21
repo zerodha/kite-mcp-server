@@ -2,3 +2,5 @@
 oldpy
 instruments.json
 mcp.bin
+vendor
+.DS_Store
