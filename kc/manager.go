@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sync"
 
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
 	"github.com/zerodha/kite-mcp-server/kc/templates"
@@ -28,7 +29,8 @@ type Manager struct {
 	templates map[string]*template.Template
 
 	Instruments *instruments.Manager
-	Sessions    map[string]*SessionData
+	sessions    map[string]*SessionData
+	sessLock    sync.RWMutex
 }
 
 func NewManager(apiKey, apiSecret string) *Manager {
@@ -44,7 +46,7 @@ func NewManager(apiKey, apiSecret string) *Manager {
 		templates: templates,
 
 		Instruments: instruments.NewManager(),
-		Sessions:    make(map[string]*SessionData),
+		sessions:    make(map[string]*SessionData),
 	}
 }
 
@@ -53,7 +55,9 @@ func (m *Manager) GetSession(sessionID string) (*SessionData, error) {
 		return nil, ErrSessionNotFound
 	}
 
-	kc, ok := m.Sessions[sessionID]
+	m.sessLock.RLock()
+	kc, ok := m.sessions[sessionID]
+	m.sessLock.RUnlock()
 	if !ok {
 		return nil, ErrSessionNotFound
 	}
@@ -66,10 +70,12 @@ func (m *Manager) ClearSession(sessionID string) {
 		return
 	}
 
-	if sess, ok := m.Sessions[sessionID]; ok {
+	m.sessLock.Lock()
+	if sess, ok := m.sessions[sessionID]; ok {
 		sess.Kite.Client.InvalidateAccessToken()
-		delete(m.Sessions, sessionID)
+		delete(m.sessions, sessionID)
 	}
+	m.sessLock.Unlock()
 }
 
 func (m *Manager) SessionLoginURL(sessionID string) (string, error) {
@@ -78,9 +84,11 @@ func (m *Manager) SessionLoginURL(sessionID string) (string, error) {
 	}
 
 	kc := NewKiteConnect(m.apiKey)
-	m.Sessions[sessionID] = &SessionData{
+	m.sessLock.Lock()
+	m.sessions[sessionID] = &SessionData{
 		Kite: kc,
 	}
+	m.sessLock.Unlock()
 
 	redirectParams := url.QueryEscape("session_id=" + sessionID) // TODO: maybe we can hash/salt this for added security
 
@@ -93,7 +101,9 @@ func (m *Manager) GenerateSession(sessionID, requestToken string) error {
 	}
 
 	// check if session exists else return an error
-	sess, ok := m.Sessions[sessionID]
+	m.sessLock.RLock()
+	sess, ok := m.sessions[sessionID]
+	m.sessLock.RUnlock()
 	if !ok {
 		return ErrSessionNotFound
 	}
