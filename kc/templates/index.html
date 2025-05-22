@@ -12,13 +12,15 @@
         <style>
             :root {
                 --orange: #ff5722;
-                --bg: #f5f6fa;
+                --green: #4caf50;
+                --bg: #f8f8f8;
                 --card-bg: #ffffff;
                 --heading: #212121;
                 --text: #727272;
-                --radius: 6px;
-                --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-                --font: "Roboto", sans-serif;
+                --radius: 5px;
+                --color-border-default: #eee;
+                --shadow: 1px 1px 4px var(--color-border-default);
+                --font: "Open Sans", sans-serif;
             }
 
             *,
@@ -30,6 +32,7 @@
                 margin: 0;
                 height: 100vh;
                 display: flex;
+                flex-direction: column;
                 align-items: center;
                 justify-content: center;
                 background: var(--bg);
@@ -39,6 +42,7 @@
 
             .card {
                 background: var(--card-bg);
+                border: 2px solid var(--color-border-default);
                 border-radius: var(--radius);
                 box-shadow: var(--shadow);
                 padding: 2rem 1.5rem;
@@ -103,7 +107,7 @@
         <div class="card">
             <div class="icon">
                 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="12" cy="12" r="12" fill="var(--orange)" />
+                    <circle cx="12" cy="12" r="12" fill="var(--green)" />
                     <path
                         d="M7.5 12.5l3 3l6-6"
                         fill="none"
