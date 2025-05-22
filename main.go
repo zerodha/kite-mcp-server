@@ -66,7 +66,10 @@ func main() {
 	switch APP_MODE {
 	case APP_MODE_SSE:
 		log.Println("Starting SSE MCP server...", url)
-		sse := server.NewSSEServer(s, server.WithBaseURL(url))
+		sse := server.NewSSEServer(s,
+			server.WithBaseURL(url),
+			server.WithKeepAlive(true),
+		)
 
 		mux := http.NewServeMux()
 		mux.HandleFunc("/callback", kcManager.HandleKiteCallback())
