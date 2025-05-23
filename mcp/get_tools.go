@@ -327,6 +327,55 @@ func (*GTTOrdersTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	}
 }
 
+type OrderTradesTool struct{}
+
+func (*OrderTradesTool) Tool() mcp.Tool {
+	return mcp.NewTool("get_order_trades",
+		mcp.WithDescription("Get trades for a specific order"),
+		mcp.WithString("order_id",
+			mcp.Description("ID of the order to fetch trades for"),
+			mcp.Required(),
+		),
+	)
+}
+
+func (*OrderTradesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		sess := server.ClientSessionFromContext(ctx)
+
+		kc, err := manager.GetSession(sess.SessionID())
+		if err != nil {
+			log.Println("error getting session", err)
+			return nil, err
+		}
+
+		args := request.GetArguments()
+		orderID := assertString(args["order_id"])
+
+		orderTrades, err := kc.Kite.Client.GetOrderTrades(orderID)
+		if err != nil {
+			log.Println("error getting order trades", err)
+			return nil, err
+		}
+
+		v, err := json.Marshal(orderTrades)
+		if err != nil {
+			log.Println("error marshalling order trades", err)
+			return nil, err
+		}
+
+		orderTradesJSON := string(v)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: orderTradesJSON,
+				},
+			},
+		}, nil
+	}
+}
+
 type OrderHistoryTool struct{}
 
 func (*OrderHistoryTool) Tool() mcp.Tool {

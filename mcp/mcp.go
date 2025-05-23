@@ -24,6 +24,7 @@ var (
 		&TradesTool{},
 		&OrdersTool{},
 		&OrderHistoryTool{},
+		&OrderTradesTool{},
 		&GTTOrdersTool{},
 		&MFHoldingsTool{},
 
