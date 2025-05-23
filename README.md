@@ -77,7 +77,7 @@ If you want to use the hosted version, you can use the following config:
 | `CancelOrder()`              | [x]                | Implemented as `cancel_order` tool              |
 | `ExitOrder()`                | [ ]                | Not yet implemented                             |
 | `ConvertPosition()`          | [ ]                | Not yet implemented                             |
-| `GetOrderHistory()`          | [ ]                | Not yet implemented                             |
+| `GetOrderHistory()`          | [x]                | Implemented as `get_order_history` tool         |
 | `GetOrderTrades()`           | [ ]                | Not yet implemented                             |
 | `GetOrderMargins()`          | [ ]                | Not yet implemented                             |
 | `GetBasketMargins()`         | [ ]                | Not yet implemented                             |

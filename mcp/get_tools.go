@@ -326,3 +326,52 @@ func (*GTTOrdersTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}, nil
 	}
 }
+
+type OrderHistoryTool struct{}
+
+func (*OrderHistoryTool) Tool() mcp.Tool {
+	return mcp.NewTool("get_order_history",
+		mcp.WithDescription("Get order history for a specific order"),
+		mcp.WithString("order_id",
+			mcp.Description("ID of the order to fetch history for"),
+			mcp.Required(),
+		),
+	)
+}
+
+func (*OrderHistoryTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		sess := server.ClientSessionFromContext(ctx)
+
+		kc, err := manager.GetSession(sess.SessionID())
+		if err != nil {
+			log.Println("error getting session", err)
+			return nil, err
+		}
+
+		args := request.GetArguments()
+		orderID := assertString(args["order_id"])
+
+		orderHistory, err := kc.Kite.Client.GetOrderHistory(orderID)
+		if err != nil {
+			log.Println("error getting order history", err)
+			return nil, err
+		}
+
+		v, err := json.Marshal(orderHistory)
+		if err != nil {
+			log.Println("error marshalling order history", err)
+			return nil, err
+		}
+
+		orderHistoryJSON := string(v)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: orderHistoryJSON,
+				},
+			},
+		}, nil
+	}
+}

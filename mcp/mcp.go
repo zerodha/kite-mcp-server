@@ -23,6 +23,7 @@ var (
 		&PositionsTool{},
 		&TradesTool{},
 		&OrdersTool{},
+		&OrderHistoryTool{},
 		&GTTOrdersTool{},
 		&MFHoldingsTool{},
 
