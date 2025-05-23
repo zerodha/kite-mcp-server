@@ -2,3 +2,7 @@
 oldpy
 instruments.json
 *.bin
+# Nix specific
+.direnv/
+result
+result-*

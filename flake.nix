@@ -33,9 +33,7 @@
             echo "- APP_HOST        : Host to listen on (default: localhost)"
           '';
 
-          # Make Go modules available even in pure environments
-          GOPATH = "$(pwd)/.go";
-          GO111MODULE = "on";
+          # Go 1.24 with modules doesn't need special environment configuration
         };
       }
     );

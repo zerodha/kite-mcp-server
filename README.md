@@ -1,5 +1,47 @@
 # Kite MCP Server
 
+## Development Environment with Nix
+
+This project includes a Nix flake for setting up a consistent development environment. This ensures that all developers have the same tools and dependencies regardless of their operating system.
+
+### Prerequisites
+
+- [Nix package manager](https://nixos.org/download.html) with flakes enabled
+- (Optional) [direnv](https://direnv.net/) for automatic environment loading
+
+### Getting Started with Nix
+
+1. Enter the development shell:
+
+   ```bash
+   nix develop
+   ```
+
+2. If you're using direnv, simply enter the directory and allow direnv:
+
+   ```bash
+   direnv allow
+   ```
+
+3. The development environment includes:
+   - Go 1.24
+   - gopls (Go language server)
+   - golangci-lint
+   - delve (Go debugger)
+   - go-tools
+
+### Environment Variables
+
+Remember to set up your environment variables in `.env` file:
+
+```
+KITE_API_KEY=your_api_key
+KITE_API_SECRET=your_api_secret
+APP_MODE=sse  # or stdio
+APP_PORT=8080  # optional
+APP_HOST=localhost  # optional
+```
+
 ## Claude config:
 
 The path to the config file can be found in the `claude_desktop_config.json` file.
