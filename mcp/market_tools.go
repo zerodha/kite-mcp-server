@@ -258,3 +258,115 @@ func (*HistoricalDataTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}, nil
 	}
 }
+
+type LTPTool struct{}
+
+func (*LTPTool) Tool() mcp.Tool {
+	return mcp.NewTool("get_ltp",
+		mcp.WithDescription("Get latest trading prices for a list of instruments"),
+		mcp.WithArray("instruments",
+			mcp.Description("Eg. ['NSE:INFY', 'NSE:SBIN']. This API returns the lastest price for the given list of instruments in the format of exchange:tradingsymbol."),
+			mcp.Required(),
+			mcp.Items(map[string]any{
+				"type": "string",
+			}),
+		),
+	)
+}
+
+func (*LTPTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		sess := server.ClientSessionFromContext(ctx)
+
+		kc, err := manager.GetSession(sess.SessionID())
+		if err != nil {
+			log.Println("error getting session for LTP", err)
+			return nil, err
+		}
+
+		args := request.GetArguments()
+
+		instruments := assertStringArray(args["instruments"])
+		if len(instruments) == 0 {
+			return nil, errors.New("at least one instrument must be specified")
+		}
+
+		ltp, err := kc.Kite.Client.GetLTP(instruments...)
+		if err != nil {
+			log.Println("error getting LTP", err)
+			return nil, err
+		}
+
+		v, err := json.Marshal(ltp)
+		if err != nil {
+			log.Println("error marshalling LTP data", err)
+			return nil, err
+		}
+
+		ltpJSON := string(v)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: ltpJSON,
+				},
+			},
+		}, nil
+	}
+}
+
+type OHLCTool struct{}
+
+func (*OHLCTool) Tool() mcp.Tool {
+	return mcp.NewTool("get_ohlc",
+		mcp.WithDescription("Get OHLC (Open, High, Low, Close) data for a list of instruments"),
+		mcp.WithArray("instruments",
+			mcp.Description("Eg. ['NSE:INFY', 'NSE:SBIN']. This API returns OHLC data for the given list of instruments in the format of exchange:tradingsymbol."),
+			mcp.Required(),
+			mcp.Items(map[string]any{
+				"type": "string",
+			}),
+		),
+	)
+}
+
+func (*OHLCTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		sess := server.ClientSessionFromContext(ctx)
+
+		kc, err := manager.GetSession(sess.SessionID())
+		if err != nil {
+			log.Println("error getting session for OHLC", err)
+			return nil, err
+		}
+
+		args := request.GetArguments()
+
+		instruments := assertStringArray(args["instruments"])
+		if len(instruments) == 0 {
+			return nil, errors.New("at least one instrument must be specified")
+		}
+
+		ohlc, err := kc.Kite.Client.GetOHLC(instruments...)
+		if err != nil {
+			log.Println("error getting OHLC", err)
+			return nil, err
+		}
+
+		v, err := json.Marshal(ohlc)
+		if err != nil {
+			log.Println("error marshalling OHLC data", err)
+			return nil, err
+		}
+
+		ohlcJSON := string(v)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: ohlcJSON,
+				},
+			},
+		}, nil
+	}
+}

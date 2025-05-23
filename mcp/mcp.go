@@ -31,6 +31,8 @@ var (
 		&QuotesTool{},
 		&InstrumentsSearchTool{},
 		&HistoricalDataTool{},
+		&LTPTool{},
+		&OHLCTool{},
 
 		// Tools that post data to Kite Connect
 		&PlaceOrderTool{},
