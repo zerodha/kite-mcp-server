@@ -56,14 +56,7 @@ func (*QuotesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		quotesJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: quotesJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(quotesJSON), nil
 	}
 }
 
@@ -143,14 +136,7 @@ func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFun
 		}
 
 		instrumentsJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: instrumentsJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(instrumentsJSON), nil
 	}
 }
 
@@ -248,13 +234,6 @@ func (*HistoricalDataTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		historicalDataJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: historicalDataJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(historicalDataJSON), nil
 	}
 }

@@ -126,14 +126,7 @@ func (*PlaceOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		ordersRespJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: ordersRespJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(ordersRespJSON), nil
 	}
 }
 
@@ -215,14 +208,7 @@ func (*ModifyOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		ordersRespJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: ordersRespJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(ordersRespJSON), nil
 	}
 }
 
@@ -272,14 +258,7 @@ func (*CancelOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		ordersRespJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: ordersRespJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(ordersRespJSON), nil
 	}
 }
 
@@ -406,14 +385,7 @@ func (*PlaceGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		gttRespJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: gttRespJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(gttRespJSON), nil
 	}
 }
 
@@ -458,14 +430,7 @@ func (*DeleteGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		gttRespJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: gttRespJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(gttRespJSON), nil
 	}
 }
 
@@ -599,13 +564,6 @@ func (*ModifyGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		gttRespJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: gttRespJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(gttRespJSON), nil
 	}
 }

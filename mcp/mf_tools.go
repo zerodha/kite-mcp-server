@@ -41,13 +41,6 @@ func (*MFHoldingsTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		holdingsJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: holdingsJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(holdingsJSON), nil
 	}
 }

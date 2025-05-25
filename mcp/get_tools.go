@@ -41,14 +41,7 @@ func (*ProfileTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		profileJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: profileJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(profileJSON), nil
 	}
 }
 
@@ -83,14 +76,7 @@ func (*MarginsTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		marginsJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: marginsJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(marginsJSON), nil
 	}
 }
 
@@ -148,14 +134,7 @@ func (*HoldingsTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		holdingsJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: holdingsJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(holdingsJSON), nil
 	}
 }
 
@@ -190,14 +169,7 @@ func (*PositionsTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		positionsJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: positionsJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(positionsJSON), nil
 	}
 }
 
@@ -232,14 +204,7 @@ func (*TradesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		tradesJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: tradesJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(tradesJSON), nil
 	}
 }
 
@@ -274,14 +239,7 @@ func (*OrdersTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		ordersJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: ordersJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(ordersJSON), nil
 	}
 }
 
@@ -316,13 +274,6 @@ func (*GTTOrdersTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		gttBookJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: gttBookJSON,
-				},
-			},
-		}, nil
+		return mcp.NewToolResultText(gttBookJSON), nil
 	}
 }
