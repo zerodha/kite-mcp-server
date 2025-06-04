@@ -3,7 +3,7 @@ module github.com/zerodha/kite-mcp-server
 go 1.24.2
 
 require (
-	github.com/mark3labs/mcp-go v0.30.0
+	github.com/mark3labs/mcp-go v0.31.0
 	github.com/zerodha/gokiteconnect/v4 v4.3.5
 )
 
