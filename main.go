@@ -65,13 +65,13 @@ func main() {
 
 	switch APP_MODE {
 	case APP_MODE_SSE:
-		log.Println("Starting SSE MCP server...", url)
-		sse := server.NewSSEServer(s, server.WithBaseURL(url))
+		log.Println("Starting Streamable HTTP MCP server...", url)
+
+		httpStreamableServer := server.NewStreamableHTTPServer(s)
 
 		mux := http.NewServeMux()
 		mux.HandleFunc("/callback", kcManager.HandleKiteCallback())
-		mux.HandleFunc("/sse", sse.ServeHTTP)
-		mux.HandleFunc("/message", sse.ServeHTTP)
+		mux.HandleFunc("/mcp", httpStreamableServer.ServeHTTP)
 		srv.Handler = mux
 
 		if err := srv.ListenAndServe(); err != nil {

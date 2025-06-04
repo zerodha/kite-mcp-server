@@ -93,7 +93,7 @@ func (*PlaceOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			return nil, err
 		}
 
-		args := request.Params.Arguments
+		args := request.GetArguments()
 
 		variety := assertString(args["variety"])
 		orderParams := kiteconnect.OrderParams{
@@ -188,7 +188,7 @@ func (*ModifyOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			return nil, err
 		}
 
-		args := request.Params.Arguments
+		args := request.GetArguments()
 
 		variety := assertString(args["variety"])
 		orderID := assertString(args["order_id"])
@@ -254,7 +254,7 @@ func (*CancelOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			return nil, err
 		}
 
-		args := request.Params.Arguments
+		args := request.GetArguments()
 
 		variety := assertString(args["variety"])
 		orderID := assertString(args["order_id"])
@@ -354,7 +354,7 @@ func (*PlaceGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			return nil, err
 		}
 
-		args := request.Params.Arguments
+		args := request.GetArguments()
 
 		// Set up basic GTT params
 		gttParams := kiteconnect.GTTParams{
@@ -439,7 +439,7 @@ func (*DeleteGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			return nil, err
 		}
 
-		args := request.Params.Arguments
+		args := request.GetArguments()
 
 		// Get the trigger ID to delete
 		triggerID := assertInt(args["trigger_id"])
@@ -544,7 +544,7 @@ func (*ModifyGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			return nil, err
 		}
 
-		args := request.Params.Arguments
+		args := request.GetArguments()
 
 		// Get the trigger ID to modify
 		triggerID := assertInt(args["trigger_id"])

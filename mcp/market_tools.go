@@ -39,7 +39,7 @@ func (*QuotesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			return nil, err
 		}
 
-		args := request.Params.Arguments
+		args := request.GetArguments()
 
 		instruments := assertStringArray(args["instruments"])
 
@@ -85,7 +85,7 @@ func (*InstrumentsSearchTool) Tool() mcp.Tool {
 
 func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.Params.Arguments
+		args := request.GetArguments()
 
 		query := assertString(args["query"])
 		filterOn := assertString(args["filter_on"])
@@ -197,7 +197,7 @@ func (*HistoricalDataTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			return nil, err
 		}
 
-		args := request.Params.Arguments
+		args := request.GetArguments()
 
 		// Parse instrument token
 		instrumentToken := assertInt(args["instrument_token"])
