@@ -7,6 +7,9 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
 	"github.com/zerodha/kite-mcp-server/kc/templates"
@@ -31,6 +34,12 @@ type Manager struct {
 	Sessions    map[string]*SessionData
 }
 
+func hashSessionID(sessionID, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(sessionID))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 func NewManager(apiKey, apiSecret string) *Manager {
 	templates, err := setupTemplates()
 	if err != nil {
@@ -53,7 +62,8 @@ func (m *Manager) GetSession(sessionID string) (*SessionData, error) {
 		return nil, ErrSessionNotFound
 	}
 
-	kc, ok := m.Sessions[sessionID]
+	hashedID := hashSessionID(sessionID, m.apiSecret)
+	kc, ok := m.Sessions[hashedID]
 	if !ok {
 		return nil, ErrSessionNotFound
 	}
@@ -66,9 +76,11 @@ func (m *Manager) ClearSession(sessionID string) {
 		return
 	}
 
-	if sess, ok := m.Sessions[sessionID]; ok {
+	hashedID := hashSessionID(sessionID, m.apiSecret)
+	if sess, ok := m.Sessions[hashedID]; ok {
 		sess.Kite.Client.InvalidateAccessToken()
 		delete(m.Sessions, sessionID)
+		delete(m.Sessions, hashedID)
 	}
 }
 
@@ -77,12 +89,14 @@ func (m *Manager) SessionLoginURL(sessionID string) (string, error) {
 		return "", ErrInvalidSessionID
 	}
 
+	hashedID := hashSessionID(sessionID, m.apiSecret)
+
 	kc := NewKiteConnect(m.apiKey)
-	m.Sessions[sessionID] = &SessionData{
+	m.Sessions[hashedID] = &SessionData{
 		Kite: kc,
 	}
 
-	redirectParams := url.QueryEscape("session_id=" + sessionID) // TODO: maybe we can hash/salt this for added security
+	redirectParams := url.QueryEscape("session_id=" + hashedID)
 
 	return kc.Client.GetLoginURL() + "&redirect_params=" + redirectParams, nil
 }
@@ -93,7 +107,8 @@ func (m *Manager) GenerateSession(sessionID, requestToken string) error {
 	}
 
 	// check if session exists else return an error
-	sess, ok := m.Sessions[sessionID]
+	hashedID := hashSessionID(sessionID, m.apiSecret)
+	sess, ok := m.Sessions[hashedID]
 	if !ok {
 		return ErrSessionNotFound
 	}
