@@ -79,7 +79,6 @@ func (m *Manager) ClearSession(sessionID string) {
 	hashedID := hashSessionID(sessionID, m.apiSecret)
 	if sess, ok := m.Sessions[hashedID]; ok {
 		sess.Kite.Client.InvalidateAccessToken()
-		delete(m.Sessions, sessionID)
 		delete(m.Sessions, hashedID)
 	}
 }
