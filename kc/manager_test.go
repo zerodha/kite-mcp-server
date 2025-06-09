@@ -493,6 +493,44 @@ func TestNewConfigConstructor(t *testing.T) {
 	})
 }
 
+// TestExternalSessionIDFromErrorLog tests the exact session ID from the error log
+func TestExternalSessionIDFromErrorLog(t *testing.T) {
+	manager, err := newTestManager("test_key", "test_secret")
+	if err != nil {
+		t.Fatalf("Expected no error creating manager, got: %v", err)
+	}
+
+	// This is the exact session ID from the error log that was failing
+	externalSessionID := "6f615000-2644-45a7-a27c-f579e20b5992"
+	
+	// Should be able to get or create session with external session ID
+	kiteSession, isNew, err := manager.GetOrCreateSession(externalSessionID)
+	if err != nil {
+		t.Errorf("Expected no error for external session ID from error log, got: %v", err)
+	}
+	if !isNew {
+		t.Error("Expected new session to be created for external session ID")
+	}
+	if kiteSession == nil {
+		t.Error("Expected non-nil Kite session data")
+	}
+	if kiteSession.Kite == nil {
+		t.Error("Expected Kite client to be initialized")
+	}
+
+	// Subsequent call should reuse existing session
+	kiteSession2, isNew2, err2 := manager.GetOrCreateSession(externalSessionID)
+	if err2 != nil {
+		t.Errorf("Expected no error on second call, got: %v", err2)
+	}
+	if isNew2 {
+		t.Error("Expected existing session to be reused")
+	}
+	if kiteSession2 != kiteSession {
+		t.Error("Expected same session instance to be returned")
+	}
+}
+
 // Helper function to check if string contains substring
 func managerContains(s, substr string) bool {
 	if len(substr) > len(s) {

@@ -100,11 +100,19 @@ func (sm *SessionRegistry) GenerateWithData(data any) string {
 }
 
 // should be a valid uuid and start with the correct prefix.
+// checkSessionID validates the format of a MCP session ID
+// Accepts both internal format (kitemcp-<uuid>) and external format (plain uuid)
 func checkSessionID(sessionID string) error {
-	if !strings.HasPrefix(sessionID, mcpSessionPrefix) {
-		return fmt.Errorf("%s", errInvalidSessionIDFormat)
+	// Handle internal format with prefix
+	if strings.HasPrefix(sessionID, mcpSessionPrefix) {
+		if _, err := uuid.Parse(sessionID[len(mcpSessionPrefix):]); err != nil {
+			return fmt.Errorf("%s: %w", errInvalidSessionIDFormat, err)
+		}
+		return nil
 	}
-	if _, err := uuid.Parse(sessionID[len(mcpSessionPrefix):]); err != nil {
+	
+	// Handle external format (plain UUID from SSE/stdio modes)
+	if _, err := uuid.Parse(sessionID); err != nil {
 		return fmt.Errorf("%s: %w", errInvalidSessionIDFormat, err)
 	}
 	return nil
@@ -350,8 +358,20 @@ func (sm *SessionRegistry) GetOrCreateSessionData(sessionID string, createDataFn
 
 	session, exists := sm.sessions[sessionID]
 	if !exists {
-		sm.logger.Warn("Session not found for ID", "session_id", sessionID)
-		return nil, false, errors.New(errSessionNotFound)
+		// Create a new session for external session IDs (from SSE/stdio modes)
+		sm.logger.Info("Creating new session for external session ID", "session_id", sessionID)
+		now := time.Now()
+		expiresAt := now.Add(sm.sessionDuration)
+		
+		session = &MCPSession{
+			ID:         sessionID,
+			Terminated: false,
+			CreatedAt:  now,
+			ExpiresAt:  expiresAt,
+			Data:       nil,
+		}
+		sm.sessions[sessionID] = session
+		exists = true
 	}
 
 	now := time.Now()

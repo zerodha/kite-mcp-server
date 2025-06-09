@@ -599,11 +599,11 @@ func TestSessionExpiration(t *testing.T) {
 		t.Errorf("Expected no error for new session, got: %v", err)
 	}
 	if isTerminated {
-		t.Error("Expected new session to not be terminated")
+		t.Error("Expected session to not be terminated initially")
 	}
 
-	// Wait for expiration
-	time.Sleep(2 * time.Millisecond)
+	// Wait for session to expire
+	time.Sleep(5 * time.Millisecond)
 
 	// Session should now be expired
 	isTerminated, err = manager.Validate(sessionID)
@@ -611,6 +611,63 @@ func TestSessionExpiration(t *testing.T) {
 		t.Errorf("Expected no error for expired session validation, got: %v", err)
 	}
 	if !isTerminated {
-		t.Error("Expected expired session to be terminated")
+		t.Error("Expected session to be terminated after expiry")
+	}
+}
+
+func TestExternalSessionIDFormat(t *testing.T) {
+	manager := NewSessionRegistry(testLogger())
+
+	// Test external session ID (plain UUID format from SSE/stdio modes)
+	externalSessionID := "6f615000-2644-45a7-a27c-f579e20b5992"
+	
+	// Should be able to create session data with external session ID
+	testData := map[string]string{"test": "data"}
+	data, isNew, err := manager.GetOrCreateSessionData(externalSessionID, func() any {
+		return testData
+	})
+	
+	if err != nil {
+		t.Errorf("Expected no error for external session ID, got: %v", err)
+	}
+	if !isNew {
+		t.Error("Expected new session to be created")
+	}
+	retrievedData, ok := data.(map[string]string)
+	if !ok {
+		t.Errorf("Expected data to be map[string]string, got: %T", data)
+	}
+	if retrievedData["test"] != "data" {
+		t.Errorf("Expected data['test'] to be 'data', got: %v", retrievedData["test"])
+	}
+
+	// Should be able to validate external session ID
+	isTerminated, err := manager.Validate(externalSessionID)
+	if err != nil {
+		t.Errorf("Expected no error validating external session ID, got: %v", err)
+	}
+	if isTerminated {
+		t.Error("Expected external session to not be terminated")
+	}
+
+	// Test internal session ID format still works
+	internalSessionID := manager.Generate()
+	
+	data2, isNew2, err2 := manager.GetOrCreateSessionData(internalSessionID, func() any {
+		return testData
+	})
+	
+	if err2 != nil {
+		t.Errorf("Expected no error for internal session ID, got: %v", err2)
+	}
+	if !isNew2 {
+		t.Error("Expected new internal session to be created")
+	}
+	retrievedData2, ok2 := data2.(map[string]string)
+	if !ok2 {
+		t.Errorf("Expected internal data to be map[string]string, got: %T", data2)
+	}
+	if retrievedData2["test"] != "data" {
+		t.Errorf("Expected internal data['test'] to be 'data', got: %v", retrievedData2["test"])
 	}
 }
