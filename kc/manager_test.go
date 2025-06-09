@@ -502,7 +502,7 @@ func TestExternalSessionIDFromErrorLog(t *testing.T) {
 
 	// This is the exact session ID from the error log that was failing
 	externalSessionID := "6f615000-2644-45a7-a27c-f579e20b5992"
-	
+
 	// Should be able to get or create session with external session ID
 	kiteSession, isNew, err := manager.GetOrCreateSession(externalSessionID)
 	if err != nil {

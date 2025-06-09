@@ -13,6 +13,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/mark3labs/mcp-go/util"
+	"github.com/zerodha/kite-mcp-server/app/metrics"
 	"github.com/zerodha/kite-mcp-server/kc"
 	"github.com/zerodha/kite-mcp-server/kc/templates"
 	"github.com/zerodha/kite-mcp-server/mcp"
@@ -26,6 +27,7 @@ type App struct {
 	kcManager      *kc.Manager
 	statusTemplate *template.Template
 	logger         *slog.Logger
+	metrics        *metrics.Manager
 }
 
 // StatusPageData holds template data for the status page
@@ -42,7 +44,9 @@ type Config struct {
 	AppMode       string
 	AppPort       string
 	AppHost       string
-	ExcludedTools string
+
+	ExcludedTools   string
+	AdminSecretPath string
 }
 
 // Server mode constants
@@ -67,11 +71,18 @@ func NewApp(logger *slog.Logger) *App {
 			AppMode:       os.Getenv("APP_MODE"),
 			AppPort:       os.Getenv("APP_PORT"),
 			AppHost:       os.Getenv("APP_HOST"),
-			ExcludedTools: os.Getenv("EXCLUDED_TOOLS"),
+
+			ExcludedTools:   os.Getenv("EXCLUDED_TOOLS"),
+			AdminSecretPath: os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
 		},
 		Version:   "v0.0.0", // Ideally injected at build time
 		startTime: time.Now(),
 		logger:    logger,
+		metrics: metrics.New(metrics.Config{
+			ServiceName:     "kite-mcp-server",
+			AdminSecretPath: os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
+			AutoCleanup:     true,
+		}),
 	}
 }
 
@@ -132,11 +143,12 @@ func (app *App) configureHTTPClient() {
 // initializeServices creates and configures Kite Connect manager and MCP server
 func (app *App) initializeServices() (*kc.Manager, *server.MCPServer, error) {
 	app.logger.Info("Creating Kite Connect manager...")
-	kcManager, err := kc.NewManager(
-		app.Config.KiteAPIKey,
-		app.Config.KiteAPISecret,
-		app.logger,
-	)
+	kcManager, err := kc.New(kc.Config{
+		APIKey:    app.Config.KiteAPIKey,
+		APISecret: app.Config.KiteAPISecret,
+		Logger:    app.logger,
+		Metrics:   app.metrics,
+	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create Kite Connect manager: %w", err)
 	}
@@ -226,6 +238,9 @@ func (app *App) startServer(srv *http.Server, kcManager *kc.Manager, mcpServer *
 func (app *App) setupMux(kcManager *kc.Manager) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", kcManager.HandleKiteCallback())
+	if app.Config.AdminSecretPath != "" {
+		mux.HandleFunc("/admin/", app.metrics.AdminHTTPHandler())
+	}
 	app.serveStatusPage(mux)
 	return mux
 }

@@ -110,7 +110,7 @@ func checkSessionID(sessionID string) error {
 		}
 		return nil
 	}
-	
+
 	// Handle external format (plain UUID from SSE/stdio modes)
 	if _, err := uuid.Parse(sessionID); err != nil {
 		return fmt.Errorf("%s: %w", errInvalidSessionIDFormat, err)
@@ -362,7 +362,7 @@ func (sm *SessionRegistry) GetOrCreateSessionData(sessionID string, createDataFn
 		sm.logger.Info("Creating new session for external session ID", "session_id", sessionID)
 		now := time.Now()
 		expiresAt := now.Add(sm.sessionDuration)
-		
+
 		session = &MCPSession{
 			ID:         sessionID,
 			Terminated: false,

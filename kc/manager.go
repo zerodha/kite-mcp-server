@@ -11,6 +11,7 @@ import (
 	"time"
 
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
+	"github.com/zerodha/kite-mcp-server/app/metrics"
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
 	"github.com/zerodha/kite-mcp-server/kc/templates"
 )
@@ -23,6 +24,7 @@ type Config struct {
 	InstrumentsConfig  *instruments.UpdateConfig // optional - defaults to instruments.DefaultUpdateConfig()
 	InstrumentsManager *instruments.Manager      // optional - if provided, skips creating new instruments manager
 	SessionSigner      *SessionSigner            // optional - if nil, creates new session signer
+	Metrics            *metrics.Manager          // optional - for tracking user metrics
 }
 
 // New creates a new kc Manager with the given configuration
@@ -57,6 +59,7 @@ func New(cfg Config) (*Manager, error) {
 		apiKey:    cfg.APIKey,
 		apiSecret: cfg.APISecret,
 		Logger:    cfg.Logger,
+		metrics:   cfg.Metrics,
 	}
 
 	if err := m.initializeTemplates(); err != nil {
@@ -111,6 +114,7 @@ type Manager struct {
 	apiKey    string
 	apiSecret string
 	Logger    *slog.Logger
+	metrics   *metrics.Manager
 
 	templates map[string]*template.Template
 
@@ -399,6 +403,12 @@ func (m *Manager) CompleteSession(mcpSessionID, kiteRequestToken string) error {
 	m.Logger.Info("Setting Kite access token for MCP session", "session_id", mcpSessionID)
 	kiteData.Kite.Client.SetAccessToken(userSess.AccessToken)
 
+	// Track successful login
+	if m.metrics != nil {
+		m.metrics.TrackDailyUser(userSess.UserID)
+		m.metrics.Increment("user_logins")
+	}
+
 	return nil
 }
 
@@ -427,6 +437,11 @@ func (m *Manager) Shutdown() {
 
 	// Stop session cleanup routines
 	m.sessionManager.StopCleanupRoutine()
+
+	// Shutdown metrics manager (stops cleanup routine)
+	if m.metrics != nil {
+		m.metrics.Shutdown()
+	}
 
 	// Shutdown instruments manager (stops scheduler)
 	m.Instruments.Shutdown()

@@ -620,13 +620,13 @@ func TestExternalSessionIDFormat(t *testing.T) {
 
 	// Test external session ID (plain UUID format from SSE/stdio modes)
 	externalSessionID := "6f615000-2644-45a7-a27c-f579e20b5992"
-	
+
 	// Should be able to create session data with external session ID
 	testData := map[string]string{"test": "data"}
 	data, isNew, err := manager.GetOrCreateSessionData(externalSessionID, func() any {
 		return testData
 	})
-	
+
 	if err != nil {
 		t.Errorf("Expected no error for external session ID, got: %v", err)
 	}
@@ -652,11 +652,11 @@ func TestExternalSessionIDFormat(t *testing.T) {
 
 	// Test internal session ID format still works
 	internalSessionID := manager.Generate()
-	
+
 	data2, isNew2, err2 := manager.GetOrCreateSessionData(internalSessionID, func() any {
 		return testData
 	})
-	
+
 	if err2 != nil {
 		t.Errorf("Expected no error for internal session ID, got: %v", err2)
 	}
