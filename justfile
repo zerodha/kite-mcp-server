@@ -113,36 +113,23 @@ init-env: _create-env-file
 # Create a new release
 release VERSION:
     #!/usr/bin/env bash
-    echo "Creating release v{{VERSION}}..."
-
-    # Generate changelog from commits since last tag
-    LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
-    if [ "$LAST_TAG" != "none" ]; then
-        echo "## Changes since $LAST_TAG" > CHANGELOG.tmp
-        git log --pretty=format:"* %s (%h)" $LAST_TAG..HEAD >> CHANGELOG.tmp
-        echo "" >> CHANGELOG.tmp
-        echo "" >> CHANGELOG.tmp
-        if [ -f CHANGELOG.md ]; then
-            cat CHANGELOG.md >> CHANGELOG.tmp
-            mv CHANGELOG.tmp CHANGELOG.md
-        else
-            mv CHANGELOG.tmp CHANGELOG.md
-        fi
-        git add CHANGELOG.md
-    fi
+    # Strip 'v' prefix if present to avoid double 'v'
+    VERSION_CLEAN=$(echo "{{VERSION}}" | sed 's/^v//')
+    TAG_NAME="v${VERSION_CLEAN}"
+    
+    echo "Creating release ${TAG_NAME}..."
 
     # Create git tag
-    git tag -a "v{{VERSION}}" -m "Release v{{VERSION}}"
+    git tag -a "${TAG_NAME}" -m "Release ${TAG_NAME}"
 
-    echo "✅ Created release v{{VERSION}}"
-    echo "✅ Generated changelog"
+    echo "✅ Created release ${TAG_NAME}"
     echo "✅ Created git tag"
     echo ""
     echo "Next steps:"
-    echo "1. Review the tag: git show v{{VERSION}}"
+    echo "1. Review the tag: git show ${TAG_NAME}"
     echo "2. Push the tag: git push --tags"
-    echo "3. Build release binary: just build-version v{{VERSION}}"
-    echo "4. Create a GitHub release: gh release create v{{VERSION}} --title \"v{{VERSION}}\" --notes-file CHANGELOG.md"
+    echo "3. Build release binary: just build-version ${TAG_NAME}"
+    echo "4. Create a GitHub release: gh release create ${TAG_NAME} --title \"${TAG_NAME}\" --generate-notes"
 
 # === Dependency Commands ===
 

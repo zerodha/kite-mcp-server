@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Nix
+      uses: cachix/install-nix-action@v27
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
+    
+    - name: Setup Nix environment
+      run: nix develop --command echo "Nix environment ready"
+    
+    - name: Run tests
+      run: nix develop --command just test
+    
+    - name: Get version from tag
+      id: version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+    
+    - name: Build for Linux
+      run: nix develop --command bash -c "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o kite-mcp-server-linux-amd64 -ldflags='-s -w -X main.MCP_SERVER_VERSION=${{ steps.version.outputs.VERSION }}' main.go"
+    
+    - name: Build for macOS (Intel)
+      run: nix develop --command bash -c "GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o kite-mcp-server-darwin-amd64 -ldflags='-s -w -X main.MCP_SERVER_VERSION=${{ steps.version.outputs.VERSION }}' main.go"
+    
+    - name: Build for macOS (Apple Silicon)
+      run: nix develop --command bash -c "GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o kite-mcp-server-darwin-arm64 -ldflags='-s -w -X main.MCP_SERVER_VERSION=${{ steps.version.outputs.VERSION }}' main.go"
+    
+    - name: Build for Windows
+      run: nix develop --command bash -c "GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o kite-mcp-server-windows-amd64.exe -ldflags='-s -w -X main.MCP_SERVER_VERSION=${{ steps.version.outputs.VERSION }}' main.go"
+    
+    - name: Make binaries executable
+      run: |
+        chmod +x kite-mcp-server-linux-amd64
+        chmod +x kite-mcp-server-darwin-amd64
+        chmod +x kite-mcp-server-darwin-arm64
+        chmod +x kite-mcp-server-windows-amd64.exe
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          kite-mcp-server-linux-amd64
+          kite-mcp-server-darwin-amd64
+          kite-mcp-server-darwin-arm64
+          kite-mcp-server-windows-amd64.exe
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
