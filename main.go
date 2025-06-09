@@ -1,95 +1,75 @@
+// Kite MCP Server implements the Model Context Protocol for the Kite Connect trading API
 package main
 
 import (
-	"context"
-	"log"
-	"net/http"
+	"fmt"
+	"log/slog"
 	"os"
 
-	"github.com/mark3labs/mcp-go/server"
-	"github.com/zerodha/kite-mcp-server/kc"
-	"github.com/zerodha/kite-mcp-server/mcp"
+	"github.com/zerodha/kite-mcp-server/app"
 )
 
-const (
-	APP_MODE_SSE   = "sse"
-	APP_MODE_STDIO = "stdio"
+var (
+	// MCP_SERVER_VERSION will be injected during the build process by the justfile
+	// Use 'just build-version VERSION' to set a specific version
+	MCP_SERVER_VERSION = "v0.0.0"
+
+	// buildString will be injected during the build process with build time and git info
+	buildString = "dev build"
 )
+
+func initLogger() *slog.Logger {
+	// Default to INFO level, can be overridden by LOG_LEVEL env var
+	// Valid levels: debug, info, warn, error
+	var level slog.Level
+	logLevel := os.Getenv("LOG_LEVEL")
+	switch logLevel {
+	case "debug":
+		level = slog.LevelDebug
+	case "info", "":
+		level = slog.LevelInfo
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo // Default to INFO if invalid
+	}
+
+	opts := &slog.HandlerOptions{
+		Level: level,
+	}
+	handler := slog.NewTextHandler(os.Stderr, opts)
+	return slog.New(handler)
+}
 
 func main() {
-	var (
-		KITE_API_KEY    = os.Getenv("KITE_API_KEY")
-		KITE_API_SECRET = os.Getenv("KITE_API_SECRET")
-		APP_MODE        = os.Getenv("APP_MODE")
-		APP_PORT        = os.Getenv("APP_PORT")
-		APP_HOST        = os.Getenv("APP_HOST")
-	)
-
-	// Set default mode if not specified
-	if APP_MODE == "" {
-		APP_MODE = APP_MODE_SSE
+	// Check for version flag
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Printf("Kite MCP Server %s\n", MCP_SERVER_VERSION)
+		fmt.Printf("Build: %s\n", buildString)
+		os.Exit(0)
 	}
 
-	if APP_PORT == "" {
-		APP_PORT = "8080"
+	// Initialize logger
+	logger := initLogger()
+
+	// Create a new application instance
+	application := app.NewApp(logger)
+
+	// Load configuration from environment
+	if err := application.LoadConfig(); err != nil {
+		logger.Error("Failed to load configuration", "error", err)
+		os.Exit(1)
 	}
 
-	if APP_HOST == "" {
-		APP_HOST = "localhost"
-	}
+	// Set the server version
+	application.SetVersion(MCP_SERVER_VERSION)
 
-	addr, port := APP_HOST, APP_PORT
-
-	// Check if API KEY or SECRET is missing
-	if KITE_API_KEY == "" || KITE_API_SECRET == "" {
-		log.Fatal("KITE_API_KEY or KITE_API_SECRET is missing")
-	}
-
-	kcManager := kc.NewManager(
-		KITE_API_KEY,
-		KITE_API_SECRET,
-	)
-
-	// Create MCP server
-	s := server.NewMCPServer(
-		"Kite MCP Server",
-		"1.0.0",
-	)
-
-	// Add tool
-	mcp.RegisterTools(s, kcManager)
-
-	// Start the server for receiving callbacks
-	url := addr + ":" + port
-	srv := &http.Server{Addr: url}
-
-	switch APP_MODE {
-	case APP_MODE_SSE:
-		log.Println("Starting SSE MCP server...", url)
-		sse := server.NewSSEServer(s,
-			server.WithBaseURL(url),
-			server.WithKeepAlive(true),
-		)
-
-		mux := http.NewServeMux()
-		mux.HandleFunc("/callback", kcManager.HandleKiteCallback())
-		mux.HandleFunc("/sse", sse.ServeHTTP)
-		mux.HandleFunc("/message", sse.ServeHTTP)
-		srv.Handler = mux
-
-		if err := srv.ListenAndServe(); err != nil {
-			log.Fatalf("Server error: %v", err)
-		}
-	case APP_MODE_STDIO:
-		log.Println("Starting STDIO MCP server...")
-		stdio := server.NewStdioServer(s)
-
-		http.HandleFunc("/callback", kcManager.HandleKiteCallback())
-
-		go srv.ListenAndServe()
-
-		if err := stdio.Listen(context.Background(), os.Stdin, os.Stdout); err != nil {
-			log.Fatalf("Server error: %v", err)
-		}
+	// Run the server (blocks until shutdown)
+	logger.Info("Starting Kite MCP Server...", "version", MCP_SERVER_VERSION, "build", buildString)
+	if err := application.RunServer(); err != nil {
+		logger.Error("Server failed to start", "error", err)
+		os.Exit(1)
 	}
 }

@@ -1,0 +1,27 @@
+{{define "content"}}
+<div class="card">
+    <div class="icon">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="12" fill="var(--success)" />
+            <path
+                d="M7.5 12.5l3 3l6-6"
+                fill="none"
+                stroke="#fff"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+            />
+        </svg>
+    </div>
+    <h1>Login Successful</h1>
+    <div class="status">
+        Authentication Complete
+    </div>
+    <p>
+        Your login was successful. You can now return to your MCP client
+        to continue your session. You can close this tab.
+    </p>
+</div>
+{{end}}
+
+{{template "base" .}}

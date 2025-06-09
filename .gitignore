@@ -1,8 +1,83 @@
+# Environment files
 .env
-oldpy
-instruments.json
+.env.local
+.env.*.local
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
 *.bin
+kite-mcp-server
+main
+
+# Go test files
+*.test
+*.prof
+coverage.out
+coverage.html
+
+# Go module cache
+go.sum.backup
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.pid
+*.lock
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+*.sublime-project
+*.sublime-workspace
+
 # Nix specific
 .direnv/
 result
 result-*
+
+# Just cache
+.just/
+
+# Build directories
+build/
+dist/
+target/
+
+# Documentation build artifacts
+
+# Local data files
+instruments.json
+*.csv
+*.xlsx
+
+# Legacy/old files
+oldpy/
+
+# Runtime files
+*.pid
+*.sock
+
+# Test binaries and artifacts
+test-binary
+kite-mcp-server-*
+
+.memory

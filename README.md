@@ -1,158 +1,321 @@
 # Kite MCP Server
 
-## Development Environment with Nix
+A Model Context Protocol (MCP) server that provides AI assistants with secure access to the Kite Connect trading API. This server enables AI agents to retrieve market data, manage portfolios, and execute trades through a standardized interface.
 
-This project includes a Nix flake for setting up a consistent development environment. This ensures that all developers have the same tools and dependencies regardless of their operating system.
+## TL;DR for Traders
+
+Want to use AI with your Kite trading account? Just add `https://mcp.kite.trade/mcp` to your AI client configuration. No installation or API keys required - it's hosted and ready to use.
+
+## Features
+
+- **Portfolio Management**: View holdings, positions, margins, and mutual fund investments
+- **Order Management**: Place, modify, and cancel orders with full order history
+- **GTT Orders**: Good Till Triggered order management
+- **Market Data Access**: Real-time quotes, historical data, OHLC data
+- **Pagination Support**: Automatic pagination for large datasets (holdings, orders, trades)
+- **Comprehensive Coverage**: Implements most Kite Connect API endpoints
+- **Multiple Deployment Modes**: stdio, HTTP, SSE, and hybrid mode (production)
+- **Built-in Documentation**: Auto-served documentation at runtime
+
+## Quick Start
+
+### Hosted Version (Recommended)
+
+The easiest way to get started is with our hosted version at `mcp.kite.trade`. Both `/mcp` and `/sse` endpoints are available - no installation or API keys required on your end.
+
+**Quick Setup:** Add the following to your MCP configuration:
+
+```
+https://mcp.kite.trade/mcp
+```
+
+**Recommended:** Use the new HTTP mode (`/mcp` endpoint) for better performance and reliability. You can use [mcp-remote](https://github.com/modelcontextprotocol/mcp-remote) to connect to the hosted server.
+
+For self-hosting with your own API keys, follow the installation steps below.
 
 ### Prerequisites
 
-- [Nix package manager](https://nixos.org/download.html) with flakes enabled
-- (Optional) [direnv](https://direnv.net/) for automatic environment loading
+- **For hosted version (recommended)**: Nothing! Just use `https://mcp.kite.trade/mcp`
+- **For self-hosting**: Go 1.21 or later
+- **For self-hosting**: Valid Kite Connect API credentials
 
-### Getting Started with Nix
+### Getting started
 
-1. Enter the development shell:
-
-   ```bash
-   nix develop
-   ```
-
-2. If you're using direnv, simply enter the directory and allow direnv:
-
-   ```bash
-   direnv allow
-   ```
-
-3. The development environment includes:
-   - Go 1.24
-   - gopls (Go language server)
-   - golangci-lint
-   - delve (Go debugger)
-   - go-tools
-
-### Environment Variables
-
-Remember to set up your environment variables in `.env` file:
-
+```bash
+git clone https://github.com/zerodha/kite-mcp-server
+cd kite-mcp-server
 ```
+
+### Configuration
+
+Create a `.env` file with your Kite Connect credentials:
+
+```env
 KITE_API_KEY=your_api_key
 KITE_API_SECRET=your_api_secret
-APP_MODE=sse  # or stdio
-APP_PORT=8080  # optional
-APP_HOST=localhost  # optional
+APP_MODE=http
+APP_PORT=8080
+APP_HOST=localhost
 ```
 
-## Claude config:
+You can also use the provided `justfile` to initialize the config.
 
-The path to the config file can be found in the `claude_desktop_config.json` file.
+```bash
+just init-env
+```
 
-Linux: `~/.config/Claude/claude_desktop_config.json`
+### Running the Server
 
-### stdio mode:
+```bash
+# Build and run
+go build -o kite-mcp-server
+./kite-mcp-server
+
+# Or run directly
+go run main.go
+```
+
+The server will start and serve a status page at `http://localhost:8080/`
+
+## Client Integration
+
+### Setup Guide
+
+- [Claude Desktop (Hosted Mode)](#claude-desktop-http-mode) - Recommended
+- [Claude Desktop (HTTP Mode)](#claude-desktop-http-mode) - Recommended
+- [Claude Desktop (SSE Mode)](#claude-desktop-sse-mode)
+- [Claude Desktop (stdio Mode)](#claude-desktop-stdio-mode)
+- [Other MCP Clients](#other-mcp-clients)
+
+### Claude Desktop (Hosted Mode)
+
+For the hosted version, add to your Claude Desktop configuration (`~/.config/Claude/claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "kite": {
-      "command": "go",
-      "args": ["run", "<ABSOLUTE_PATH>/main.go"],
+      "command": "npx",
+      "args": ["mcp-remote", "https://mcp.kite.trade/mcp"]
+    }
+  }
+}
+```
+
+### Claude Desktop (HTTP Mode)
+
+Add to your Claude Desktop configuration (`~/.config/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "kite": {
+      "command": "npx",
+      "args": ["mcp-remote", "http://localhost:8080/mcp", "--allow-http"],
       "env": {
-        "APP_MODE": "stdio",
-        "KITE_API_KEY": "<your_api_key>",
-        "KITE_API_SECRET": "<your_api_secret>"
+        "APP_MODE": "http",
+        "KITE_API_KEY": "your_api_key",
+        "KITE_API_SECRET": "your_api_secret"
       }
     }
   }
 }
 ```
 
-### SSE mode
+### Claude Desktop (SSE Mode)
 
-For the SSE mode, you can run the following command to start the server:
-
-```
-go run main.go
-```
+Add to your Claude Desktop configuration (`~/.config/Claude/claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "kite": {
       "command": "npx",
-      "args": ["mcp-remote", "http://localhost:8081/sse"]
+      "args": ["mcp-remote", "http://localhost:8080/sse", "--allow-http"],
+      "env": {
+        "APP_MODE": "sse",
+        "KITE_API_KEY": "your_api_key",
+        "KITE_API_SECRET": "your_api_secret"
+      }
     }
   }
 }
 ```
 
-If you want to use the hosted version, you can use the following config:
+### Claude Desktop (stdio Mode)
+
+For self-hosted installations, you must first build the binary:
+
+```bash
+go build -o kite-mcp-server
+```
+
+Then add to your Claude Desktop configuration (`~/.config/Claude/claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "kite": {
-      "command": "npx",
-      "args": ["mcp-remote", "https://mcp.kite.trade/sse"]
+      "command": "/full/path/to/your/kite-mcp-server",
+      "env": {
+        "APP_MODE": "stdio",
+        "KITE_API_KEY": "your_api_key",
+        "KITE_API_SECRET": "your_api_secret"
+      }
     }
   }
 }
 ```
 
-## Kite Connect API Integration Status
+**Important**: Use the full absolute path to your built binary. For example:
 
-| API Method                   | Integration Status | Remarks                                         |
-| ---------------------------- | ------------------ | ----------------------------------------------- |
-| **User & Account Methods**   |                    |                                                 |
-| `GetUserProfile()`           | [x]                | Implemented as `get_profile` tool               |
-| `GetUserMargins()`           | [x]                | Implemented as `get_margins` tool               |
-| `GetHoldings()`              | [x]                | Implemented as `get_holdings` tool              |
-| `GetPositions()`             | [x]                | Implemented as `get_positions` tool             |
-| `GetFullUserProfile()`       | [ ]                | Not yet implemented                             |
-| `InvalidateAccessToken()`    | [ ]                | Not yet implemented                             |
-| `InvalidateRefreshToken()`   | [ ]                | Not yet implemented                             |
-| `RenewAccessToken()`         | [ ]                | Not yet implemented                             |
-| **Orders & Trades Methods**  |                    |                                                 |
-| `GetOrders()`                | [x]                | Implemented as `get_orders` tool                |
-| `GetTrades()`                | [x]                | Implemented as `get_trades` tool                |
-| `PlaceOrder()`               | [x]                | Implemented as `place_order` tool               |
-| `ModifyOrder()`              | [x]                | Implemented as `modify_order` tool              |
-| `CancelOrder()`              | [x]                | Implemented as `cancel_order` tool              |
-| `ExitOrder()`                | [ ]                | Not yet implemented                             |
-| `ConvertPosition()`          | [ ]                | Not yet implemented                             |
-| `GetOrderHistory()`          | [x]                | Implemented as `get_order_history` tool         |
-| `GetOrderTrades()`           | [ ]                | Not yet implemented                             |
-| `GetOrderMargins()`          | [ ]                | Not yet implemented                             |
-| `GetBasketMargins()`         | [ ]                | Not yet implemented                             |
-| `GetOrderCharges()`          | [ ]                | Not yet implemented                             |
-| **GTT Orders**               |                    |                                                 |
-| `GetGTTs()`                  | [x]                | Implemented as `get_gtts` tool                  |
-| `GetGTT()`                   | [ ]                | Not yet implemented                             |
-| `PlaceGTT()`                 | [x]                | Implemented as `place_gtt_order` tool           |
-| `ModifyGTT()`                | [x]                | Implemented as `modify_gtt_order` tool          |
-| `DeleteGTT()`                | [x]                | Implemented as `delete_gtt_order` tool          |
-| **Market Data Methods**      |                    |                                                 |
-| `GetQuote()`                 | [x]                | Implemented as `get_quotes` tool                |
-| `GetHistoricalData()`        | [x]                | Implemented as `get_historical_data` tool       |
-| `GetLTP()`                   | [x]                | Implemented as `get_ltp` tool                   |
-| `GetOHLC()`                  | [x]                | Implemented as `get_ohlc` tool                  |
-| `GetInstruments()`           | [-]                | Won't implement. Use `instruments_search` tool. |
-| `GetInstrumentsByExchange()` | [-]                | Won't implement                                 |
-| `GetAuctionInstruments()`    | [ ]                | Not yet implemented                             |
-| **Mutual Funds Methods**     |                    |                                                 |
-| `GetMFOrders()`              | [ ]                | Not yet implemented                             |
-| `GetMFOrderInfo()`           | [ ]                | Not yet implemented                             |
-| `PlaceMFOrder()`             | [ ]                | Not yet implemented                             |
-| `CancelMFOrder()`            | [ ]                | Not yet implemented                             |
-| `GetMFSIPs()`                | [ ]                | Not yet implemented                             |
-| `GetMFSIPInfo()`             | [ ]                | Not yet implemented                             |
-| `PlaceMFSIP()`               | [ ]                | Not yet implemented                             |
-| `ModifyMFSIP()`              | [ ]                | Not yet implemented                             |
-| `CancelMFSIP()`              | [ ]                | Not yet implemented                             |
-| `GetMFHoldings()`            | [x]                | Implemented as `get_mf_holdings` tool           |
-| `GetMFHoldingInfo()`         | [ ]                | Not yet implemented                             |
-| `GetMFInstruments()`         | [ ]                | Not yet implemented                             |
-| `GetMFOrdersByDate()`        | [ ]                | Not yet implemented                             |
-| `GetMFAllottedISINs()`       | [ ]                | Not yet implemented                             |
-| **Other Methods**            |                    |                                                 |
-| `InitiateHoldingsAuth()`     | [ ]                | Not yet implemented                             |
-| `GetUserSegmentMargins()`    | [ ]                | Not yet implemented                             |
+- `/home/username/kite-mcp-server/kite-mcp-server` (Linux)
+- `/Users/username/kite-mcp-server/kite-mcp-server` (macOS)
+- `C:\Users\username\kite-mcp-server\kite-mcp-server.exe` (Windows)
+
+### Other MCP Clients
+
+For other MCP-compatible clients, use the hosted endpoint `https://mcp.kite.trade/mcp` with [mcp-remote](https://github.com/modelcontextprotocol/mcp-remote) or configure your client to connect directly to the HTTP endpoint.
+
+## Available Tools
+
+### Setup & Authentication
+
+- `login` - Login to Kite API and generate authorization link
+
+### Market Data
+
+- `get_quotes` - Get real-time market quotes
+- `get_ltp` - Get last traded price
+- `get_ohlc` - Get OHLC data
+- `get_historical_data` - Historical price data
+- `search_instruments` - Search trading instruments
+
+### Portfolio & Account
+
+- `get_profile` - User profile information
+- `get_margins` - Account margins
+- `get_holdings` - Portfolio holdings
+- `get_positions` - Current positions
+- `get_mf_holdings` - Mutual fund holdings
+
+### Orders & Trading
+
+- `place_order` - Place new orders
+- `modify_order` - Modify existing orders
+- `cancel_order` - Cancel orders
+- `get_orders` - List all orders
+- `get_trades` - Trading history
+- `get_order_history` - Order execution history
+- `get_order_trades` - Get trades for a specific order
+
+### GTT Orders
+
+- `get_gtts` - List GTT orders
+- `place_gtt_order` - Create GTT orders
+- `modify_gtt_order` - Modify GTT orders
+- `delete_gtt_order` - Delete GTT orders
+
+## API Coverage
+
+This server implements the majority of Kite Connect API endpoints and also provides additional tools.
+
+## Development
+
+### Development Environment
+
+This project includes a Nix flake for consistent development environments:
+
+```bash
+# Enter development shell
+nix develop
+
+# Or with direnv
+direnv allow
+```
+
+### Using Just Commands
+
+Install [Just](https://github.com/casey/just) for convenient development commands:
+
+```bash
+just build      # Build the project
+just run        # Run the server
+just test       # Run tests
+just lint       # Format and lint code
+just coverage   # Generate coverage report
+```
+
+### Running Tests
+
+**Requirements:**
+
+- Go 1.23+ with `GOEXPERIMENT=synctest` (required for timing-dependent tests)
+
+```bash
+# Run all tests
+just test
+
+# With coverage
+just coverage
+
+# With race detector
+just test-race
+
+# Direct go command (if you prefer)
+CGO_ENABLED=0 GOEXPERIMENT=synctest go test -v ./...
+```
+
+#### Synctest Integration
+
+This project requires Go's `synctest` package for time-dependent tests (session expiry, clock skew tolerance). All timing tests use `synctest.Run()` for:
+
+- **Fast execution**: Time-dependent tests complete in milliseconds instead of minutes
+- **Deterministic timing**: No flaky timing-based test failures
+- **Controlled time**: Tests can advance time without actual delays
+
+The justfile automatically includes `GOEXPERIMENT=synctest` in all test commands.
+
+## Configuration Options
+
+| Environment Variable | Default     | Description                                                |
+| -------------------- | ----------- | ---------------------------------------------------------- |
+| `KITE_API_KEY`       | Required    | Your Kite Connect API key                                  |
+| `KITE_API_SECRET`    | Required    | Your Kite Connect API secret                               |
+| `APP_MODE`           | `http`      | Server mode: `stdio`, `http`, `sse`, or `hybrid`           |
+| `APP_PORT`           | `8080`      | Server port (HTTP/SSE/hybrid modes)                        |
+| `APP_HOST`           | `localhost` | Server host (HTTP/SSE/hybrid modes)                        |
+| `EXCLUDED_TOOLS`     | _(empty)_   | Comma-separated list of tools to exclude from registration |
+
+**Note:** In production, we use hybrid mode which supports both `/sse` and `/mcp` endpoints, making both HTTP and SSE protocols available for different client needs.
+
+### Tool Exclusion
+
+You can exclude specific tools by setting the `EXCLUDED_TOOLS` environment variable with a comma-separated list of tool names. This is useful for creating read-only instances.
+
+**Example:**
+
+```env
+EXCLUDED_TOOLS=place_order,modify_order,cancel_order
+```
+
+The hosted version at `mcp.kite.trade` excludes potentially destructive trading operations for security. For accessing the other operations you can generate your own API keys and run the server locally.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Run `just lint` and `just test`
+6. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Support
+
+For bugs and general suggestions, please use GitHub Discussions.
+
+For Kite Connect API documentation, visit: https://kite.trade/docs/connect/

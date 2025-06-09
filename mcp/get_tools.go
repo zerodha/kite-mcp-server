@@ -2,8 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
-	"log"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -14,42 +12,14 @@ type ProfileTool struct{}
 
 func (*ProfileTool) Tool() mcp.Tool {
 	return mcp.NewTool("get_profile",
-		mcp.WithDescription("Get profile"),
+		mcp.WithDescription("Retrieve the user's profile information, including user ID, name, email, and account details like products orders, and exchanges available to the user. Use this to get basic user details."),
 	)
 }
 
 func (*ProfileTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
-
-		kc, err := manager.GetSession(sess.SessionID())
-		if err != nil {
-			log.Println("error getting profile", err)
-			return nil, err
-		}
-
-		profile, err := kc.Kite.Client.GetUserProfile()
-		if err != nil {
-			log.Println("error getting profile", err)
-			return nil, err
-		}
-
-		v, err := json.Marshal(profile)
-		if err != nil {
-			log.Println("error marshalling profile", err)
-			return nil, err
-		}
-
-		profileJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: profileJSON,
-				},
-			},
-		}, nil
-	}
+	return SimpleToolHandler(manager, "get_profile", func(session *kc.KiteSessionData) (interface{}, error) {
+		return session.Kite.Client.GetUserProfile()
+	})
 }
 
 type MarginsTool struct{}
@@ -61,270 +31,165 @@ func (*MarginsTool) Tool() mcp.Tool {
 }
 
 func (*MarginsTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
-
-		kc, err := manager.GetSession(sess.SessionID())
-		if err != nil {
-			log.Println("error getting margins", err)
-			return nil, err
-		}
-
-		margins, err := kc.Kite.Client.GetUserMargins()
-		if err != nil {
-			log.Println("error getting margins", err)
-			return nil, err
-		}
-
-		v, err := json.Marshal(margins)
-		if err != nil {
-			log.Println("error marshalling margins", err)
-			return nil, err
-		}
-
-		marginsJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: marginsJSON,
-				},
-			},
-		}, nil
-	}
+	return SimpleToolHandler(manager, "get_margins", func(session *kc.KiteSessionData) (interface{}, error) {
+		return session.Kite.Client.GetUserMargins()
+	})
 }
 
 type HoldingsTool struct{}
 
 func (*HoldingsTool) Tool() mcp.Tool {
 	return mcp.NewTool("get_holdings",
-		mcp.WithDescription("Get holdings for the current user."),
+		mcp.WithDescription("Get holdings for the current user. Supports pagination for large datasets."),
 		mcp.WithNumber("from",
-			mcp.Description("from is the index from which to show the holdings. (not required unless you have a large payload issue)"),
+			mcp.Description("Starting index for pagination (0-based). Default: 0"),
 		),
 		mcp.WithNumber("limit",
-			mcp.Description("limit is the maximum number of holdings to show. (not required unless you have a large payload issue)"),
+			mcp.Description("Maximum number of holdings to return. If not specified, returns all holdings. When specified, response includes pagination metadata."),
 		),
 	)
 }
 
 func (*HoldingsTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
-
-		kc, err := manager.GetSession(sess.SessionID())
+	return PaginatedToolHandler(manager, "get_holdings", func(session *kc.KiteSessionData) ([]interface{}, error) {
+		holdings, err := session.Kite.Client.GetHoldings()
 		if err != nil {
-			log.Println("error getting holdings", err)
 			return nil, err
 		}
 
-		holdings, err := kc.Kite.Client.GetHoldings()
-		if err != nil {
-			log.Println("error getting holdings", err)
-			return nil, err
+		// Convert to []interface{} for generic pagination
+		result := make([]interface{}, len(holdings))
+		for i, holding := range holdings {
+			result[i] = holding
 		}
-
-		args := request.GetArguments()
-		// Set defaults for pagination
-		from := assertInt(args["from"])
-		limit := assertInt(args["limit"])
-
-		// Apply pagination only if there are holdings and limit is specified
-		if len(holdings) > 0 && limit > 0 {
-			// Ensure from is within bounds
-			from = min(max(from, 0), len(holdings))
-
-			// Calculate end index (from + limit) but don't exceed holdings length
-			end := min(from+limit, len(holdings))
-
-			// Slice the holdings based on pagination
-			holdings = holdings[from:end]
-		}
-
-		v, err := json.Marshal(holdings)
-		if err != nil {
-			log.Println("error marshalling holdings", err)
-			return nil, err
-		}
-
-		holdingsJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: holdingsJSON,
-				},
-			},
-		}, nil
-	}
+		return result, nil
+	})
 }
 
 type PositionsTool struct{}
 
 func (*PositionsTool) Tool() mcp.Tool {
 	return mcp.NewTool("get_positions",
-		mcp.WithDescription("Get positions"),
+		mcp.WithDescription("Get current positions. Supports pagination for large datasets."),
+		mcp.WithNumber("from",
+			mcp.Description("Starting index for pagination (0-based). Default: 0"),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of positions to return. If not specified, returns all positions. When specified, response includes pagination metadata."),
+		),
 	)
 }
 
 func (*PositionsTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
-
-		kc, err := manager.GetSession(sess.SessionID())
+	return PaginatedToolHandler(manager, "get_positions", func(session *kc.KiteSessionData) ([]interface{}, error) {
+		positions, err := session.Kite.Client.GetPositions()
 		if err != nil {
-			log.Println("error getting positions", err)
 			return nil, err
 		}
 
-		positions, err := kc.Kite.Client.GetPositions()
-		if err != nil {
-			log.Println("error getting positions", err)
-			return nil, err
+		// Convert to []interface{} for generic pagination
+		result := make([]interface{}, len(positions.Day)+len(positions.Net))
+		idx := 0
+		for _, pos := range positions.Day {
+			result[idx] = pos
+			idx++
 		}
-
-		v, err := json.Marshal(positions)
-		if err != nil {
-			log.Println("error marshalling positions", err)
-			return nil, err
+		for _, pos := range positions.Net {
+			result[idx] = pos
+			idx++
 		}
-
-		positionsJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: positionsJSON,
-				},
-			},
-		}, nil
-	}
+		return result, nil
+	})
 }
 
 type TradesTool struct{}
 
 func (*TradesTool) Tool() mcp.Tool {
 	return mcp.NewTool("get_trades",
-		mcp.WithDescription("Get trades"),
+		mcp.WithDescription("Get trading history. Supports pagination for large datasets."),
+		mcp.WithNumber("from",
+			mcp.Description("Starting index for pagination (0-based). Default: 0"),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of trades to return. If not specified, returns all trades. When specified, response includes pagination metadata."),
+		),
 	)
 }
 
 func (*TradesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
-
-		kc, err := manager.GetSession(sess.SessionID())
+	return PaginatedToolHandler(manager, "get_trades", func(session *kc.KiteSessionData) ([]interface{}, error) {
+		trades, err := session.Kite.Client.GetTrades()
 		if err != nil {
-			log.Println("error getting trades", err)
 			return nil, err
 		}
 
-		trades, err := kc.Kite.Client.GetTrades()
-		if err != nil {
-			log.Println("error getting trades", err)
-			return nil, err
+		// Convert to []interface{} for generic pagination
+		result := make([]interface{}, len(trades))
+		for i, trade := range trades {
+			result[i] = trade
 		}
-
-		v, err := json.Marshal(trades)
-		if err != nil {
-			log.Println("error marshalling trades", err)
-			return nil, err
-		}
-
-		tradesJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: tradesJSON,
-				},
-			},
-		}, nil
-	}
+		return result, nil
+	})
 }
 
 type OrdersTool struct{}
 
 func (*OrdersTool) Tool() mcp.Tool {
 	return mcp.NewTool("get_orders",
-		mcp.WithDescription("Get orders"),
+		mcp.WithDescription("Get all orders. Supports pagination for large datasets."),
+		mcp.WithNumber("from",
+			mcp.Description("Starting index for pagination (0-based). Default: 0"),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of orders to return. If not specified, returns all orders. When specified, response includes pagination metadata."),
+		),
 	)
 }
 
 func (*OrdersTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
-
-		kc, err := manager.GetSession(sess.SessionID())
+	return PaginatedToolHandler(manager, "get_orders", func(session *kc.KiteSessionData) ([]interface{}, error) {
+		orders, err := session.Kite.Client.GetOrders()
 		if err != nil {
-			log.Println("error getting session", err)
 			return nil, err
 		}
 
-		orders, err := kc.Kite.Client.GetOrders()
-		if err != nil {
-			log.Println("error getting orders", err)
-			return nil, err
+		// Convert to []interface{} for generic pagination
+		result := make([]interface{}, len(orders))
+		for i, order := range orders {
+			result[i] = order
 		}
-
-		v, err := json.Marshal(orders)
-		if err != nil {
-			log.Println("error marshalling orders", err)
-			return nil, err
-		}
-
-		ordersJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: ordersJSON,
-				},
-			},
-		}, nil
-	}
+		return result, nil
+	})
 }
 
 type GTTOrdersTool struct{}
 
 func (*GTTOrdersTool) Tool() mcp.Tool {
 	return mcp.NewTool("get_gtts",
-		mcp.WithDescription("Get all active GTT orders"),
+		mcp.WithDescription("Get all active GTT orders. Supports pagination for large datasets."),
+		mcp.WithNumber("from",
+			mcp.Description("Starting index for pagination (0-based). Default: 0"),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of GTT orders to return. If not specified, returns all GTT orders. When specified, response includes pagination metadata."),
+		),
 	)
 }
 
 func (*GTTOrdersTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
-
-		kc, err := manager.GetSession(sess.SessionID())
+	return PaginatedToolHandler(manager, "get_gtts", func(session *kc.KiteSessionData) ([]interface{}, error) {
+		gttBook, err := session.Kite.Client.GetGTTs()
 		if err != nil {
-			log.Println("error getting session", err)
 			return nil, err
 		}
 
-		gttBook, err := kc.Kite.Client.GetGTTs()
-		if err != nil {
-			log.Println("error getting GTT book", err)
-			return nil, err
+		// Convert to []interface{} for generic pagination
+		result := make([]interface{}, len(gttBook))
+		for i, gtt := range gttBook {
+			result[i] = gtt
 		}
-
-		v, err := json.Marshal(gttBook)
-		if err != nil {
-			log.Println("error marshalling GTT book", err)
-			return nil, err
-		}
-
-		gttBookJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: gttBookJSON,
-				},
-			},
-		}, nil
-	}
+		return result, nil
+	})
 }
 
 type OrderTradesTool struct{}
@@ -340,39 +205,25 @@ func (*OrderTradesTool) Tool() mcp.Tool {
 }
 
 func (*OrderTradesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
-
-		kc, err := manager.GetSession(sess.SessionID())
-		if err != nil {
-			log.Println("error getting session", err)
-			return nil, err
-		}
-
 		args := request.GetArguments()
-		orderID := assertString(args["order_id"])
 
-		orderTrades, err := kc.Kite.Client.GetOrderTrades(orderID)
-		if err != nil {
-			log.Println("error getting order trades", err)
-			return nil, err
+		// Validate required parameters
+		if err := ValidateRequired(args, "order_id"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		v, err := json.Marshal(orderTrades)
-		if err != nil {
-			log.Println("error marshalling order trades", err)
-			return nil, err
-		}
+		orderID := SafeAssertString(args["order_id"], "")
 
-		orderTradesJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: orderTradesJSON,
-				},
-			},
-		}, nil
+		return handler.WithSession(ctx, "get_order_trades", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+			orderTrades, err := session.Kite.Client.GetOrderTrades(orderID)
+			if err != nil {
+				return mcp.NewToolResultError("Failed to get order trades"), nil
+			}
+
+			return handler.MarshalResponse(orderTrades, "get_order_trades")
+		})
 	}
 }
 
@@ -389,38 +240,24 @@ func (*OrderHistoryTool) Tool() mcp.Tool {
 }
 
 func (*OrderHistoryTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
-
-		kc, err := manager.GetSession(sess.SessionID())
-		if err != nil {
-			log.Println("error getting session", err)
-			return nil, err
-		}
-
 		args := request.GetArguments()
-		orderID := assertString(args["order_id"])
 
-		orderHistory, err := kc.Kite.Client.GetOrderHistory(orderID)
-		if err != nil {
-			log.Println("error getting order history", err)
-			return nil, err
+		// Validate required parameters
+		if err := ValidateRequired(args, "order_id"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		v, err := json.Marshal(orderHistory)
-		if err != nil {
-			log.Println("error marshalling order history", err)
-			return nil, err
-		}
+		orderID := SafeAssertString(args["order_id"], "")
 
-		orderHistoryJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: orderHistoryJSON,
-				},
-			},
-		}, nil
+		return handler.WithSession(ctx, "get_order_history", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+			orderHistory, err := session.Kite.Client.GetOrderHistory(orderID)
+			if err != nil {
+				return mcp.NewToolResultError("Failed to get order history"), nil
+			}
+
+			return handler.MarshalResponse(orderHistory, "get_order_history")
+		})
 	}
 }
