@@ -171,8 +171,8 @@ func (app *App) initializeServices() (*kc.Manager, *server.MCPServer, error) {
 func (app *App) createHTTPServer(url string) *http.Server {
 	return &http.Server{
 		Addr:         url,
-		ReadTimeout:  15 * time.Second, // Once we refactor with koanf, we should pick up from defaults/config
-		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  0, // 0 implies no timeout
+		WriteTimeout: 0, // 0 implies no timeout
 	}
 }
 
