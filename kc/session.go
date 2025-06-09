@@ -371,7 +371,6 @@ func (sm *SessionRegistry) GetOrCreateSessionData(sessionID string, createDataFn
 			Data:       nil,
 		}
 		sm.sessions[sessionID] = session
-		exists = true
 	}
 
 	now := time.Now()

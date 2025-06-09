@@ -513,8 +513,7 @@ func TestExternalSessionIDFromErrorLog(t *testing.T) {
 	}
 	if kiteSession == nil {
 		t.Error("Expected non-nil Kite session data")
-	}
-	if kiteSession.Kite == nil {
+	} else if kiteSession.Kite == nil {
 		t.Error("Expected Kite client to be initialized")
 	}
 
