@@ -1,8 +1,8 @@
 package mcp
 
 import (
-	"fmt"
-	"log"
+	"log/slog"
+	"strings"
 
 	gomcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -11,8 +11,14 @@ import (
 
 // TODO: add destructive, openworld and readonly hints where applicable.
 
-var (
-	ToolList []Tool = []Tool{ // TODO: this does not need to be global, it could be moved inside the function that calls RegisterTools
+type Tool interface {
+	Tool() gomcp.Tool
+	Handler(*kc.Manager) server.ToolHandlerFunc
+}
+
+// GetAllTools returns all available tools for registration
+func GetAllTools() []Tool {
+	return []Tool{
 		// Tools for setting up the client
 		&LoginTool{},
 
@@ -23,6 +29,8 @@ var (
 		&PositionsTool{},
 		&TradesTool{},
 		&OrdersTool{},
+		&OrderHistoryTool{},
+		&OrderTradesTool{},
 		&GTTOrdersTool{},
 		&MFHoldingsTool{},
 
@@ -30,6 +38,8 @@ var (
 		&QuotesTool{},
 		&InstrumentsSearchTool{},
 		&HistoricalDataTool{},
+		&LTPTool{},
+		&OHLCTool{},
 
 		// Tools that post data to Kite Connect
 		&PlaceOrderTool{},
@@ -39,97 +49,63 @@ var (
 		&ModifyGTTOrderTool{},
 		&DeleteGTTOrderTool{},
 	}
-)
-
-type Tool interface {
-	Tool() gomcp.Tool
-	Handler(*kc.Manager) server.ToolHandlerFunc
 }
 
-func RegisterTools(srv *server.MCPServer, manager *kc.Manager) {
-	for _, tool := range ToolList {
+// parseExcludedTools parses a comma-separated string of tool names and returns a set of excluded tools.
+// This function is exported for testing purposes to ensure tests use the exact same logic as production.
+func parseExcludedTools(excludedTools string) map[string]bool {
+	excludedSet := make(map[string]bool)
+	if excludedTools != "" {
+		excluded := strings.Split(excludedTools, ",")
+		for _, toolName := range excluded {
+			toolName = strings.TrimSpace(toolName)
+			if toolName != "" {
+				excludedSet[toolName] = true
+			}
+		}
+	}
+	return excludedSet
+}
+
+// filterTools returns tools that are not in the excluded set, along with counts.
+// Returns (filteredTools, registeredCount, excludedCount).
+// This function is exported for testing purposes to ensure tests use the exact same logic as production.
+func filterTools(allTools []Tool, excludedSet map[string]bool) ([]Tool, int, int) {
+	filteredTools := make([]Tool, 0, len(allTools))
+	excludedCount := 0
+
+	for _, tool := range allTools {
+		toolName := tool.Tool().Name
+		if excludedSet[toolName] {
+			excludedCount++
+			continue
+		}
+		filteredTools = append(filteredTools, tool)
+	}
+
+	return filteredTools, len(filteredTools), excludedCount
+}
+
+func RegisterTools(srv *server.MCPServer, manager *kc.Manager, excludedTools string, logger *slog.Logger) {
+	// Parse excluded tools list
+	excludedSet := parseExcludedTools(excludedTools)
+
+	// Log excluded tools
+	for toolName := range excludedSet {
+		logger.Info("Excluding tool from registration", "tool", toolName)
+	}
+
+	// Filter tools
+	allTools := GetAllTools()
+	filteredTools, registeredCount, excludedCount := filterTools(allTools, excludedSet)
+
+	// Register filtered tools
+	for _, tool := range filteredTools {
 		srv.AddTool(tool.Tool(), tool.Handler(manager))
 	}
-}
 
-// Utilities for assertions
-
-func assertString(v any) string {
-	if v == nil {
-		return ""
-	}
-
-	s, ok := v.(string)
-	if !ok {
-		return fmt.Sprintf("%v", v)
-	}
-
-	return s
-}
-
-func assertInt(v any) int {
-	if v == nil {
-		return 0
-	}
-
-	i, ok := v.(int)
-	if !ok {
-		// Try to assert if it is float64, if so, convert it to int
-		return int(assertFloat64(v))
-	}
-
-	return i
-}
-
-func assertFloat64(v any) float64 {
-	if v == nil {
-		return 0.0
-	}
-
-	f, ok := v.(float64)
-	if !ok {
-		return 0.0
-	}
-
-	return f
-}
-
-func assertStringArray(v any) []string {
-	if v == nil {
-		return nil
-	}
-
-	arr, ok := v.([]any)
-	if !ok {
-		log.Printf("debug actual type: %T", v)
-		return nil
-	}
-
-	out := make([]string, len(arr))
-	for i, item := range arr {
-		out[i] = assertString(item)
-	}
-
-	return out
-}
-
-func assertBool(v any) bool {
-	if v == nil {
-		return false
-	}
-
-	b, ok := v.(bool)
-	if !ok {
-		// Check if it is a string and convert it to bool
-		s := assertString(v)
-		if s == "true" {
-			return true
-		} else if s == "false" {
-			return false
-		}
-
-		return false
-	}
-
-	return b
+	logger.Info("Tool registration complete",
+		"registered", registeredCount,
+		"excluded", excludedCount,
+		"total_available", len(allTools))
 }

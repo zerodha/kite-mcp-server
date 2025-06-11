@@ -1,10 +1,10 @@
 package templates
 
-// Embed index.html in this package
+// Embed login_success.html, status.html, and base.html in this package
 
 import (
 	"embed"
 )
 
-//go:embed index.html
+//go:embed login_success.html status.html base.html
 var FS embed.FS

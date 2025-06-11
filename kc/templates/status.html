@@ -1,0 +1,19 @@
+{{define "content"}}
+<div class="card">
+    <div class="icon">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="10" fill="none" stroke="var(--success)" stroke-width="2"/>
+            <path d="M8 12l2 2 4-4" fill="none" stroke="var(--success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    </div>
+    <h1>Kite MCP Server</h1>
+    <div class="status">
+        Service Running
+    </div>
+    <div class="info">
+        Version: <span class="version">{{.Version}}</span>
+    </div>
+</div>
+{{end}}
+
+{{template "base" .}}

@@ -2,9 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"log"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -84,56 +81,42 @@ func (*PlaceOrderTool) Tool() mcp.Tool {
 }
 
 func (*PlaceOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
+		args := request.GetArguments()
 
-		kc, err := manager.GetSession(sess.SessionID())
-		if err != nil {
-			log.Println("error getting session", err)
-			return nil, err
+		// Validate required parameters
+		if err := ValidateRequired(args, "variety", "exchange", "tradingsymbol", "transaction_type", "quantity", "product", "order_type"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		args := request.Params.Arguments
-
-		variety := assertString(args["variety"])
+		variety := SafeAssertString(args["variety"], "regular")
 		orderParams := kiteconnect.OrderParams{
-			Exchange:          assertString(args["exchange"]),
-			Tradingsymbol:     assertString(args["tradingsymbol"]),
-			Validity:          assertString(args["validity"]),
-			ValidityTTL:       assertInt(args["validity_ttl"]),
-			Product:           assertString(args["product"]),
-			OrderType:         assertString(args["order_type"]),
-			TransactionType:   assertString(args["transaction_type"]),
-			Quantity:          assertInt(args["quantity"]),
-			DisclosedQuantity: assertInt(args["disclosed_quantity"]),
-			Price:             assertFloat64(args["price"]),
-			TriggerPrice:      assertFloat64(args["trigger_price"]),
-			IcebergLegs:       assertInt(args["iceberg_legs"]),
-			IcebergQty:        assertInt(args["iceberg_quantity"]),
-			Tag:               assertString(args["tag"]),
+			Exchange:          SafeAssertString(args["exchange"], "NSE"),
+			Tradingsymbol:     SafeAssertString(args["tradingsymbol"], ""),
+			Validity:          SafeAssertString(args["validity"], ""),
+			ValidityTTL:       SafeAssertInt(args["validity_ttl"], 0),
+			Product:           SafeAssertString(args["product"], ""),
+			OrderType:         SafeAssertString(args["order_type"], ""),
+			TransactionType:   SafeAssertString(args["transaction_type"], ""),
+			Quantity:          SafeAssertInt(args["quantity"], 1),
+			DisclosedQuantity: SafeAssertInt(args["disclosed_quantity"], 0),
+			Price:             SafeAssertFloat64(args["price"], 0.0),
+			TriggerPrice:      SafeAssertFloat64(args["trigger_price"], 0.0),
+			IcebergLegs:       SafeAssertInt(args["iceberg_legs"], 0),
+			IcebergQty:        SafeAssertInt(args["iceberg_quantity"], 0),
+			Tag:               SafeAssertString(args["tag"], ""),
 		}
 
-		resp, err := kc.Kite.Client.PlaceOrder(variety, orderParams)
-		if err != nil {
-			log.Println("error getting orders", err)
-			return nil, err
-		}
+		return handler.WithSession(ctx, "place_order", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+			resp, err := session.Kite.Client.PlaceOrder(variety, orderParams)
+			if err != nil {
+				handler.manager.Logger.Error("Failed to place order", "error", err)
+				return mcp.NewToolResultError("Failed to place order"), nil
+			}
 
-		v, err := json.Marshal(resp)
-		if err != nil {
-			log.Println("error marshalling orders", err)
-			return nil, err
-		}
-
-		ordersRespJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: ordersRespJSON,
-				},
-			},
-		}, nil
+			return handler.MarshalResponse(resp, "place_order")
+		})
 	}
 }
 
@@ -179,50 +162,36 @@ func (*ModifyOrderTool) Tool() mcp.Tool {
 }
 
 func (*ModifyOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
+		args := request.GetArguments()
 
-		kc, err := manager.GetSession(sess.SessionID())
-		if err != nil {
-			log.Println("error getting session", err)
-			return nil, err
+		// Validate required parameters
+		if err := ValidateRequired(args, "variety", "order_id", "order_type"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		args := request.Params.Arguments
-
-		variety := assertString(args["variety"])
-		orderID := assertString(args["order_id"])
+		variety := SafeAssertString(args["variety"], "regular")
+		orderID := SafeAssertString(args["order_id"], "")
 
 		orderParams := kiteconnect.OrderParams{
-			Quantity:          assertInt(args["quantity"]),
-			Price:             assertFloat64(args["price"]),
-			OrderType:         assertString(args["order_type"]),
-			TriggerPrice:      assertFloat64(args["trigger_price"]),
-			Validity:          assertString(args["validity"]),
-			DisclosedQuantity: assertInt(args["disclosed_quantity"]),
+			Quantity:          SafeAssertInt(args["quantity"], 1),
+			Price:             SafeAssertFloat64(args["price"], 0.0),
+			OrderType:         SafeAssertString(args["order_type"], ""),
+			TriggerPrice:      SafeAssertFloat64(args["trigger_price"], 0.0),
+			Validity:          SafeAssertString(args["validity"], ""),
+			DisclosedQuantity: SafeAssertInt(args["disclosed_quantity"], 0),
 		}
 
-		resp, err := kc.Kite.Client.ModifyOrder(variety, orderID, orderParams)
-		if err != nil {
-			log.Println("error modifying order", err)
-			return nil, err
-		}
+		return handler.WithSession(ctx, "modify_order", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+			resp, err := session.Kite.Client.ModifyOrder(variety, orderID, orderParams)
+			if err != nil {
+				handler.manager.Logger.Error("Failed to modify order", "error", err)
+				return mcp.NewToolResultError("Failed to modify order"), nil
+			}
 
-		v, err := json.Marshal(resp)
-		if err != nil {
-			log.Println("error marshalling orders", err)
-			return nil, err
-		}
-
-		ordersRespJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: ordersRespJSON,
-				},
-			},
-		}, nil
+			return handler.MarshalResponse(resp, "modify_order")
+		})
 	}
 }
 
@@ -245,41 +214,27 @@ func (*CancelOrderTool) Tool() mcp.Tool {
 }
 
 func (*CancelOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
+		args := request.GetArguments()
 
-		kc, err := manager.GetSession(sess.SessionID())
-		if err != nil {
-			log.Println("error getting session", err)
-			return nil, err
+		// Validate required parameters
+		if err := ValidateRequired(args, "variety", "order_id"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		args := request.Params.Arguments
+		variety := SafeAssertString(args["variety"], "regular")
+		orderID := SafeAssertString(args["order_id"], "")
 
-		variety := assertString(args["variety"])
-		orderID := assertString(args["order_id"])
+		return handler.WithSession(ctx, "cancel_order", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+			resp, err := session.Kite.Client.CancelOrder(variety, orderID, nil)
+			if err != nil {
+				handler.manager.Logger.Error("Failed to cancel order", "error", err)
+				return mcp.NewToolResultError("Failed to cancel order"), nil
+			}
 
-		resp, err := kc.Kite.Client.CancelOrder(variety, orderID, nil)
-		if err != nil {
-			log.Println("error cancelling order", err)
-			return nil, err
-		}
-
-		v, err := json.Marshal(resp)
-		if err != nil {
-			log.Println("error marshalling orders", err)
-			return nil, err
-		}
-
-		ordersRespJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: ordersRespJSON,
-				},
-			},
-		}, nil
+			return handler.MarshalResponse(resp, "cancel_order")
+		})
 	}
 }
 
@@ -306,6 +261,11 @@ func (*PlaceGTTOrderTool) Tool() mcp.Tool {
 			mcp.Description("Transaction type"),
 			mcp.Required(),
 			mcp.Enum("BUY", "SELL"),
+		),
+		mcp.WithString("product",
+			mcp.Description("Product type"),
+			mcp.Required(),
+			mcp.Enum("CNC", "NRML", "MIS", "MTF"),
 		),
 		mcp.WithString("trigger_type",
 			mcp.Description("GTT trigger type"),
@@ -345,75 +305,62 @@ func (*PlaceGTTOrderTool) Tool() mcp.Tool {
 }
 
 func (*PlaceGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
+		args := request.GetArguments()
 
-		kc, err := manager.GetSession(sess.SessionID())
-		if err != nil {
-			log.Println("error getting session", err)
-			return nil, err
+		// Validate required parameters
+		if err := ValidateRequired(args, "exchange", "tradingsymbol", "last_price", "transaction_type", "product", "trigger_type"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-
-		args := request.Params.Arguments
 
 		// Set up basic GTT params
 		gttParams := kiteconnect.GTTParams{
-			Exchange:        assertString(args["exchange"]),
-			Tradingsymbol:   assertString(args["tradingsymbol"]),
-			LastPrice:       assertFloat64(args["last_price"]),
-			TransactionType: assertString(args["transaction_type"]),
+			Exchange:        SafeAssertString(args["exchange"], "NSE"),
+			Tradingsymbol:   SafeAssertString(args["tradingsymbol"], ""),
+			LastPrice:       SafeAssertFloat64(args["last_price"], 0.0),
+			TransactionType: SafeAssertString(args["transaction_type"], ""),
+			Product:         SafeAssertString(args["product"], ""),
 		}
 
 		// Set up trigger based on trigger_type
-		triggerType := assertString(args["trigger_type"])
+		triggerType := SafeAssertString(args["trigger_type"], "")
 
-		if triggerType == "single" {
+		switch triggerType {
+		case "single":
 			gttParams.Trigger = &kiteconnect.GTTSingleLegTrigger{
 				TriggerParams: kiteconnect.TriggerParams{
-					TriggerValue: assertFloat64(args["trigger_value"]),
-					Quantity:     assertFloat64(args["quantity"]),
-					LimitPrice:   assertFloat64(args["limit_price"]),
+					TriggerValue: SafeAssertFloat64(args["trigger_value"], 0.0),
+					Quantity:     SafeAssertFloat64(args["quantity"], 0.0),
+					LimitPrice:   SafeAssertFloat64(args["limit_price"], 0.0),
 				},
 			}
-		} else if triggerType == "two-leg" {
+		case "two-leg":
 			gttParams.Trigger = &kiteconnect.GTTOneCancelsOtherTrigger{
 				Upper: kiteconnect.TriggerParams{
-					TriggerValue: assertFloat64(args["upper_trigger_value"]),
-					Quantity:     assertFloat64(args["upper_quantity"]),
-					LimitPrice:   assertFloat64(args["upper_limit_price"]),
+					TriggerValue: SafeAssertFloat64(args["upper_trigger_value"], 0.0),
+					Quantity:     SafeAssertFloat64(args["upper_quantity"], 0.0),
+					LimitPrice:   SafeAssertFloat64(args["upper_limit_price"], 0.0),
 				},
 				Lower: kiteconnect.TriggerParams{
-					TriggerValue: assertFloat64(args["lower_trigger_value"]),
-					Quantity:     assertFloat64(args["lower_quantity"]),
-					LimitPrice:   assertFloat64(args["lower_limit_price"]),
+					TriggerValue: SafeAssertFloat64(args["lower_trigger_value"], 0.0),
+					Quantity:     SafeAssertFloat64(args["lower_quantity"], 0.0),
+					LimitPrice:   SafeAssertFloat64(args["lower_limit_price"], 0.0),
 				},
 			}
-		} else {
-			return nil, fmt.Errorf("invalid trigger_type: %s", triggerType)
+		default:
+			return mcp.NewToolResultError("Invalid trigger_type. Must be 'single' or 'two-leg'"), nil
 		}
 
-		// Place GTT order
-		resp, err := kc.Kite.Client.PlaceGTT(gttParams)
-		if err != nil {
-			log.Println("error placing GTT order", err)
-			return nil, err
-		}
+		return handler.WithSession(ctx, "place_gtt_order", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+			resp, err := session.Kite.Client.PlaceGTT(gttParams)
+			if err != nil {
+				handler.manager.Logger.Error("Failed to place GTT order", "error", err)
+				return mcp.NewToolResultError("Failed to place GTT order"), nil
+			}
 
-		v, err := json.Marshal(resp)
-		if err != nil {
-			log.Println("error marshalling GTT response", err)
-			return nil, err
-		}
-
-		gttRespJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: gttRespJSON,
-				},
-			},
-		}, nil
+			return handler.MarshalResponse(resp, "place_gtt_order")
+		})
 	}
 }
 
@@ -430,42 +377,27 @@ func (*DeleteGTTOrderTool) Tool() mcp.Tool {
 }
 
 func (*DeleteGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
+		args := request.GetArguments()
 
-		kc, err := manager.GetSession(sess.SessionID())
-		if err != nil {
-			log.Println("error getting session", err)
-			return nil, err
+		// Validate required parameters
+		if err := ValidateRequired(args, "trigger_id"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-
-		args := request.Params.Arguments
 
 		// Get the trigger ID to delete
-		triggerID := assertInt(args["trigger_id"])
+		triggerID := SafeAssertInt(args["trigger_id"], 0)
 
-		// Delete the GTT order
-		resp, err := kc.Kite.Client.DeleteGTT(triggerID)
-		if err != nil {
-			log.Println("error deleting GTT order", err)
-			return nil, err
-		}
+		return handler.WithSession(ctx, "delete_gtt_order", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+			resp, err := session.Kite.Client.DeleteGTT(triggerID)
+			if err != nil {
+				handler.manager.Logger.Error("Failed to delete GTT order", "error", err)
+				return mcp.NewToolResultError("Failed to delete GTT order"), nil
+			}
 
-		v, err := json.Marshal(resp)
-		if err != nil {
-			log.Println("error marshalling GTT deletion response", err)
-			return nil, err
-		}
-
-		gttRespJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: gttRespJSON,
-				},
-			},
-		}, nil
+			return handler.MarshalResponse(resp, "delete_gtt_order")
+		})
 	}
 }
 
@@ -535,77 +467,63 @@ func (*ModifyGTTOrderTool) Tool() mcp.Tool {
 }
 
 func (*ModifyGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
+		args := request.GetArguments()
 
-		kc, err := manager.GetSession(sess.SessionID())
-		if err != nil {
-			log.Println("error getting session", err)
-			return nil, err
+		// Validate required parameters
+		if err := ValidateRequired(args, "trigger_id", "exchange", "tradingsymbol", "last_price", "transaction_type", "trigger_type"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		args := request.Params.Arguments
-
 		// Get the trigger ID to modify
-		triggerID := assertInt(args["trigger_id"])
+		triggerID := SafeAssertInt(args["trigger_id"], 0)
 
 		// Set up basic GTT params
 		gttParams := kiteconnect.GTTParams{
-			Exchange:        assertString(args["exchange"]),
-			Tradingsymbol:   assertString(args["tradingsymbol"]),
-			LastPrice:       assertFloat64(args["last_price"]),
-			TransactionType: assertString(args["transaction_type"]),
+			Exchange:        SafeAssertString(args["exchange"], "NSE"),
+			Tradingsymbol:   SafeAssertString(args["tradingsymbol"], ""),
+			LastPrice:       SafeAssertFloat64(args["last_price"], 0.0),
+			TransactionType: SafeAssertString(args["transaction_type"], ""),
 		}
 
 		// Set up trigger based on trigger_type
-		triggerType := assertString(args["trigger_type"])
+		triggerType := SafeAssertString(args["trigger_type"], "")
 
-		if triggerType == "single" {
+		switch triggerType {
+		case "single":
 			gttParams.Trigger = &kiteconnect.GTTSingleLegTrigger{
 				TriggerParams: kiteconnect.TriggerParams{
-					TriggerValue: assertFloat64(args["trigger_value"]),
-					Quantity:     assertFloat64(args["quantity"]),
-					LimitPrice:   assertFloat64(args["limit_price"]),
+					TriggerValue: SafeAssertFloat64(args["trigger_value"], 0.0),
+					Quantity:     SafeAssertFloat64(args["quantity"], 0.0),
+					LimitPrice:   SafeAssertFloat64(args["limit_price"], 0.0),
 				},
 			}
-		} else if triggerType == "two-leg" {
+		case "two-leg":
 			gttParams.Trigger = &kiteconnect.GTTOneCancelsOtherTrigger{
 				Upper: kiteconnect.TriggerParams{
-					TriggerValue: assertFloat64(args["upper_trigger_value"]),
-					Quantity:     assertFloat64(args["upper_quantity"]),
-					LimitPrice:   assertFloat64(args["upper_limit_price"]),
+					TriggerValue: SafeAssertFloat64(args["upper_trigger_value"], 0.0),
+					Quantity:     SafeAssertFloat64(args["upper_quantity"], 0.0),
+					LimitPrice:   SafeAssertFloat64(args["upper_limit_price"], 0.0),
 				},
 				Lower: kiteconnect.TriggerParams{
-					TriggerValue: assertFloat64(args["lower_trigger_value"]),
-					Quantity:     assertFloat64(args["lower_quantity"]),
-					LimitPrice:   assertFloat64(args["lower_limit_price"]),
+					TriggerValue: SafeAssertFloat64(args["lower_trigger_value"], 0.0),
+					Quantity:     SafeAssertFloat64(args["lower_quantity"], 0.0),
+					LimitPrice:   SafeAssertFloat64(args["lower_limit_price"], 0.0),
 				},
 			}
-		} else {
-			return nil, fmt.Errorf("invalid trigger_type: %s", triggerType)
+		default:
+			return mcp.NewToolResultError("Invalid trigger_type. Must be 'single' or 'two-leg'"), nil
 		}
 
-		// Modify GTT order
-		resp, err := kc.Kite.Client.ModifyGTT(triggerID, gttParams)
-		if err != nil {
-			log.Println("error modifying GTT order", err)
-			return nil, err
-		}
+		return handler.WithSession(ctx, "modify_gtt_order", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+			resp, err := session.Kite.Client.ModifyGTT(triggerID, gttParams)
+			if err != nil {
+				handler.manager.Logger.Error("Failed to modify GTT order", "error", err)
+				return mcp.NewToolResultError("Failed to modify GTT order"), nil
+			}
 
-		v, err := json.Marshal(resp)
-		if err != nil {
-			log.Println("error marshalling GTT response", err)
-			return nil, err
-		}
-
-		gttRespJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: gttRespJSON,
-				},
-			},
-		}, nil
+			return handler.MarshalResponse(resp, "modify_gtt_order")
+		})
 	}
 }

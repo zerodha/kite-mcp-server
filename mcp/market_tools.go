@@ -2,9 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"log"
 	"strings"
 	"time"
 
@@ -30,40 +27,25 @@ func (*QuotesTool) Tool() mcp.Tool {
 }
 
 func (*QuotesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
+		args := request.GetArguments()
 
-		kc, err := manager.GetSession(sess.SessionID())
-		if err != nil {
-			log.Println("error getting quotes", err)
-			return nil, err
+		// Validate required parameters
+		if err := ValidateRequired(args, "instruments"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		args := request.Params.Arguments
+		instruments := SafeAssertStringArray(args["instruments"])
 
-		instruments := assertStringArray(args["instruments"])
+		return handler.WithSession(ctx, "get_quotes", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+			quotes, err := session.Kite.Client.GetQuote(instruments...)
+			if err != nil {
+				return mcp.NewToolResultError("Failed to get quotes"), nil
+			}
 
-		quotes, err := kc.Kite.Client.GetQuote(instruments...)
-		if err != nil {
-			log.Println("error getting quotes", err)
-			return nil, err
-		}
-
-		v, err := json.Marshal(quotes)
-		if err != nil {
-			log.Println("error marshalling quotes", err)
-			return nil, err
-		}
-
-		quotesJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: quotesJSON,
-				},
-			},
-		}, nil
+			return handler.MarshalResponse(quotes, "get_quotes")
+		})
 	}
 }
 
@@ -71,7 +53,7 @@ type InstrumentsSearchTool struct{}
 
 func (*InstrumentsSearchTool) Tool() mcp.Tool {
 	return mcp.NewTool("search_instruments", // TODO this can be multiplexed into various modes. Currently only the filter mode is implemented but other instruments queries in the instruments manager can be exposed here as well.
-		mcp.WithDescription("Get a list of all instruments"),
+		mcp.WithDescription("Search instruments. Supports pagination for large result sets."),
 		mcp.WithString("query",
 			mcp.Description("Search query"),
 			mcp.Required(),
@@ -80,19 +62,35 @@ func (*InstrumentsSearchTool) Tool() mcp.Tool {
 			mcp.Description("Filter on a specific field. (Optional). [id(default)=exch:tradingsymbol, name=nice name of the instrument, tradingsymbol=used to trade in a specific exchange, isin=universal identifier for an instrument across exchanges], underlying=[query=underlying instrument, result=futures and options. note=query format -> exch:tradingsymbol where NSE/BSE:PNB converted to -> NFO/BFO:PNB for query since futures and options available under them]"),
 			mcp.Enum("id", "name", "isin", "tradingsymbol", "underlying"),
 		),
+		mcp.WithNumber("from",
+			mcp.Description("Starting index for pagination (0-based). Default: 0"),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of instruments to return. If not specified, returns all matching instruments. When specified, response includes pagination metadata."),
+		),
 	)
 }
 
 func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args := request.Params.Arguments
+		args := request.GetArguments()
 
-		query := assertString(args["query"])
-		filterOn := assertString(args["filter_on"])
-		// TODO: maybe we can add some pagination here.
+		// Validate required parameters
+		if err := ValidateRequired(args, "query"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
-		manager.Instruments.UpdateInstruments()
-		out := []instruments.Instrument{}
+		query := SafeAssertString(args["query"], "")
+		filterOn := SafeAssertString(args["filter_on"], "id")
+
+		// Don't call UpdateInstruments() here since it might already be happening in another thread
+		// But we do need to ensure instruments are loaded
+		if manager.Instruments.Count() == 0 {
+			manager.Logger.Warn("No instruments loaded, search may return incomplete results")
+		}
+
+		var out []instruments.Instrument
 
 		switch filterOn {
 		case "underlying":
@@ -100,7 +98,7 @@ func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFun
 			if strings.Contains(query, ":") {
 				parts := strings.Split(query, ":")
 				if len(parts) != 2 {
-					return nil, errors.New("invalid query format, specify exch:underlying, where exchange is BFO/NFO")
+					return mcp.NewToolResultError("Invalid query format, specify exch:underlying, where exchange is BFO/NFO"), nil
 				}
 
 				exch := parts[0]
@@ -117,7 +115,6 @@ func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFun
 				out = instruments
 			}
 		default:
-
 			instruments := manager.Instruments.Filter(func(instrument instruments.Instrument) bool {
 				switch filterOn {
 				case "name":
@@ -136,21 +133,27 @@ func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFun
 			out = instruments
 		}
 
-		v, err := json.Marshal(out)
-		if err != nil {
-			log.Println("error marshalling instruments", err)
-			return nil, err
+		// Parse pagination parameters
+		params := ParsePaginationParams(args)
+
+		// Apply pagination if limit is specified
+		originalLength := len(out)
+		paginatedData := ApplyPagination(out, params)
+
+		// Create response with pagination metadata if pagination was applied
+		var responseData interface{}
+		if params.Limit > 0 {
+			// Convert to []interface{} for pagination response
+			interfaceData := make([]interface{}, len(paginatedData))
+			for i, instrument := range paginatedData {
+				interfaceData[i] = instrument
+			}
+			responseData = CreatePaginatedResponse(out, interfaceData, params, originalLength)
+		} else {
+			responseData = paginatedData
 		}
 
-		instrumentsJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: instrumentsJSON,
-				},
-			},
-		}, nil
+		return handler.MarshalResponse(responseData, "search_instruments")
 	}
 }
 
@@ -188,73 +191,131 @@ func (*HistoricalDataTool) Tool() mcp.Tool {
 }
 
 func (*HistoricalDataTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		sess := server.ClientSessionFromContext(ctx)
+		args := request.GetArguments()
 
-		kc, err := manager.GetSession(sess.SessionID())
-		if err != nil {
-			log.Println("error getting session", err)
-			return nil, err
+		// Validate required parameters
+		if err := ValidateRequired(args, "instrument_token", "from_date", "to_date", "interval"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-
-		args := request.Params.Arguments
 
 		// Parse instrument token
-		instrumentToken := assertInt(args["instrument_token"])
+		instrumentToken := SafeAssertInt(args["instrument_token"], 0)
 
 		// Parse from_date and to_date
-		fromDate, err := time.Parse("2006-01-02 15:04:05", assertString(args["from_date"]))
+		fromDate, err := time.Parse("2006-01-02 15:04:05", SafeAssertString(args["from_date"], ""))
 		if err != nil {
-			log.Println("error parsing from_date", err)
-			return nil, err
+			return mcp.NewToolResultError("Failed to parse from_date, use format YYYY-MM-DD HH:MM:SS"), nil
 		}
 
-		toDate, err := time.Parse("2006-01-02 15:04:05", assertString(args["to_date"]))
+		toDate, err := time.Parse("2006-01-02 15:04:05", SafeAssertString(args["to_date"], ""))
 		if err != nil {
-			log.Println("error parsing to_date", err)
-			return nil, err
+			return mcp.NewToolResultError("Failed to parse to_date, use format YYYY-MM-DD HH:MM:SS"), nil
 		}
 
 		// Get other parameters
-		interval := assertString(args["interval"])
-		continuous := false
-		if args["continuous"] != nil {
-			continuous = assertBool(args["continuous"])
-		}
-		oi := false
-		if args["oi"] != nil {
-			oi = assertBool(args["oi"])
+		interval := SafeAssertString(args["interval"], "")
+		continuous := SafeAssertBool(args["continuous"], false)
+		oi := SafeAssertBool(args["oi"], false)
+
+		return handler.WithSession(ctx, "get_historical_data", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+			// Get historical data
+			historicalData, err := session.Kite.Client.GetHistoricalData(
+				instrumentToken,
+				interval,
+				fromDate,
+				toDate,
+				continuous,
+				oi,
+			)
+			if err != nil {
+				return mcp.NewToolResultError("Failed to get historical data"), nil
+			}
+
+			return handler.MarshalResponse(historicalData, "get_historical_data")
+		})
+	}
+}
+
+type LTPTool struct{}
+
+func (*LTPTool) Tool() mcp.Tool {
+	return mcp.NewTool("get_ltp",
+		mcp.WithDescription("Get latest trading prices for a list of instruments"),
+		mcp.WithArray("instruments",
+			mcp.Description("Eg. ['NSE:INFY', 'NSE:SBIN']. This API returns the lastest price for the given list of instruments in the format of exchange:tradingsymbol."),
+			mcp.Required(),
+			mcp.Items(map[string]any{
+				"type": "string",
+			}),
+		),
+	)
+}
+
+func (*LTPTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+
+		// Validate required parameters
+		if err := ValidateRequired(args, "instruments"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		// Get historical data
-		historicalData, err := kc.Kite.Client.GetHistoricalData(
-			instrumentToken,
-			interval,
-			fromDate,
-			toDate,
-			continuous,
-			oi,
-		)
-		if err != nil {
-			log.Println("error getting historical data", err)
-			return nil, err
+		instruments := SafeAssertStringArray(args["instruments"])
+		if len(instruments) == 0 {
+			return mcp.NewToolResultError("At least one instrument must be specified"), nil
 		}
 
-		// Convert to JSON
-		v, err := json.Marshal(historicalData)
-		if err != nil {
-			log.Println("error marshalling historical data", err)
-			return nil, err
+		return handler.WithSession(ctx, "get_ltp", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+			ltp, err := session.Kite.Client.GetLTP(instruments...)
+			if err != nil {
+				return mcp.NewToolResultError("Failed to get latest trading prices"), nil
+			}
+
+			return handler.MarshalResponse(ltp, "get_ltp")
+		})
+	}
+}
+
+type OHLCTool struct{}
+
+func (*OHLCTool) Tool() mcp.Tool {
+	return mcp.NewTool("get_ohlc",
+		mcp.WithDescription("Get OHLC (Open, High, Low, Close) data for a list of instruments"),
+		mcp.WithArray("instruments",
+			mcp.Description("Eg. ['NSE:INFY', 'NSE:SBIN']. This API returns OHLC data for the given list of instruments in the format of exchange:tradingsymbol."),
+			mcp.Required(),
+			mcp.Items(map[string]any{
+				"type": "string",
+			}),
+		),
+	)
+}
+
+func (*OHLCTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+
+		// Validate required parameters
+		if err := ValidateRequired(args, "instruments"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		historicalDataJSON := string(v)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: historicalDataJSON,
-				},
-			},
-		}, nil
+		instruments := SafeAssertStringArray(args["instruments"])
+		if len(instruments) == 0 {
+			return mcp.NewToolResultError("At least one instrument must be specified"), nil
+		}
+
+		return handler.WithSession(ctx, "get_ohlc", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+			ohlc, err := session.Kite.Client.GetOHLC(instruments...)
+			if err != nil {
+				return mcp.NewToolResultError("Failed to get OHLC data"), nil
+			}
+
+			return handler.MarshalResponse(ohlc, "get_ohlc")
+		})
 	}
 }
