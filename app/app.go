@@ -223,6 +223,7 @@ func (app *App) setupMux() *http.ServeMux {
 	mux.Handle("/token", app.rateLimiter.Middleware(http.HandlerFunc(app.oauthHandler.Token)))
 	mux.Handle("/register", app.rateLimiter.Middleware(http.HandlerFunc(app.oauthHandler.Register)))
 	mux.HandleFunc("/.well-known/oauth-authorization-server", app.oauthHandler.Discovery)
+	mux.HandleFunc("/.well-known/oauth-protected-resource", app.oauthHandler.ProtectedResourceMetadata)
 	return mux
 }
 

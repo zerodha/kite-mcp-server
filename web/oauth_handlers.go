@@ -145,10 +145,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		// Complete the OAuth flow, which will redirect to the client
 		// We initialize a new session for the user here. The user's ID will be the subject.
 		mySession := &fosite.DefaultSession{
-			Subject: userSession.ID,
-			// The user suggested that an uninitialized ExpiresAt map might cause issues.
-			// While Fosite's setters/getters are nil-safe, other parts of the library
-			// or its dependencies might not be. Initializing it is a safe bet.
+			Subject:   userSession.ID,
 			ExpiresAt: make(map[fosite.TokenType]time.Time),
 		}
 
@@ -162,29 +159,13 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		h.Logger.Debug("Preparing to complete OAuth flow",
-			"session_id", sessionID,
-			"user_id", userSession.ID,
-			"redirect_uri", ar.GetRedirectURI().String(),
-			"state", ar.GetState(),
-			"response_types", ar.GetResponseTypes(),
-			"requested_scopes", ar.GetRequestedScopes(),
-			"granted_scopes", ar.GetGrantedScopes(),
-			"fosite_session_subject", mySession.Subject)
-
 		response, err := h.FositeProvider.NewAuthorizeResponse(ctx, ar, mySession)
 		if err != nil {
-			// Log the full Fosite error for debugging, including debug and hint fields.
-			if rfcErr, ok := err.(*fosite.RFC6749Error); ok {
-				h.Logger.Error("Fosite failed to create authorize response", "error", rfcErr.Error(), "debug", rfcErr.Debug(), "hint", rfcErr.HintField, "session_id", sessionID)
-			} else {
-				h.Logger.Error("Fosite failed to create authorize response with a non-fosite error", "error", err, "session_id", sessionID)
-			}
+			h.Logger.Error("Fosite failed to create authorize response", "error", err, "session_id", sessionID)
 			h.FositeProvider.WriteAuthorizeError(ctx, w, ar, err)
 			return
 		}
 
-		h.Logger.Debug("Fosite successfully created authorize response", "session_id", sessionID)
 		h.FositeProvider.WriteAuthorizeResponse(ctx, w, ar, response)
 		return
 	}
@@ -275,19 +256,37 @@ func (h *OAuthHandler) Discovery(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// ProtectedResourceMetadata is the handler for the /.well-known/oauth-protected-resource endpoint.
+// It provides clients with information about how to obtain an access token for the MCP server.
+func (h *OAuthHandler) ProtectedResourceMetadata(w http.ResponseWriter, r *http.Request) {
+	// As per RFC 9728, this endpoint provides metadata about the resource server (this MCP server).
+	issuer := "http://" + h.AppConfig.Host // Should be https in production
+	response := map[string]interface{}{
+		"resource": "http://" + h.AppConfig.Host + "/mcp",
+		"authorization_servers": []string{
+			issuer,
+		},
+		"scopes_supported":         []string{"default", "offline", "openid"},
+		"bearer_methods_supported": []string{"header"},
+	}
+
+	w.Header().Set("Content-Type", "application/json;charset=UTF-8")
+	json.NewEncoder(w).Encode(response)
+}
+
 // Middleware is the OAuth 2.1 middleware for protecting MCP endpoints.
 func (h *OAuthHandler) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		token := fosite.AccessTokenFromRequest(r)
 		if token == "" {
-			http.Error(w, "Unauthorized: No access token provided", http.StatusUnauthorized)
+			h.writeUnauthorizedError(w, "Unauthorized: No access token provided")
 			return
 		}
 
 		_, ar, err := h.FositeProvider.IntrospectToken(ctx, token, fosite.AccessToken, &fosite.DefaultSession{})
 		if err != nil {
-			http.Error(w, "Invalid or expired OAuth token", http.StatusUnauthorized)
+			h.writeUnauthorizedError(w, "Invalid or expired OAuth token")
 			return
 		}
 
@@ -295,7 +294,7 @@ func (h *OAuthHandler) Middleware(next http.Handler) http.Handler {
 
 		// Check if the underlying Kite credentials are still valid.
 		if _, err := h.KCManager.GetAuthenticatedClient(sessionID); err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+			h.writeUnauthorizedError(w, err.Error())
 			return
 		}
 
@@ -303,4 +302,12 @@ func (h *OAuthHandler) Middleware(next http.Handler) http.Handler {
 		r.Header.Set("Mcp-Session-Id", sessionID)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// writeUnauthorizedError sets the WWW-Authenticate header and writes a 401 error.
+func (h *OAuthHandler) writeUnauthorizedError(w http.ResponseWriter, message string) {
+	// As per RFC9728 Section 5.1, we must include the WWW-Authenticate header
+	// to point clients to the resource metadata endpoint.
+	w.Header().Set("WWW-Authenticate", `Bearer, resource_metadata="/.well-known/oauth-protected-resource"`)
+	http.Error(w, message, http.StatusUnauthorized)
 }
