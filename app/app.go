@@ -455,15 +455,24 @@ func (app *App) registrationHandler(w http.ResponseWriter, r *http.Request) {
 func (app *App) discoveryHandler(w http.ResponseWriter, r *http.Request) {
 	issuer := "http://" + r.Host // Should be https in production
 	response := map[string]interface{}{
-		"issuer":                                issuer,
-		"authorization_endpoint":                issuer + "/authorize",
-		"token_endpoint":                        issuer + "/token",
-		"jwks_uri":                              issuer + "/.well-known/jwks.json", // Placeholder
-		"registration_endpoint":                 issuer + "/register",
-		"scopes_supported":                      []string{"openid", "offline"},
-		"response_types_supported":              []string{"code", "id_token", "token"},
+		"issuer":                 issuer,
+		"authorization_endpoint": issuer + "/authorize",
+		"token_endpoint":         issuer + "/token",
+		"jwks_uri":               issuer + "/.well-known/jwks.json", // Placeholder
+		"registration_endpoint":  issuer + "/register",
+		"scopes_supported":       []string{"openid", "offline"},
+		"response_types_supported": []string{
+			"code",
+			"id_token",
+			"token",
+			"code id_token",
+			"code token",
+			"id_token token",
+			"code id_token token",
+		},
 		"grant_types_supported":                 []string{"authorization_code", "client_credentials", "refresh_token"},
 		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post"},
+		"code_challenge_methods_supported":      []string{"S256"},
 	}
 
 	w.Header().Set("Content-Type", "application/json")
