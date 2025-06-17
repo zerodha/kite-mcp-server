@@ -38,6 +38,17 @@ type AppConfig struct {
 }
 
 // NewOAuthHandler creates a new handler for all OAuth-related endpoints.
+func NewOAuthHandler(provider fosite.OAuth2Provider, store *oauth.InMemoryStore, kcManager *kc.Manager, logger *slog.Logger, cfg AppConfig) *OAuthHandler {
+	return &OAuthHandler{
+		FositeProvider: provider,
+		FositeStore:    store,
+		KCManager:      kcManager,
+		Logger:         logger,
+		AppConfig:      cfg,
+	}
+}
+
+// Authorize is the handler for the /authorize endpoint.
 func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ar, err := h.FositeProvider.NewAuthorizeRequest(ctx, r)
@@ -46,17 +57,11 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate a temporary session ID for this OAuth flow.
-	tempSessionID := h.KCManager.GenerateOAuthSessionID()
-
-	// Store the authorize request in the temporary session.
-	if err := h.KCManager.SessionManager().UpdateSessionData(tempSessionID, ar); err != nil {
-		http.Error(w, "Internal Server Error: failed to store session", http.StatusInternalServerError)
-		return
-	}
+	// Generate a temporary session and store the authorize request in it.
+	tempSessionID := h.KCManager.SessionManager().GenerateWithData(ar)
 
 	// Generate a login URL that includes the signed temporary session ID.
-	kiteLoginURL, err := h.KCManager.GenerateOAuthLoginURL(tempSessionID)
+	kiteLoginURL, err := h.KCManager.GenerateLoginURL(tempSessionID)
 	if err != nil {
 		http.Error(w, "Internal Server Error: failed to generate login URL", http.StatusInternalServerError)
 		return
@@ -105,57 +110,92 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Route based on the data type stored in the session.
-
-	// FLOW 1: OAuth /authorize - Session data is an AuthorizeRequester
-	if ar, ok := session.Data.(fosite.AuthorizeRequester); ok {
-		h.Logger.Info("Handling OAuth callback", "session_id", sessionID)
-		// This is a temporary session. Clean it up after we're done.
-		defer m.ClearSession(sessionID)
-
-		// Use a temporary client to complete the login and get the UserID
-		tempKSD := kc.NewKiteConnect(h.AppConfig.KiteAPIKey)
-		tempKiteData := &kc.KiteSessionData{Kite: tempKSD}
-		userSess, err := m.CompleteLogin(tempKiteData, requestToken)
-		if err != nil {
+	// 3. Complete the Kite login to get new credentials.
+	creds, err := m.CompleteLogin(requestToken)
+	if err != nil {
+		// If it's an OAuth flow, write a Fosite error.
+		if ar, ok := session.OAuthData.(fosite.AuthorizeRequester); ok {
 			h.FositeProvider.WriteAuthorizeError(ctx, w, ar, err)
+		} else {
+			http.Error(w, "Failed to complete Kite login", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// 4. Store the new credentials in the session.
+	session.Credentials = creds
+
+	// 5. Route based on the session's original purpose.
+
+	// FLOW 1: OAuth /authorize
+	if ar, ok := session.OAuthData.(fosite.AuthorizeRequester); ok {
+		h.Logger.Info("Handling OAuth callback", "session_id", sessionID)
+		// This was a temporary session for OAuth. We will use the UserID from the
+		// new credentials to create or find the user's permanent session.
+		defer m.SessionManager().Terminate(sessionID)
+
+		userSession, _, err := m.SessionManager().GetOrCreate(creds.UserID)
+		if err != nil {
+			http.Error(w, "Failed to create user session after OAuth login", http.StatusInternalServerError)
 			return
 		}
+		// Store the fresh credentials in the user's persistent session.
+		userSession.Credentials = creds
 
 		// Complete the OAuth flow, which will redirect to the client
-		mySession := &fosite.DefaultSession{Subject: userSess.UserID}
-		for _, scope := range ar.GetGrantedScopes() {
-			ar.GrantScope(scope)
+		// We initialize a new session for the user here. The user's ID will be the subject.
+		mySession := &fosite.DefaultSession{
+			Subject: userSession.ID,
+			// The user suggested that an uninitialized ExpiresAt map might cause issues.
+			// While Fosite's setters/getters are nil-safe, other parts of the library
+			// or its dependencies might not be. Initializing it is a safe bet.
+			ExpiresAt: make(map[fosite.TokenType]time.Time),
 		}
+
+		// If no scopes were requested, we grant a default scope.
+		// Fosite requires at least one scope to be granted.
+		if len(ar.GetRequestedScopes()) == 0 {
+			ar.GrantScope("default")
+		} else {
+			for _, scope := range ar.GetRequestedScopes() {
+				ar.GrantScope(scope)
+			}
+		}
+
+		h.Logger.Debug("Preparing to complete OAuth flow",
+			"session_id", sessionID,
+			"user_id", userSession.ID,
+			"redirect_uri", ar.GetRedirectURI().String(),
+			"state", ar.GetState(),
+			"response_types", ar.GetResponseTypes(),
+			"requested_scopes", ar.GetRequestedScopes(),
+			"granted_scopes", ar.GetGrantedScopes(),
+			"fosite_session_subject", mySession.Subject)
+
 		response, err := h.FositeProvider.NewAuthorizeResponse(ctx, ar, mySession)
 		if err != nil {
+			// Log the full Fosite error for debugging, including debug and hint fields.
+			if rfcErr, ok := err.(*fosite.RFC6749Error); ok {
+				h.Logger.Error("Fosite failed to create authorize response", "error", rfcErr.Error(), "debug", rfcErr.Debug(), "hint", rfcErr.HintField, "session_id", sessionID)
+			} else {
+				h.Logger.Error("Fosite failed to create authorize response with a non-fosite error", "error", err, "session_id", sessionID)
+			}
 			h.FositeProvider.WriteAuthorizeError(ctx, w, ar, err)
 			return
 		}
+
+		h.Logger.Debug("Fosite successfully created authorize response", "session_id", sessionID)
 		h.FositeProvider.WriteAuthorizeResponse(ctx, w, ar, response)
 		return
 	}
 
-	// FLOW 2: Login Tool - Session data is KiteSessionData
-	if ksd, ok := session.Data.(*kc.KiteSessionData); ok {
-		h.Logger.Info("Handling Login Tool callback", "session_id", sessionID)
-		// This is a persistent session. We complete the login directly into its KiteSessionData.
-		_, err := m.CompleteLogin(ksd, requestToken)
-		if err != nil {
-			http.Error(w, "Failed to complete Kite login", http.StatusInternalServerError)
-			return
-		}
-
-		// Render the success page for the user
-		if err := h.KCManager.RenderSuccessTemplate(w); err != nil {
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-		}
-		return
+	// FLOW 2: Login Tool
+	h.Logger.Info("Handling Login Tool callback", "session_id", sessionID)
+	// This was a persistent session. We have already stored the new credentials in it.
+	// Now, just render the success page for the user.
+	if err := h.KCManager.RenderSuccessTemplate(w); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
-
-	// If we get here, the session data is of an unknown or nil type. This is an error.
-	h.Logger.Error("Callback session data has unexpected type or is nil", "session_id", sessionID)
-	http.Error(w, "Invalid callback context", http.StatusBadRequest)
 }
 
 // Register is the handler for the /register endpoint.
@@ -241,32 +281,26 @@ func (h *OAuthHandler) Middleware(next http.Handler) http.Handler {
 		ctx := r.Context()
 		token := fosite.AccessTokenFromRequest(r)
 		if token == "" {
-			// Send 401 Unauthorized if no token is provided.
 			http.Error(w, "Unauthorized: No access token provided", http.StatusUnauthorized)
 			return
 		}
 
 		_, ar, err := h.FositeProvider.IntrospectToken(ctx, token, fosite.AccessToken, &fosite.DefaultSession{})
 		if err != nil {
-			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+			http.Error(w, "Invalid or expired OAuth token", http.StatusUnauthorized)
 			return
 		}
-		// Set the authenticated session ID in the header for the next handler.
-		r.Header.Set("Mcp-Session-Id", ar.GetSession().GetSubject())
 
-		// The downstream handler will use the Mcp-Session-Id header, which we have
-		// populated from the validated OAuth token's subject (the Kite User ID).
+		sessionID := ar.GetSession().GetSubject()
+
+		// Check if the underlying Kite credentials are still valid.
+		if _, err := h.KCManager.GetAuthenticatedClient(sessionID); err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+
+		// Set the authenticated session ID in the header for the next handler.
+		r.Header.Set("Mcp-Session-Id", sessionID)
 		next.ServeHTTP(w, r)
 	})
-}
-
-// NewOAuthHandler creates a new handler for all OAuth-related endpoints.
-func NewOAuthHandler(provider fosite.OAuth2Provider, store *oauth.InMemoryStore, kcManager *kc.Manager, logger *slog.Logger, cfg AppConfig) *OAuthHandler {
-	return &OAuthHandler{
-		FositeProvider: provider,
-		FositeStore:    store,
-		KCManager:      kcManager,
-		Logger:         logger,
-		AppConfig:      cfg,
-	}
 }

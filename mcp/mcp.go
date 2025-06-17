@@ -52,7 +52,6 @@ func GetAllTools() []Tool {
 }
 
 // parseExcludedTools parses a comma-separated string of tool names and returns a set of excluded tools.
-// This function is exported for testing purposes to ensure tests use the exact same logic as production.
 func parseExcludedTools(excludedTools string) map[string]bool {
 	excludedSet := make(map[string]bool)
 	if excludedTools != "" {
@@ -68,8 +67,6 @@ func parseExcludedTools(excludedTools string) map[string]bool {
 }
 
 // filterTools returns tools that are not in the excluded set, along with counts.
-// Returns (filteredTools, registeredCount, excludedCount).
-// This function is exported for testing purposes to ensure tests use the exact same logic as production.
 func filterTools(allTools []Tool, excludedSet map[string]bool) ([]Tool, int, int) {
 	filteredTools := make([]Tool, 0, len(allTools))
 	excludedCount := 0

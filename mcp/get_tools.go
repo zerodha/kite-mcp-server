@@ -5,6 +5,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 	"github.com/zerodha/kite-mcp-server/kc"
 )
 
@@ -17,8 +18,8 @@ func (*ProfileTool) Tool() mcp.Tool {
 }
 
 func (*ProfileTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return SimpleToolHandler(manager, "get_profile", func(session *kc.KiteSessionData) (interface{}, error) {
-		return session.Kite.Client.GetUserProfile()
+	return SimpleToolHandler(manager, "get_profile", func(client *kiteconnect.Client) (interface{}, error) {
+		return client.GetUserProfile()
 	})
 }
 
@@ -31,8 +32,8 @@ func (*MarginsTool) Tool() mcp.Tool {
 }
 
 func (*MarginsTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return SimpleToolHandler(manager, "get_margins", func(session *kc.KiteSessionData) (interface{}, error) {
-		return session.Kite.Client.GetUserMargins()
+	return SimpleToolHandler(manager, "get_margins", func(client *kiteconnect.Client) (interface{}, error) {
+		return client.GetUserMargins()
 	})
 }
 
@@ -51,13 +52,11 @@ func (*HoldingsTool) Tool() mcp.Tool {
 }
 
 func (*HoldingsTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return PaginatedToolHandler(manager, "get_holdings", func(session *kc.KiteSessionData) ([]interface{}, error) {
-		holdings, err := session.Kite.Client.GetHoldings()
+	return PaginatedToolHandler(manager, "get_holdings", func(client *kiteconnect.Client) ([]interface{}, error) {
+		holdings, err := client.GetHoldings()
 		if err != nil {
 			return nil, err
 		}
-
-		// Convert to []interface{} for generic pagination
 		result := make([]interface{}, len(holdings))
 		for i, holding := range holdings {
 			result[i] = holding
@@ -81,13 +80,11 @@ func (*PositionsTool) Tool() mcp.Tool {
 }
 
 func (*PositionsTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return PaginatedToolHandler(manager, "get_positions", func(session *kc.KiteSessionData) ([]interface{}, error) {
-		positions, err := session.Kite.Client.GetPositions()
+	return PaginatedToolHandler(manager, "get_positions", func(client *kiteconnect.Client) ([]interface{}, error) {
+		positions, err := client.GetPositions()
 		if err != nil {
 			return nil, err
 		}
-
-		// Convert to []interface{} for generic pagination
 		result := make([]interface{}, len(positions.Day)+len(positions.Net))
 		idx := 0
 		for _, pos := range positions.Day {
@@ -117,13 +114,11 @@ func (*TradesTool) Tool() mcp.Tool {
 }
 
 func (*TradesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return PaginatedToolHandler(manager, "get_trades", func(session *kc.KiteSessionData) ([]interface{}, error) {
-		trades, err := session.Kite.Client.GetTrades()
+	return PaginatedToolHandler(manager, "get_trades", func(client *kiteconnect.Client) ([]interface{}, error) {
+		trades, err := client.GetTrades()
 		if err != nil {
 			return nil, err
 		}
-
-		// Convert to []interface{} for generic pagination
 		result := make([]interface{}, len(trades))
 		for i, trade := range trades {
 			result[i] = trade
@@ -147,13 +142,11 @@ func (*OrdersTool) Tool() mcp.Tool {
 }
 
 func (*OrdersTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return PaginatedToolHandler(manager, "get_orders", func(session *kc.KiteSessionData) ([]interface{}, error) {
-		orders, err := session.Kite.Client.GetOrders()
+	return PaginatedToolHandler(manager, "get_orders", func(client *kiteconnect.Client) ([]interface{}, error) {
+		orders, err := client.GetOrders()
 		if err != nil {
 			return nil, err
 		}
-
-		// Convert to []interface{} for generic pagination
 		result := make([]interface{}, len(orders))
 		for i, order := range orders {
 			result[i] = order
@@ -177,13 +170,11 @@ func (*GTTOrdersTool) Tool() mcp.Tool {
 }
 
 func (*GTTOrdersTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return PaginatedToolHandler(manager, "get_gtts", func(session *kc.KiteSessionData) ([]interface{}, error) {
-		gttBook, err := session.Kite.Client.GetGTTs()
+	return PaginatedToolHandler(manager, "get_gtts", func(client *kiteconnect.Client) ([]interface{}, error) {
+		gttBook, err := client.GetGTTs()
 		if err != nil {
 			return nil, err
 		}
-
-		// Convert to []interface{} for generic pagination
 		result := make([]interface{}, len(gttBook))
 		for i, gtt := range gttBook {
 			result[i] = gtt
@@ -208,20 +199,16 @@ func (*OrderTradesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
-
-		// Validate required parameters
 		if err := ValidateRequired(args, "order_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-
 		orderID := SafeAssertString(args["order_id"], "")
 
-		return handler.WithSession(ctx, "get_order_trades", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
-			orderTrades, err := session.Kite.Client.GetOrderTrades(orderID)
+		return handler.WithKiteClient(ctx, "get_order_trades", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			orderTrades, err := client.GetOrderTrades(orderID)
 			if err != nil {
 				return mcp.NewToolResultError("Failed to get order trades"), nil
 			}
-
 			return handler.MarshalResponse(orderTrades, "get_order_trades")
 		})
 	}
@@ -243,20 +230,16 @@ func (*OrderHistoryTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
-
-		// Validate required parameters
 		if err := ValidateRequired(args, "order_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-
 		orderID := SafeAssertString(args["order_id"], "")
 
-		return handler.WithSession(ctx, "get_order_history", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
-			orderHistory, err := session.Kite.Client.GetOrderHistory(orderID)
+		return handler.WithKiteClient(ctx, "get_order_history", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			orderHistory, err := client.GetOrderHistory(orderID)
 			if err != nil {
 				return mcp.NewToolResultError("Failed to get order history"), nil
 			}
-
 			return handler.MarshalResponse(orderHistory, "get_order_history")
 		})
 	}

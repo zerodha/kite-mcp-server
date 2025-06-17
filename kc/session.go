@@ -21,13 +21,14 @@ const (
 	mcpSessionPrefix          = "kitemcp-"
 )
 
-// Session represents a single user/client session.
+// Session represents a single, long-lived user/client session.
 type Session struct {
-	ID         string
-	Terminated bool
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	Data       any // Can hold KiteSessionData or temporary OAuth data.
+	ID          string
+	Terminated  bool
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	Credentials *KiteCredentials // Holds the short-lived Kite credentials.
+	OAuthData   any              // Holds temporary data for an in-progress OAuth flow.
 }
 
 // SessionManager manages all active sessions.
@@ -67,11 +68,10 @@ func (sm *SessionManager) GenerateWithData(initialData any) string {
 	expiresAt := now.Add(sm.sessionDuration)
 
 	sm.sessions[sessionID] = &Session{
-		ID:         sessionID,
-		Terminated: false,
-		CreatedAt:  now,
-		ExpiresAt:  expiresAt,
-		Data:       initialData,
+		ID:        sessionID,
+		CreatedAt: now,
+		ExpiresAt: expiresAt,
+		OAuthData: initialData,
 	}
 
 	sm.logger.Info("Generated new session", "session_id", sessionID, "expires_at", expiresAt)
@@ -84,7 +84,6 @@ func (sm *SessionManager) Generate() string {
 }
 
 // GetOrCreate retrieves an existing session or creates a new one if the ID is not found.
-// This is used for sessions where the ID is provided by an external source (OAuth UserID, SSE client).
 func (sm *SessionManager) GetOrCreate(sessionID string) (*Session, bool, error) {
 	if sessionID == "" {
 		return nil, false, errors.New("session ID cannot be empty")
@@ -112,11 +111,9 @@ func (sm *SessionManager) GetOrCreate(sessionID string) (*Session, bool, error) 
 	now := time.Now()
 	expiresAt := now.Add(sm.sessionDuration)
 	session = &Session{
-		ID:         sessionID,
-		Terminated: false,
-		CreatedAt:  now,
-		ExpiresAt:  expiresAt,
-		Data:       nil, // Data is populated by the caller
+		ID:        sessionID,
+		CreatedAt: now,
+		ExpiresAt: expiresAt,
 	}
 	sm.sessions[sessionID] = session
 
@@ -124,7 +121,6 @@ func (sm *SessionManager) GetOrCreate(sessionID string) (*Session, bool, error) 
 }
 
 // Terminate marks a session as terminated and runs cleanup hooks.
-// It returns (bool, error) to satisfy the server.SessionIdManager interface.
 func (sm *SessionManager) Terminate(sessionID string) (bool, error) {
 	if sessionID == "" {
 		return false, errors.New("session ID cannot be empty")
@@ -144,10 +140,7 @@ func (sm *SessionManager) Terminate(sessionID string) (bool, error) {
 			hook(session)
 		}
 	}
-
-	// Also delete it from the map
 	delete(sm.sessions, sessionID)
-
 	return true, nil
 }
 
@@ -166,27 +159,6 @@ func (sm *SessionManager) Get(sessionID string) (*Session, error) {
 	}
 
 	return session, nil
-}
-
-// UpdateSessionData updates the data for an existing session.
-func (sm *SessionManager) UpdateSessionData(sessionID string, data any) error {
-	if sessionID == "" {
-		return errors.New("session ID cannot be empty")
-	}
-
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	session, exists := sm.sessions[sessionID]
-	if !exists {
-		return errors.New(errSessionNotFound)
-	}
-	if session.Terminated {
-		return errors.New(errCannotUpdateTerminated)
-	}
-
-	session.Data = data
-	return nil
 }
 
 // CleanupExpiredSessions removes expired sessions from memory.
@@ -232,7 +204,6 @@ func (sm *SessionManager) StopCleanupRoutine() {
 	}
 }
 
-// cleanupRoutine runs periodic cleanup of expired sessions.
 func (sm *SessionManager) cleanupRoutine(ctx context.Context) {
 	ticker := time.NewTicker(DefaultCleanupInterval)
 	defer ticker.Stop()
@@ -254,17 +225,10 @@ func (sm *SessionManager) cleanupRoutine(ctx context.Context) {
 	}
 }
 
-// GetSessionCount returns the number of active sessions.
-func (sm *SessionManager) GetSessionCount() int {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return len(sm.sessions)
-}
-
 // Validate validates a session ID and returns its termination status.
 func (sm *SessionManager) Validate(sessionID string) (bool, error) {
 	if sessionID == "" {
-		return true, errors.New("session ID cannot be empty") // Is terminated, with error
+		return true, errors.New("session ID cannot be empty")
 	}
 
 	sm.mu.RLock()
@@ -272,11 +236,11 @@ func (sm *SessionManager) Validate(sessionID string) (bool, error) {
 
 	session, exists := sm.sessions[sessionID]
 	if !exists {
-		return true, errors.New(errSessionNotFound) // Is terminated, with error
+		return true, errors.New(errSessionNotFound)
 	}
 
 	if time.Now().After(session.ExpiresAt) {
-		return true, nil // Expired is a form of terminated.
+		return true, nil
 	}
 
 	return session.Terminated, nil

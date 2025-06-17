@@ -115,7 +115,7 @@ func TestStartServer_InvalidMode(t *testing.T) {
 		},
 	}
 
-	err := app.startServer(nil, nil, nil, "")
+	err := app.startServer(nil, nil, "")
 
 	if err == nil {
 		t.Error("Expected error for invalid APP_MODE")

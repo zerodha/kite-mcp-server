@@ -7,6 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 	"github.com/zerodha/kite-mcp-server/kc"
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
 )
@@ -30,20 +31,15 @@ func (*QuotesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
-
-		// Validate required parameters
 		if err := ValidateRequired(args, "instruments"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-
 		instruments := SafeAssertStringArray(args["instruments"])
-
-		return handler.WithSession(ctx, "get_quotes", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
-			quotes, err := session.Kite.Client.GetQuote(instruments...)
+		return handler.WithKiteClient(ctx, "get_quotes", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			quotes, err := client.GetQuote(instruments...)
 			if err != nil {
 				return mcp.NewToolResultError("Failed to get quotes"), nil
 			}
-
 			return handler.MarshalResponse(quotes, "get_quotes")
 		})
 	}
@@ -75,17 +71,16 @@ func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFun
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
-
-		// Validate required parameters
 		if err := ValidateRequired(args, "query"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-
 		query := SafeAssertString(args["query"], "")
 		filterOn := SafeAssertString(args["filter_on"], "id")
 
-		// Don't call UpdateInstruments() here since it might already be happening in another thread
-		// But we do need to ensure instruments are loaded
+		if manager.Instruments == nil {
+			return mcp.NewToolResultError("Instrument manager is not initialized."), nil
+		}
+
 		if manager.Instruments.Count() == 0 {
 			manager.Logger.Warn("No instruments loaded, search may return incomplete results")
 		}
@@ -94,23 +89,18 @@ func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFun
 
 		switch filterOn {
 		case "underlying":
-			// query needs to be split by `:` into exch and underlying.
 			if strings.Contains(query, ":") {
 				parts := strings.Split(query, ":")
 				if len(parts) != 2 {
 					return mcp.NewToolResultError("Invalid query format, specify exch:underlying, where exchange is BFO/NFO"), nil
 				}
-
 				exch := parts[0]
 				underlying := parts[1]
-
 				instruments, _ := manager.Instruments.GetAllByUnderlying(exch, underlying)
 				out = instruments
 			} else {
-				// Assume query is just the underlying symbol and try. Just to save prompt calls.
 				exch := "NFO"
 				underlying := query
-
 				instruments, _ := manager.Instruments.GetAllByUnderlying(exch, underlying)
 				out = instruments
 			}
@@ -129,21 +119,13 @@ func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFun
 					return strings.Contains(strings.ToLower(instrument.ID), strings.ToLower(query))
 				}
 			})
-
 			out = instruments
 		}
-
-		// Parse pagination parameters
 		params := ParsePaginationParams(args)
-
-		// Apply pagination if limit is specified
 		originalLength := len(out)
 		paginatedData := ApplyPagination(out, params)
-
-		// Create response with pagination metadata if pagination was applied
 		var responseData interface{}
 		if params.Limit > 0 {
-			// Convert to []interface{} for pagination response
 			interfaceData := make([]interface{}, len(paginatedData))
 			for i, instrument := range paginatedData {
 				interfaceData[i] = instrument
@@ -152,7 +134,6 @@ func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFun
 		} else {
 			responseData = paginatedData
 		}
-
 		return handler.MarshalResponse(responseData, "search_instruments")
 	}
 }
@@ -194,34 +175,24 @@ func (*HistoricalDataTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
-
-		// Validate required parameters
 		if err := ValidateRequired(args, "instrument_token", "from_date", "to_date", "interval"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-
-		// Parse instrument token
 		instrumentToken := SafeAssertInt(args["instrument_token"], 0)
-
-		// Parse from_date and to_date
 		fromDate, err := time.Parse("2006-01-02 15:04:05", SafeAssertString(args["from_date"], ""))
 		if err != nil {
 			return mcp.NewToolResultError("Failed to parse from_date, use format YYYY-MM-DD HH:MM:SS"), nil
 		}
-
 		toDate, err := time.Parse("2006-01-02 15:04:05", SafeAssertString(args["to_date"], ""))
 		if err != nil {
 			return mcp.NewToolResultError("Failed to parse to_date, use format YYYY-MM-DD HH:MM:SS"), nil
 		}
-
-		// Get other parameters
 		interval := SafeAssertString(args["interval"], "")
 		continuous := SafeAssertBool(args["continuous"], false)
 		oi := SafeAssertBool(args["oi"], false)
 
-		return handler.WithSession(ctx, "get_historical_data", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
-			// Get historical data
-			historicalData, err := session.Kite.Client.GetHistoricalData(
+		return handler.WithKiteClient(ctx, "get_historical_data", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			historicalData, err := client.GetHistoricalData(
 				instrumentToken,
 				interval,
 				fromDate,
@@ -232,7 +203,6 @@ func (*HistoricalDataTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			if err != nil {
 				return mcp.NewToolResultError("Failed to get historical data"), nil
 			}
-
 			return handler.MarshalResponse(historicalData, "get_historical_data")
 		})
 	}
@@ -257,23 +227,18 @@ func (*LTPTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
-
-		// Validate required parameters
 		if err := ValidateRequired(args, "instruments"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-
 		instruments := SafeAssertStringArray(args["instruments"])
 		if len(instruments) == 0 {
 			return mcp.NewToolResultError("At least one instrument must be specified"), nil
 		}
-
-		return handler.WithSession(ctx, "get_ltp", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
-			ltp, err := session.Kite.Client.GetLTP(instruments...)
+		return handler.WithKiteClient(ctx, "get_ltp", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			ltp, err := client.GetLTP(instruments...)
 			if err != nil {
 				return mcp.NewToolResultError("Failed to get latest trading prices"), nil
 			}
-
 			return handler.MarshalResponse(ltp, "get_ltp")
 		})
 	}
@@ -298,23 +263,18 @@ func (*OHLCTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
-
-		// Validate required parameters
 		if err := ValidateRequired(args, "instruments"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-
 		instruments := SafeAssertStringArray(args["instruments"])
 		if len(instruments) == 0 {
 			return mcp.NewToolResultError("At least one instrument must be specified"), nil
 		}
-
-		return handler.WithSession(ctx, "get_ohlc", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
-			ohlc, err := session.Kite.Client.GetOHLC(instruments...)
+		return handler.WithKiteClient(ctx, "get_ohlc", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			ohlc, err := client.GetOHLC(instruments...)
 			if err != nil {
 				return mcp.NewToolResultError("Failed to get OHLC data"), nil
 			}
-
 			return handler.MarshalResponse(ohlc, "get_ohlc")
 		})
 	}

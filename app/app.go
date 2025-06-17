@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"github.com/ory/fosite"
 	"github.com/zerodha/kite-mcp-server/app/metrics"
 	"github.com/zerodha/kite-mcp-server/kc"
+	"github.com/zerodha/kite-mcp-server/kc/instruments"
 	"github.com/zerodha/kite-mcp-server/kc/templates"
 	"github.com/zerodha/kite-mcp-server/mcp"
 	"github.com/zerodha/kite-mcp-server/oauth"
@@ -111,8 +113,8 @@ func (app *App) RunServer() error {
 		return err
 	}
 	srv := app.createHTTPServer(url)
-	app.setupGracefulShutdown(srv, app.kcManager)
-	return app.startServer(srv, app.kcManager, mcpServer, url)
+	app.setupGracefulShutdown(srv)
+	return app.startServer(srv, mcpServer, url)
 }
 
 func (app *App) buildServerURL() string {
@@ -124,8 +126,14 @@ func (app *App) configureHTTPClient() {
 }
 
 func (app *App) initializeServices() (*server.MCPServer, error) {
-	// --- Metrics & Rate Limiter ---
 	app.logger.Info("Initializing services...")
+	// --- Instruments Manager ---
+	instManager, err := instruments.New(instruments.Config{Logger: app.logger})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create instruments manager: %w", err)
+	}
+
+	// --- Metrics & Rate Limiter ---
 	app.metrics = metrics.New(metrics.Config{
 		ServiceName:     "kite-mcp-server",
 		AdminSecretPath: app.Config.AdminSecretPath,
@@ -134,7 +142,13 @@ func (app *App) initializeServices() (*server.MCPServer, error) {
 	app.rateLimiter = web.NewRateLimiter()
 
 	// --- Fosite OAuth2 Provider ---
+	// The HMAC strategy used by Fosite for signing tokens requires a secret key.
+	// The error "secret for signing HMAC-SHA512/256 is expected to be 32 byte long, got 0 byte"
+	// indicates this was not set. We'll use the Kite API Secret as a source of entropy
+	// and hash it with SHA-256 to produce a 32-byte key.
+	key := sha256.Sum256([]byte(app.Config.KiteAPISecret))
 	fositeConfig := &fosite.Config{
+		GlobalSecret:        key[:],
 		AccessTokenLifespan: time.Hour * 24,
 	}
 	app.fositeStore = oauth.NewInMemoryStore()
@@ -142,10 +156,11 @@ func (app *App) initializeServices() (*server.MCPServer, error) {
 
 	// --- Kite Connect Manager ---
 	kcManager, err := kc.New(kc.Config{
-		APIKey:    app.Config.KiteAPIKey,
-		APISecret: app.Config.KiteAPISecret,
-		Logger:    app.logger,
-		Metrics:   app.metrics,
+		APIKey:      app.Config.KiteAPIKey,
+		APISecret:   app.Config.KiteAPISecret,
+		Logger:      app.logger,
+		Metrics:     app.metrics,
+		Instruments: instManager,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Kite Connect manager: %w", err)
@@ -176,13 +191,18 @@ func (app *App) createHTTPServer(url string) *http.Server {
 	return &http.Server{Addr: url}
 }
 
-func (app *App) setupGracefulShutdown(srv *http.Server, kcManager *kc.Manager) {
+func (app *App) setupGracefulShutdown(srv *http.Server) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	go func() {
 		defer stop()
 		<-ctx.Done()
 		app.logger.Info("Shutting down server...")
-		kcManager.Shutdown()
+
+		// Shutdown services
+		app.kcManager.Shutdown()
+		app.metrics.Shutdown()
+
+		// Shutdown HTTP server
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -194,19 +214,15 @@ func (app *App) setupGracefulShutdown(srv *http.Server, kcManager *kc.Manager) {
 
 func (app *App) setupMux() *http.ServeMux {
 	mux := http.NewServeMux()
-	// Admin and status routes
 	if app.Config.AdminSecretPath != "" {
 		mux.HandleFunc("/admin/", app.metrics.AdminHTTPHandler())
 	}
 	mux.HandleFunc("/", app.serveStatusPage)
-
-	// OAuth routes
 	mux.HandleFunc("/callback", app.oauthHandler.Callback)
 	mux.Handle("/authorize", app.rateLimiter.Middleware(http.HandlerFunc(app.oauthHandler.Authorize)))
 	mux.Handle("/token", app.rateLimiter.Middleware(http.HandlerFunc(app.oauthHandler.Token)))
 	mux.Handle("/register", app.rateLimiter.Middleware(http.HandlerFunc(app.oauthHandler.Register)))
 	mux.HandleFunc("/.well-known/oauth-authorization-server", app.oauthHandler.Discovery)
-
 	return mux
 }
 
@@ -216,7 +232,7 @@ func (app *App) serveHTTPServer(srv *http.Server) {
 	}
 }
 
-func (app *App) startServer(srv *http.Server, kcManager *kc.Manager, mcpServer *server.MCPServer, url string) error {
+func (app *App) startServer(srv *http.Server, mcpServer *server.MCPServer, url string) error {
 	switch app.Config.AppMode {
 	default:
 		return fmt.Errorf("invalid APP_MODE: %s", app.Config.AppMode)
@@ -257,11 +273,8 @@ func (app *App) startHybridServerMode(srv *http.Server, mcpServer *server.MCPSer
 	streamable := server.NewStreamableHTTPServer(mcpServer, server.WithSessionIdManager(app.kcManager.SessionManager()))
 	mux := app.setupMux()
 
-	// Register SSE endpoints
 	mux.HandleFunc("/sse", sse.ServeHTTP)
 	mux.HandleFunc("/message", sse.ServeHTTP)
-
-	// Register HTTP endpoint with OAuth middleware
 	mux.Handle("/mcp", app.oauthHandler.Middleware(http.HandlerFunc(streamable.ServeHTTP)))
 
 	srv.Handler = mux
