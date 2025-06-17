@@ -368,7 +368,7 @@ func TestStopCleanupRoutine(t *testing.T) {
 	}
 
 	// Should not panic
-	manager.StopCleanupRoutine()
+	manager.SessionManager().StopCleanupRoutine()
 }
 
 func TestGetOrCreateSession(t *testing.T) {

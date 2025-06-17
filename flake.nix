@@ -18,6 +18,7 @@
             gopls
             golangci-lint
             just
+            nodejs
           ];
         };
       });
