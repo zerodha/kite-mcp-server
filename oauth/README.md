@@ -123,19 +123,14 @@ sequenceDiagram
 
 ## 6. Protecting the `/mcp` Endpoint
 
-The `oauthMiddleware` is responsible for securing the `/mcp` endpoint. It supports two modes of operation for maximum compatibility:
+The `oauthMiddleware` is responsible for securing the `/mcp` endpoint. It enforces OAuth 2.1 Bearer Token authentication for all requests.
 
-1.  **OAuth 2.1 (Primary):**
-    -   The middleware inspects the `Authorization: Bearer <token>` header.
-    -   It calls Fosite's `IntrospectToken` to validate the token.
-    -   If the token is valid, it extracts the subject (the Kite User ID).
-    -   It **sets the `Mcp-Session-Id` header on the request** with the Kite User ID before passing it to the next handler.
+1.  The middleware inspects the `Authorization: Bearer <token>` header. Requests without a valid token are rejected with a `401 Unauthorized` status.
+2.  It calls Fosite's `IntrospectToken` to validate the token.
+3.  If the token is valid, it extracts the subject (the Kite User ID).
+4.  It **sets the `Mcp-Session-Id` header on the request** with the Kite User ID before passing it to the downstream MCP handler.
 
-2.  **Header Fallback (Legacy/Simple Clients):**
-    -   If no `Authorization` header is present, the middleware does nothing.
-    -   The downstream `StreamableHTTPServer` will then look for the `Mcp-Session-Id` header directly, allowing clients that don't use OAuth to continue functioning.
-
-This design cleanly decouples the OAuth authentication layer from the core MCP session management logic.
+This design ensures that all access to the `/mcp` endpoint is authenticated via OAuth, while using the Kite User ID from the token as a stable session identifier for the duration of the request. The legacy `Mcp-Session-Id` header is still used by other server modes like SSE, but for the `/mcp` endpoint, it is derived exclusively from the OAuth token.
 
 ## 7. Security Considerations
 

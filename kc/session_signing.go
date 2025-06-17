@@ -142,7 +142,11 @@ func (s *SessionSigner) VerifySessionID(signedParam string) (string, error) {
 
 // ValidateSessionID performs basic validation on a session ID format
 func (s *SessionSigner) ValidateSessionID(sessionID string) error {
-	return checkSessionID(sessionID)
+	if sessionID == "" {
+		return errors.New("session ID cannot be empty")
+	}
+
+	return nil
 }
 
 // SignRedirectParams creates a signed redirect parameter string for Kite authentication

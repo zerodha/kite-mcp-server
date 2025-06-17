@@ -34,38 +34,29 @@ func (*LoginTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		if !isNew {
-			// We have an existing session, verify it works by getting the profile
+			// We have an existing session, verify it works by getting the profile.
 			manager.Logger.Debug("Found existing Kite session, verifying with profile check", "session_id", mcpSessionID)
 			profile, err := kiteSession.Kite.Client.GetUserProfile()
+			if err == nil {
+				manager.Logger.Info("Kite profile check successful, user already logged in.", "session_id", mcpSessionID, "user", profile.UserName)
+				return mcp.NewToolResultText(fmt.Sprintf("You are already logged in as %s. There is no need to log in again.", profile.UserName)), nil
+			}
+			// If the profile check fails, the token is likely expired.
+			// We clear the session data to force a fresh login.
+			manager.Logger.Warn("Kite profile check failed, likely due to an expired token. Clearing session data to re-authenticate.", "session_id", mcpSessionID, "error", err)
+			if clearErr := manager.ClearSessionData(mcpSessionID); clearErr != nil {
+				manager.Logger.Error("Failed to clear session data for re-authentication", "session_id", mcpSessionID, "error", clearErr)
+				return mcp.NewToolResultError("Failed to clear session data for re-authentication"), nil
+			}
+			// After clearing data, we must re-create the KiteSessionData shell
+			kiteSession, _, err = manager.GetOrCreateSession(mcpSessionID)
 			if err != nil {
-				manager.Logger.Warn("Kite profile check failed, clearing session data", "session_id", mcpSessionID, "error", err)
-				// If we are still getting an error, lets clear session data and recreate
-				if clearErr := manager.ClearSessionData(mcpSessionID); clearErr != nil {
-					manager.Logger.Error("Failed to clear session data", "session_id", mcpSessionID, "error", clearErr)
-					return mcp.NewToolResultError("Failed to clear session data"), nil
-				}
-
-				// Create a new session
-				_, _, err = manager.GetOrCreateSession(mcpSessionID)
-				if err != nil {
-					manager.Logger.Error("Failed to create new Kite session", "session_id", mcpSessionID, "error", err)
-					return mcp.NewToolResultError("Failed to create new Kite session"), nil
-				}
-			} else {
-				manager.Logger.Info("Kite profile check successful", "session_id", mcpSessionID, "user", profile.UserName)
-				return &mcp.CallToolResult{
-					Content: []mcp.Content{
-						mcp.TextContent{
-							Type: "text",
-							Text: fmt.Sprintf("You are already logged in as %s", profile.UserName),
-						},
-					},
-				}, nil
+				return mcp.NewToolResultError("Failed to re-create session after clearing for re-authentication"), nil
 			}
 		}
 
-		// Proceed with Kite login URL generation using the MCP session
-		url, err := manager.SessionLoginURL(mcpSessionID)
+		// Proceed with Kite login URL generation using the (now clean) MCP session.
+		url, err := manager.GetLoginToolURL(mcpSessionID)
 		if err != nil {
 			manager.Logger.Error("Error generating Kite login URL", "session_id", mcpSessionID, "error", err)
 			return mcp.NewToolResultError("Failed to generate Kite login URL"), nil
