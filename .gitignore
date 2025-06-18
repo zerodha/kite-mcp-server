@@ -81,3 +81,5 @@ test-binary
 kite-mcp-server-*
 
 .memory
+.clinerules
+*repomix*

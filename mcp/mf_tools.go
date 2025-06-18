@@ -3,6 +3,7 @@ package mcp
 import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 	"github.com/zerodha/kite-mcp-server/kc"
 )
 
@@ -21,13 +22,11 @@ func (*MFHoldingsTool) Tool() mcp.Tool {
 }
 
 func (*MFHoldingsTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
-	return PaginatedToolHandler(manager, "get_mf_holdings", func(session *kc.KiteSessionData) ([]interface{}, error) {
-		holdings, err := session.Kite.Client.GetMFHoldings()
+	return PaginatedToolHandler(manager, "get_mf_holdings", func(client *kiteconnect.Client) ([]interface{}, error) {
+		holdings, err := client.GetMFHoldings()
 		if err != nil {
 			return nil, err
 		}
-
-		// Convert to []interface{} for generic pagination
 		result := make([]interface{}, len(holdings))
 		for i, holding := range holdings {
 			result[i] = holding

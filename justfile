@@ -61,7 +61,7 @@ docs-serve: build
 
 # Run all tests
 test:
-    {{TEST_FLAGS}} go test -v ./...
+    {{TEST_FLAGS}} go test ./...
 
 # Run tests with coverage
 test-coverage:
@@ -113,10 +113,11 @@ init-env: _create-env-file
 # Create a new release
 release VERSION:
     #!/usr/bin/env bash
+    set -e
     # Strip 'v' prefix if present to avoid double 'v'
     VERSION_CLEAN=$(echo "{{VERSION}}" | sed 's/^v//')
     TAG_NAME="v${VERSION_CLEAN}"
-    
+
     echo "Creating release ${TAG_NAME}..."
 
     # Create git tag
@@ -143,6 +144,7 @@ deps-update:
 # Build with git-derived version
 _build-with-git-version:
     #!/usr/bin/env bash
+    set -e
     VERSION=$(just _get-git-version)
     BUILDSTR="$(just _get-build-string)"
     {{GO_FLAGS}} go build -o {{BINARY_NAME}} -ldflags="{{LDFLAGS}} -X 'main.MCP_SERVER_VERSION=${VERSION}' -X 'main.buildString=${BUILDSTR}'" {{MAIN_FILE}}
@@ -151,6 +153,7 @@ _build-with-git-version:
 # Build with specific version
 _build-with-version VERSION:
     #!/usr/bin/env bash
+    set -e
     BUILDSTR="$(just _get-build-string)"
     {{GO_FLAGS}} go build -o {{BINARY_NAME}} -ldflags="{{LDFLAGS}} -X 'main.MCP_SERVER_VERSION={{VERSION}}' -X 'main.buildString=${BUILDSTR}'" {{MAIN_FILE}}
     echo "✅ Built {{BINARY_NAME}} with version {{VERSION}}"
