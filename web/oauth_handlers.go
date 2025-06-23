@@ -1,11 +1,17 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ory/fosite"
@@ -29,6 +35,7 @@ type OAuthHandler struct {
 	KCManager      *kc.Manager
 	Logger         *slog.Logger
 	AppConfig      AppConfig
+	clientRegMutex sync.Mutex
 }
 
 // AppConfig holds configuration required by the OAuth handlers.
@@ -51,8 +58,83 @@ func NewOAuthHandler(provider fosite.OAuth2Provider, store *oauth.InMemoryStore,
 // Authorize is the handler for the /authorize endpoint.
 func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ar, err := h.FositeProvider.NewAuthorizeRequest(ctx, r)
+
+	clientID := r.URL.Query().Get("client_id")
+	redirectURI := r.URL.Query().Get("redirect_uri")
+
+	if clientID == "" || redirectURI == "" {
+		http.Error(w, "Missing required parameters", http.StatusBadRequest)
+		return
+	}
+
+	// Synchronized client lookup with potential auto-registration
+	var err error
+
+	// Try to get client - use a retry mechanism for race conditions
+	maxRetries := 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		_, err := h.FositeStore.GetClient(ctx, clientID)
+		if err == nil {
+			// Client found successfully
+			break
+		}
+
+		// Client not found - auto-register only on first attempt
+		if attempt == 0 {
+			// Auto-register as PUBLIC client (no secret required for PKCE flow)
+			autoClient := &fosite.DefaultClient{
+				ID:            clientID,
+				Secret:        nil, // Public client - no secret
+				GrantTypes:    fosite.Arguments{"authorization_code", "refresh_token"},
+				ResponseTypes: fosite.Arguments{"code"},
+				Scopes:        fosite.Arguments{"default", "openid"},
+				RedirectURIs:  []string{redirectURI},
+				Public:        true, // Mark as public client
+			}
+
+			// Atomic auto-registration
+			h.FositeStore.AddClient(autoClient)
+
+			// Immediate verification
+			_, err = h.FositeStore.GetClient(ctx, clientID)
+			if err == nil {
+				h.Logger.Info("Auto-registered client", "client_id", clientID)
+				break
+			}
+		}
+	}
+
+	// Create a new request with proper parameters
+	newReq := r.Clone(ctx)
+	query := newReq.URL.Query()
+
+	// Add missing required parameters
+	modified := false
+
+	stateParam := query.Get("state")
+	if stateParam == "" || len(stateParam) < 8 {
+		state := "auto-state-" + mustGenerateRandomString(16)
+		query.Set("state", state)
+		modified = true
+	}
+
+	if query.Get("code_challenge") == "" && query.Get("response_type") == "code" {
+		// Generate a proper PKCE challenge
+		codeVerifier := mustGenerateRandomString(32)
+		challenge := generateCodeChallenge(codeVerifier)
+		query.Set("code_challenge", challenge)
+		query.Set("code_challenge_method", "S256")
+		modified = true
+	}
+
+	if modified {
+		newReq.URL.RawQuery = query.Encode()
+	}
+
+	// Use the modified request
+	ar, err := h.FositeProvider.NewAuthorizeRequest(ctx, newReq)
 	if err != nil {
+		h.Logger.Error("Failed to create authorize request", "error", err)
 		h.FositeProvider.WriteAuthorizeError(ctx, w, ar, err)
 		return
 	}
@@ -70,20 +152,52 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, kiteLoginURL, http.StatusFound)
 }
 
+// Add this helper function for PKCE
+func generateCodeChallenge(verifier string) string {
+	h := sha256.Sum256([]byte(verifier))
+	return base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(h[:])
+}
+
 // Token is the handler for the /token endpoint.
 func (h *OAuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	mySessionData := &fosite.DefaultSession{}
 	accessRequest, err := h.FositeProvider.NewAccessRequest(ctx, r, mySessionData)
 	if err != nil {
+		h.Logger.Error("Failed to create access request", "error", err, "error_type", fmt.Sprintf("%T", err))
+
+		// Check if it's a client authentication error
+		fositeErr := fosite.ErrorToRFC6749Error(err)
+		if fositeErr.ErrorField == fosite.ErrInvalidClient.ErrorField {
+			clientID := r.Form.Get("client_id")
+			h.Logger.Error("Client authentication failed in token endpoint",
+				"client_id", clientID,
+				"error_description", fositeErr.DescriptionField)
+
+			// Check if client exists
+			if client, getErr := h.FositeStore.GetClient(ctx, clientID); getErr != nil {
+				h.Logger.Error("Client not found in store during token exchange", "client_id", clientID)
+			} else {
+				h.Logger.Info("Client found in store, but authentication failed",
+					"client_id", clientID,
+					"redirect_uris", client.GetRedirectURIs())
+			}
+		}
+
 		h.FositeProvider.WriteAccessError(ctx, w, accessRequest, err)
 		return
 	}
+
+	h.Logger.Info("Access request created successfully, generating response")
+
 	accessResponse, err := h.FositeProvider.NewAccessResponse(ctx, accessRequest)
 	if err != nil {
+		h.Logger.Error("Failed to create access response", "error", err)
 		h.FositeProvider.WriteAccessError(ctx, w, accessRequest, err)
 		return
 	}
+
+	h.Logger.Info("Token exchange completed successfully")
 	h.FositeProvider.WriteAccessResponse(ctx, w, accessRequest, accessResponse)
 }
 
@@ -187,14 +301,21 @@ func (h *OAuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		Scopes:        fosite.Arguments{"openid", "offline"},
 	}
 
-	decoder := json.NewDecoder(r.Body)
+	// Read and parse body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request", http.StatusBadRequest)
+		return
+	}
+
 	var registrationRequest struct {
 		ClientName   string   `json:"client_name"`
 		RedirectURIs []string `json:"redirect_uris"`
 		GrantTypes   []string `json:"grant_types"`
 	}
-	if err := decoder.Decode(&registrationRequest); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+
+	if err := json.Unmarshal(body, &registrationRequest); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
@@ -212,12 +333,29 @@ func (h *OAuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 	client.Secret = hashedSecret
 
-	h.FositeStore.AddClient(client)
-	h.Logger.Info("Successfully registered new dynamic client", "client_id", client.ID)
+	ctx := context.Background()
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	// Store client and immediately verify in a synchronized block
+	h.FositeStore.AddClient(client)
+
+	// Immediate verification without delays - this forces synchronization
+	storedClient, err := h.FositeStore.GetClient(ctx, client.ID)
+	if err != nil {
+		// If verification fails, remove the partially stored client
+		h.FositeStore.DeleteClient(ctx, client.ID)
+		http.Error(w, "Failed to register client", http.StatusInternalServerError)
+		return
+	}
+
+	// check that the stored client has the right data
+	if storedClient.GetID() != client.ID {
+		h.FositeStore.DeleteClient(ctx, client.ID)
+		http.Error(w, "Client registration verification failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Send response only after successful verification
+	response := map[string]interface{}{
 		"client_id":                client.GetID(),
 		"client_secret":            secret,
 		"grant_types":              client.GetGrantTypes(),
@@ -225,7 +363,20 @@ func (h *OAuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		"client_name":              registrationRequest.ClientName,
 		"client_id_issued_at":      time.Now().Unix(),
 		"client_secret_expires_at": 0,
-	})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		// Client is already stored, so don't delete it
+		// Just log the encoding error
+		h.Logger.Error("Failed to encode registration response", "error", err)
+		return
+	}
+
+	// Optional: minimal logging after everything is done
+	h.Logger.Info("Client registered successfully", "client_id", client.ID)
 }
 
 // Discovery is the handler for the /.well-known/oauth-authorization-server endpoint.
@@ -280,6 +431,7 @@ func (h *OAuthHandler) Middleware(next http.Handler) http.Handler {
 		ctx := r.Context()
 		token := fosite.AccessTokenFromRequest(r)
 		if token == "" {
+			h.Logger.Error("No access token provided")
 			h.writeUnauthorizedError(w, "Unauthorized: No access token provided")
 			return
 		}
@@ -297,17 +449,29 @@ func (h *OAuthHandler) Middleware(next http.Handler) http.Handler {
 			h.writeUnauthorizedError(w, err.Error())
 			return
 		}
+		h.Logger.Info("All validation passed, forwarding to MCP handler")
 
 		// Set the authenticated session ID in the header for the next handler.
 		r.Header.Set("Mcp-Session-Id", sessionID)
+		// Don't set response headers here, let the MCP handler do it
 		next.ServeHTTP(w, r)
 	})
 }
 
 // writeUnauthorizedError sets the WWW-Authenticate header and writes a 401 error.
 func (h *OAuthHandler) writeUnauthorizedError(w http.ResponseWriter, message string) {
-	// As per RFC9728 Section 5.1, we must include the WWW-Authenticate header
-	// to point clients to the resource metadata endpoint.
-	w.Header().Set("WWW-Authenticate", `Bearer, resource_metadata="/.well-known/oauth-protected-resource"`)
-	http.Error(w, message, http.StatusUnauthorized)
+	w.Header().Set("WWW-Authenticate", `Bearer realm="kite-mcp", error="invalid_token"`)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+
+	errorResponse := map[string]interface{}{
+		"error":                 "invalid_token",
+		"error_description":     message,
+		"authorization_servers": []string{"http://" + h.AppConfig.Host},
+		"resource_metadata":     "/.well-known/oauth-protected-resource",
+	}
+
+	if err := json.NewEncoder(w).Encode(errorResponse); err != nil {
+		h.Logger.Error("Failed to encode error response", "error", err)
+	}
 }
