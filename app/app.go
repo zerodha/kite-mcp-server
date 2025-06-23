@@ -187,6 +187,49 @@ func (app *App) initializeServices() (*server.MCPServer, error) {
 	return mcpServer, nil
 }
 
+// MCP response writer wrapper to ensure proper headers
+type mcpResponseWriter struct {
+	http.ResponseWriter
+	logger    *slog.Logger
+	headerSet bool
+}
+
+func (w *mcpResponseWriter) Write(data []byte) (int, error) {
+	if !w.headerSet {
+		// Ensure JSON content type for MCP
+		if w.Header().Get("Content-Type") == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.logger.Info("Set default MCP content type")
+		}
+		w.headerSet = true
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *mcpResponseWriter) WriteHeader(statusCode int) {
+	if !w.headerSet {
+		if w.Header().Get("Content-Type") == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.logger.Info("Set default MCP content type in WriteHeader")
+		}
+		w.headerSet = true
+	}
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+// Helper to wrap MCP handler with proper headers
+func (app *App) mcpWithHeaders(handler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Create a response writer that ensures JSON content type
+		wrapped := &mcpResponseWriter{
+			ResponseWriter: w,
+			logger:         app.logger,
+		}
+
+		handler.ServeHTTP(wrapped, r)
+	})
+}
+
 func (app *App) createHTTPServer(url string) *http.Server {
 	return &http.Server{Addr: url}
 }
@@ -253,7 +296,7 @@ func (app *App) startHTTPServerMode(srv *http.Server, mcpServer *server.MCPServe
 	app.logger.Info("Starting HTTP MCP server", "url", "http://"+srv.Addr+"/mcp")
 	streamable := server.NewStreamableHTTPServer(mcpServer, server.WithSessionIdManager(app.kcManager.SessionManager()))
 	mux := app.setupMux()
-	mux.Handle("/mcp", app.oauthHandler.Middleware(http.HandlerFunc(streamable.ServeHTTP)))
+	mux.Handle("/mcp", app.oauthHandler.Middleware(app.mcpWithHeaders(http.HandlerFunc(streamable.ServeHTTP))))
 	srv.Handler = mux
 	app.serveHTTPServer(srv)
 }
@@ -276,7 +319,7 @@ func (app *App) startHybridServerMode(srv *http.Server, mcpServer *server.MCPSer
 
 	mux.HandleFunc("/sse", sse.ServeHTTP)
 	mux.HandleFunc("/message", sse.ServeHTTP)
-	mux.Handle("/mcp", app.oauthHandler.Middleware(http.HandlerFunc(streamable.ServeHTTP)))
+	mux.Handle("/mcp", app.oauthHandler.Middleware(app.mcpWithHeaders(http.HandlerFunc(streamable.ServeHTTP))))
 
 	srv.Handler = mux
 	app.serveHTTPServer(srv)

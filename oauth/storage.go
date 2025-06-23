@@ -83,7 +83,14 @@ func (s *InMemoryStore) DeleteClient(ctx context.Context, id string) error {
 func (s *InMemoryStore) GetClients(ctx context.Context, limit, offset int) (map[string]fosite.Client, error) {
 	s.RLock()
 	defer s.RUnlock()
-	return s.clients, nil
+
+	// Create a copy of the map to avoid race conditions
+	result := make(map[string]fosite.Client, len(s.clients))
+	for id, client := range s.clients {
+		result[id] = client
+	}
+
+	return result, nil
 }
 
 func (s *InMemoryStore) CreateAuthorizeCodeSession(_ context.Context, signature string, requester fosite.Requester) error {
