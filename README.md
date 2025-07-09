@@ -4,10 +4,15 @@ A Model Context Protocol (MCP) server that provides AI assistants with secure ac
 
 ## TL;DR for Traders
 
-Want to use AI with your Kite trading account? Just add `https://mcp.kite.trade/mcp` to your AI client configuration. No installation or API keys required - it's hosted and ready to use.
+Want to use AI with your Kite trading account? 
+
+**Easiest**: Install our [Claude Desktop Extension](https://github.com/zerodha/kite-mcp-server/releases) - One-click install, no configuration needed!
+
+**Alternative**: Add `https://mcp.kite.trade/mcp` to your AI client configuration. No installation or API keys required - it's hosted and ready to use.
 
 ## Features
 
+- **Claude Desktop Extension**: One-click installation with local execution for maximum security
 - **Portfolio Management**: View holdings, positions, margins, and mutual fund investments
 - **Order Management**: Place, modify, and cancel orders with full order history
 - **GTT Orders**: Good Till Triggered order management
@@ -81,11 +86,44 @@ The server will start and serve a status page at `http://localhost:8080/`
 
 ### Setup Guide
 
-- [Claude Desktop (Hosted Mode)](#claude-desktop-http-mode) - Recommended
+- [Claude Desktop Extension](#claude-desktop-extension) - **Easiest & Most Secure**
+- [Claude Desktop (Hosted Mode)](#claude-desktop-hosted-mode) - Recommended
 - [Claude Desktop (HTTP Mode)](#claude-desktop-http-mode) - Recommended
 - [Claude Desktop (SSE Mode)](#claude-desktop-sse-mode)
 - [Claude Desktop (stdio Mode)](#claude-desktop-stdio-mode)
 - [Other MCP Clients](#other-mcp-clients)
+
+### Claude Desktop Extension
+
+The easiest and most secure way to use Kite MCP Server is through our Claude Desktop Extension. This provides:
+
+- **One-click installation** - Install directly through Claude Desktop
+- **Local execution** - Runs on your machine for maximum security
+- **No configuration** - No manual setup or API key management required
+- **Automatic updates** - Get new features and bug fixes automatically
+- **Cross-platform** - Works on macOS, Windows, and Linux
+
+#### Installation
+
+1. **Download the Extension**: Get the latest `.dxt` file from our [releases page](https://github.com/zerodha/kite-mcp-server/releases)
+2. **Install in Claude Desktop**: 
+   - Open Claude Desktop
+   - Go to Settings → Extensions
+   - Click "Install Extension" and select the downloaded `.dxt` file
+3. **Authenticate**: Follow the authentication flow when first using the extension
+
+#### Usage
+
+Once installed, you can interact with your Kite account using natural language:
+
+```
+"Show me my current portfolio"
+"What's the latest price for RELIANCE?"
+"Place a market order for 100 shares of TCS"
+"Show my trading history for today"
+```
+
+The extension provides access to all Kite Connect features including portfolio management, market data, order execution, and GTT orders.
 
 ### Claude Desktop (Hosted Mode)
 
@@ -244,6 +282,11 @@ just run        # Run the server
 just test       # Run tests
 just lint       # Format and lint code
 just coverage   # Generate coverage report
+
+# Desktop Extension Development
+just build-extension      # Build cross-platform extension binaries
+just package-extension    # Package extension as .dxt file
+just release-extension    # Create automated release with extension
 ```
 
 ### Running Tests
