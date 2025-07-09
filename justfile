@@ -131,14 +131,14 @@ release VERSION:
     echo "3. Build release binary: just build-version ${TAG_NAME}"
     echo "4. Create a GitHub release: gh release create ${TAG_NAME} --title \"${TAG_NAME}\" --generate-notes"
 
-# Create a new release with automated extension packaging
+# Create a new release with automated extension packaging (unified workflow)
 release-extension VERSION:
     #!/usr/bin/env bash
     # Strip 'v' prefix if present to avoid double 'v'
     VERSION_CLEAN=$(echo "{{VERSION}}" | sed 's/^v//')
     TAG_NAME="v${VERSION_CLEAN}"
     
-    echo "🚀 Creating release with desktop extension automation: ${TAG_NAME}"
+    echo "🚀 Creating release with unified automation: ${TAG_NAME}"
     echo ""
     
     # Run tests first
@@ -179,11 +179,11 @@ release-extension VERSION:
     echo "1. Review the tag: git show ${TAG_NAME}"
     echo "2. Push to trigger automation: git push --tags"
     echo ""
-    echo "🤖 Automation will:"
-    echo "  • Build cross-platform binaries"
-    echo "  • Sync extension version"
-    echo "  • Package .dxt file"
-    echo "  • Create GitHub release with artifacts"
+    echo "🤖 Unified workflow will:"
+    echo "  • Build cross-platform server binaries"
+    echo "  • Conditionally build desktop extension (if present)"
+    echo "  • Sync extension version and package .dxt file"
+    echo "  • Create unified GitHub release with all artifacts"
     echo "  • Generate installation instructions"
     echo ""
     echo "⏱️  Expected completion: ~5-10 minutes after push"
