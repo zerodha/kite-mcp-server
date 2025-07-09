@@ -1,0 +1,214 @@
+name: Release Desktop Extension
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Trigger on version tags like v1.0.0, v1.2.3, etc.
+
+permissions:
+  contents: write  # Required for creating releases
+  
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          
+      - name: Run tests
+        run: |
+          CGO_ENABLED=0 GOEXPERIMENT=synctest go test -v ./...
+
+  build-extension:
+    name: Build and Release Extension
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for git describe
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install DXT CLI
+        run: npm install -g @anthropic-ai/dxt
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Extract version from git tag
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "clean_version=${VERSION#v}" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Build cross-platform binaries
+        run: |
+          cd desktop-extension-claude
+          chmod +x build-binaries.sh sync-version.sh
+          ./build-binaries.sh
+
+      - name: Verify binaries
+        run: |
+          echo "Checking built binaries:"
+          ls -la desktop-extension-claude/server/binaries/
+          
+          # Verify all required binaries exist
+          REQUIRED_BINARIES=(
+            "kite-mcp-darwin-amd64"
+            "kite-mcp-darwin-arm64"
+            "kite-mcp-linux-amd64"
+            "kite-mcp-linux-arm64"
+            "kite-mcp-windows-amd64.exe"
+          )
+          
+          for binary in "${REQUIRED_BINARIES[@]}"; do
+            if [ ! -f "desktop-extension-claude/server/binaries/$binary" ]; then
+              echo "❌ Missing binary: $binary"
+              exit 1
+            else
+              echo "✅ Found binary: $binary"
+            fi
+          done
+
+      - name: Verify version sync
+        run: |
+          cd desktop-extension-claude
+          MANIFEST_VERSION=$(jq -r '.version' manifest.json)
+          echo "Manifest version: $MANIFEST_VERSION"
+          
+          # Verify version was synced correctly
+          if [ -z "$MANIFEST_VERSION" ] || [ "$MANIFEST_VERSION" = "null" ]; then
+            echo "❌ Invalid manifest version"
+            exit 1
+          fi
+          echo "✅ Version sync verified: $MANIFEST_VERSION"
+
+      - name: Package extension
+        run: |
+          cd desktop-extension-claude
+          dxt pack .
+          
+          # Find the generated .dxt file
+          DXT_FILE=$(find . -name "*.dxt" -type f | head -1)
+          if [ -z "$DXT_FILE" ]; then
+            echo "❌ No .dxt file generated"
+            exit 1
+          fi
+          
+          echo "✅ Extension packaged: $DXT_FILE"
+          echo "dxt_file=$DXT_FILE" >> $GITHUB_ENV
+
+      - name: Verify extension package
+        run: |
+          cd desktop-extension-claude
+          if [ ! -f "$dxt_file" ]; then
+            echo "❌ Extension package not found: $dxt_file"
+            exit 1
+          fi
+          
+          # Check file size (should be reasonable)
+          SIZE=$(stat -c%s "$dxt_file" 2>/dev/null || stat -f%z "$dxt_file")
+          echo "Extension size: $SIZE bytes"
+          
+          if [ "$SIZE" -lt 1000 ]; then
+            echo "❌ Extension file too small, likely corrupted"
+            exit 1
+          fi
+          
+          echo "✅ Extension package verified"
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          
+          # Create release notes
+          cat > release_notes.md << 'EOF'
+          ## Kite Connect Desktop Extension ${{ steps.version.outputs.version }}
+          
+          ### 🚀 Features
+          - Complete Kite Connect API integration with OAuth authentication
+          - Real-time portfolio and market data access
+          - Secure local execution with fallback to hosted server
+          - Cross-platform support (macOS, Windows, Linux)
+          
+          ### 📦 Installation
+          
+          **Option 1: Direct Install (Recommended)**
+          1. Download the `kite-connect.dxt` file below
+          2. Open Claude Desktop
+          3. Go to Settings > Extensions
+          4. Click "Install Extension" and select the downloaded file
+          
+          **Option 2: Manual Build**
+          ```bash
+          git clone https://github.com/zerodha/kite-mcp-server
+          cd kite-mcp-server
+          just package-extension
+          ```
+          
+          ### 🔧 Requirements
+          - Claude Desktop 0.10.0 or later
+          - Valid Zerodha trading account for authentication
+          
+          ### 📋 Available Tools
+          - Portfolio management (holdings, positions, margins)
+          - Market data (quotes, historical data, instrument search)
+          - Order management (place, modify, cancel orders)
+          - GTT orders and mutual fund operations
+          
+          ### 🔐 Security
+          - OAuth-based authentication (no API keys required)
+          - Local execution for maximum privacy
+          - Secure session management with automatic refresh
+          
+          ---
+          
+          🤖 Generated with automated release pipeline
+          EOF
+          
+          echo "Release notes generated"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Kite Connect Desktop Extension ${{ steps.version.outputs.version }}"
+          body_path: release_notes.md
+          files: |
+            desktop-extension-claude/*.dxt
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "🎉 Release completed successfully!"
+          echo "📋 Version: ${{ steps.version.outputs.version }}"
+          echo "📦 Extension: desktop-extension-claude/${{ env.dxt_file }}"
+          echo "🔗 Release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.version }}"
+          echo ""
+          echo "📥 Users can now:"
+          echo "  1. Download the .dxt file from the GitHub release"
+          echo "  2. Install it in Claude Desktop via Settings > Extensions"
+          echo "  3. Receive automatic updates if/when submitted to Anthropic's directory"

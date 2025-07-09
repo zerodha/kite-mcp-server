@@ -131,6 +131,78 @@ release VERSION:
     echo "3. Build release binary: just build-version ${TAG_NAME}"
     echo "4. Create a GitHub release: gh release create ${TAG_NAME} --title \"${TAG_NAME}\" --generate-notes"
 
+# Create a new release with automated extension packaging
+release-extension VERSION:
+    #!/usr/bin/env bash
+    # Strip 'v' prefix if present to avoid double 'v'
+    VERSION_CLEAN=$(echo "{{VERSION}}" | sed 's/^v//')
+    TAG_NAME="v${VERSION_CLEAN}"
+    
+    echo "🚀 Creating release with desktop extension automation: ${TAG_NAME}"
+    echo ""
+    
+    # Run tests first
+    echo "🧪 Running tests..."
+    CGO_ENABLED=0 GOEXPERIMENT=synctest go test -v ./...
+    if [ $? -ne 0 ]; then
+        echo "❌ Tests failed. Aborting release."
+        exit 1
+    fi
+    echo "✅ Tests passed"
+    echo ""
+    
+    # Validate extension can be built locally
+    echo "🔨 Validating extension build..."
+    just build-extension
+    if [ $? -ne 0 ]; then
+        echo "❌ Extension build failed. Aborting release."
+        exit 1
+    fi
+    echo "✅ Extension build validated"
+    echo ""
+
+    # Create git tag
+    echo "🏷️  Creating git tag..."
+    git tag -a "${TAG_NAME}" -m "Release ${TAG_NAME}"
+    echo "✅ Created git tag ${TAG_NAME}"
+    echo ""
+    
+    echo "🎉 Release prepared successfully!"
+    echo ""
+    echo "📋 Summary:"
+    echo "  Version: ${TAG_NAME}"
+    echo "  Extension: Ready for automated build"
+    echo "  Tests: Passed ✅"
+    echo "  Build: Validated ✅"
+    echo ""
+    echo "🚀 Next steps:"
+    echo "1. Review the tag: git show ${TAG_NAME}"
+    echo "2. Push to trigger automation: git push --tags"
+    echo ""
+    echo "🤖 Automation will:"
+    echo "  • Build cross-platform binaries"
+    echo "  • Sync extension version"
+    echo "  • Package .dxt file"
+    echo "  • Create GitHub release with artifacts"
+    echo "  • Generate installation instructions"
+    echo ""
+    echo "⏱️  Expected completion: ~5-10 minutes after push"
+    echo "🔗 Monitor progress: https://github.com/$(git config --get remote.origin.url | sed 's/.*github.com[:\/]\([^\/]*\/[^\/]*\).*/\1/' | sed 's/.git$//')/actions"
+
+# === Extension Commands ===
+
+# Sync desktop extension version with git tags
+sync-extension-version:
+    ./desktop-extension-claude/sync-version.sh
+
+# Build desktop extension binaries
+build-extension: sync-extension-version
+    ./desktop-extension-claude/build-binaries.sh
+
+# Package desktop extension (requires dxt CLI)
+package-extension: build-extension
+    cd desktop-extension-claude && dxt pack .
+
 # === Dependency Commands ===
 
 # Update all dependencies
