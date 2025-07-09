@@ -6,13 +6,13 @@ A Model Context Protocol (MCP) server that provides AI assistants with secure ac
 
 Want to use AI with your Kite trading account? 
 
-**Easiest**: Install our [Claude Desktop Extension](https://github.com/zerodha/kite-mcp-server/releases) - One-click install with OAuth authentication, no API keys needed!
+**Easiest**: Install our [Claude Desktop Extension](https://github.com/zerodha/kite-mcp-server/releases) - One-click install, no configuration needed!
 
 **Alternative**: Add `https://mcp.kite.trade/mcp` to your AI client configuration. No installation or API keys required - it's hosted and ready to use.
 
 ## Features
 
-- **Claude Desktop Extension**: One-click installation with OAuth authentication for maximum security
+- **Claude Desktop Extension**: One-click installation with local execution for maximum security
 - **Portfolio Management**: View holdings, positions, margins, and mutual fund investments
 - **Order Management**: Place, modify, and cancel orders with full order history
 - **GTT Orders**: Good Till Triggered order management
@@ -98,8 +98,8 @@ The server will start and serve a status page at `http://localhost:8080/`
 The easiest and most secure way to use Kite MCP Server is through our Claude Desktop Extension. This provides:
 
 - **One-click installation** - Install directly through Claude Desktop
-- **OAuth authentication** - No API keys required, authenticate through your browser
-- **Local execution** - Your credentials never leave your machine
+- **Local execution** - Runs on your machine for maximum security
+- **No configuration** - No manual setup or API key management required
 - **Automatic updates** - Get new features and bug fixes automatically
 - **Cross-platform** - Works on macOS, Windows, and Linux
 
@@ -110,7 +110,7 @@ The easiest and most secure way to use Kite MCP Server is through our Claude Des
    - Open Claude Desktop
    - Go to Settings → Extensions
    - Click "Install Extension" and select the downloaded `.dxt` file
-3. **Authenticate**: Follow the OAuth flow when first using the extension
+3. **Authenticate**: Follow the authentication flow when first using the extension
 
 #### Usage
 

@@ -7,7 +7,7 @@ A desktop extension for [Claude Desktop](https://claude.ai/desktop) that provide
 - **Local Execution**: Runs the MCP server locally with your credentials stored securely
 - **Cross-Platform**: Works on macOS, Windows, and Linux
 - **One-Click Installation**: Install via Claude Desktop's extension system
-- **OAuth Authentication**: Secure browser-based OAuth flow
+- **Secure Authentication**: Browser-based authentication flow
 - **Fallback Mode**: Automatically falls back to hosted server if local binary fails
 - **Complete API Coverage**: Access to all 22 Kite Connect API endpoints
 
@@ -82,12 +82,12 @@ The extension uses a hybrid architecture:
 1. **Primary Mode**: Local Go binary execution for maximum security
 2. **Fallback Mode**: Hosted server connection if local binary fails
 3. **Node.js Wrapper**: Handles MCP protocol and process management
-4. **Secure Storage**: Credentials encrypted in OS keychain
+4. **Secure Storage**: Sessions encrypted in OS keychain
 
 ## Security
 
 - **Local Execution**: No data leaves your machine in primary mode
-- **OAuth Authentication**: Secure browser-based authentication flow
+- **Secure Authentication**: Browser-based authentication flow
 - **No Stored Credentials**: No API keys or secrets stored locally
 - **Session Management**: Secure session handling with automatic token refresh
 - **HTTPS Only**: All network communication uses TLS encryption

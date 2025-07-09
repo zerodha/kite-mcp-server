@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Model Context Protocol (MCP) server that provides AI assistants with secure access to the Kite Connect trading API. The server enables AI agents to retrieve market data, manage portfolios, and execute trades through a standardized interface.
 
-**The project now includes a Claude Desktop Extension** that packages the MCP server for easy installation and local execution with OAuth authentication.
+**The project now includes a Claude Desktop Extension** that packages the MCP server for easy installation and local execution.
 
 **Key Technologies:**
 - Go 1.24+ with experimental synctest support
@@ -127,7 +127,7 @@ The Claude Desktop Extension uses a hybrid proxy architecture:
 1. **Node.js Proxy** (`server/index.js`) - Handles MCP protocol communication
 2. **Local Binary Execution** - Spawns platform-specific Go binary for processing
 3. **Fallback to Hosted** - Automatically falls back to `https://mcp.kite.trade/mcp` if local binary fails
-4. **OAuth Authentication** - Secure browser-based authentication flow
+4. **Secure Authentication** - Browser-based authentication flow
 5. **Session Management** - Persistent session handling with automatic refresh
 6. **Request Validation** - Comprehensive input validation and sanitization
 
@@ -199,7 +199,7 @@ direnv allow
 ### Desktop Extension Security
 
 - **Local Execution** - No credentials or data leave the user's machine
-- **OAuth Flow** - Secure browser-based authentication, no API keys stored
+- **Secure Authentication** - Browser-based authentication, no API keys stored
 - **Request Validation** - All tool calls validated against JSON schemas
 - **Input Sanitization** - Protection against injection attacks
 - **Session Isolation** - Each extension instance maintains isolated sessions
