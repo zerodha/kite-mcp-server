@@ -26,6 +26,9 @@ func (*LoginTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		mcpSessionID := mcpClientSession.SessionID()
 		manager.Logger.Info("Login tool called", "session_id", mcpSessionID)
 
+		// Clear any existing default session when starting a new login
+		manager.ClearDefaultSession()
+
 		// Get or create a Kite session for this MCP session
 		kiteSession, isNew, err := manager.GetOrCreateSession(mcpSessionID)
 		if err != nil {
