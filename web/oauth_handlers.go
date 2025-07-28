@@ -4,8 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ory/fosite"
@@ -29,6 +31,7 @@ type OAuthHandler struct {
 	KCManager      *kc.Manager
 	Logger         *slog.Logger
 	AppConfig      AppConfig
+	clientRegMutex sync.Mutex
 }
 
 // AppConfig holds configuration required by the OAuth handlers.
@@ -51,6 +54,29 @@ func NewOAuthHandler(provider fosite.OAuth2Provider, store *oauth.InMemoryStore,
 // Authorize is the handler for the /authorize endpoint.
 func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	clientID := r.URL.Query().Get("client_id")
+	redirectURI := r.URL.Query().Get("redirect_uri")
+
+	if clientID == "" || redirectURI == "" {
+		http.Error(w, "Missing required parameters", http.StatusBadRequest)
+		return
+	}
+
+	// Auto-register client if not found
+	h.clientRegMutex.Lock()
+	defer h.clientRegMutex.Unlock()
+	if _, err := h.FositeStore.GetClient(ctx, clientID); err != nil {
+		autoClient := &fosite.DefaultClient{
+			ID:           clientID,
+			Public:       true,
+			RedirectURIs: []string{redirectURI},
+			GrantTypes:   fosite.Arguments{"authorization_code", "refresh_token"},
+			Scopes:       fosite.Arguments{"default", "openid"},
+		}
+		h.FositeStore.AddClient(autoClient)
+	}
+
+	// Process authorization request
 	ar, err := h.FositeProvider.NewAuthorizeRequest(ctx, r)
 	if err != nil {
 		h.FositeProvider.WriteAuthorizeError(ctx, w, ar, err)
@@ -181,36 +207,21 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 
 // Register is the handler for the /register endpoint.
 func (h *OAuthHandler) Register(w http.ResponseWriter, r *http.Request) {
-	client := &fosite.DefaultClient{
-		GrantTypes:    fosite.Arguments{"authorization_code", "refresh_token", "client_credentials"},
-		ResponseTypes: fosite.Arguments{"code", "id_token"},
-		Scopes:        fosite.Arguments{"openid", "offline"},
-	}
-
-	decoder := json.NewDecoder(r.Body)
-	var registrationRequest struct {
+	body, _ := io.ReadAll(r.Body)
+	var req struct {
 		ClientName   string   `json:"client_name"`
 		RedirectURIs []string `json:"redirect_uris"`
-		GrantTypes   []string `json:"grant_types"`
 	}
-	if err := decoder.Decode(&registrationRequest); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+	json.Unmarshal(body, &req)
 
-	client.ID = "client-" + mustGenerateRandomString(12)
-	client.RedirectURIs = registrationRequest.RedirectURIs
-	if len(registrationRequest.GrantTypes) > 0 {
-		client.GrantTypes = registrationRequest.GrantTypes
+	client := &fosite.DefaultClient{
+		ID:            "client-" + mustGenerateRandomString(12),
+		Secret:        []byte("secret-" + mustGenerateRandomString(24)),
+		RedirectURIs:  req.RedirectURIs,
+		GrantTypes:    fosite.Arguments{"authorization_code", "refresh_token"},
+		ResponseTypes: fosite.Arguments{"code"},
+		Scopes:        fosite.Arguments{"openid", "openid"},
 	}
-
-	secret := "secret-" + mustGenerateRandomString(24)
-	hashedSecret, err := oauth.HashSecret(secret)
-	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-	client.Secret = hashedSecret
 
 	h.FositeStore.AddClient(client)
 	h.Logger.Info("Successfully registered new dynamic client", "client_id", client.ID)
@@ -218,11 +229,12 @@ func (h *OAuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"client_id":                client.GetID(),
-		"client_secret":            secret,
+		"client_id":                client.ID,
+		"client_secret":            client.Secret,
 		"grant_types":              client.GetGrantTypes(),
-		"redirect_uris":            client.GetRedirectURIs(),
-		"client_name":              registrationRequest.ClientName,
+		"scopes_supported":         []string{"default", "openid"},
+		"redirect_uris":            client.RedirectURIs,
+		"client_name":              req.ClientName,
 		"client_id_issued_at":      time.Now().Unix(),
 		"client_secret_expires_at": 0,
 	})
@@ -237,7 +249,7 @@ func (h *OAuthHandler) Discovery(w http.ResponseWriter, r *http.Request) {
 		"token_endpoint":         issuer + "/token",
 		"jwks_uri":               issuer + "/.well-known/jwks.json", // Placeholder
 		"registration_endpoint":  issuer + "/register",
-		"scopes_supported":       []string{"openid", "offline"},
+		"scopes_supported":       []string{"openid"},
 		"response_types_supported": []string{
 			"code",
 			"id_token",
@@ -266,7 +278,7 @@ func (h *OAuthHandler) ProtectedResourceMetadata(w http.ResponseWriter, r *http.
 		"authorization_servers": []string{
 			issuer,
 		},
-		"scopes_supported":         []string{"default", "offline", "openid"},
+		"scopes_supported":         []string{"default", "openid"},
 		"bearer_methods_supported": []string{"header"},
 	}
 
