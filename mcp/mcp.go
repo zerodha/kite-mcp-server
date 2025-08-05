@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 
@@ -96,13 +97,36 @@ func RegisterTools(srv *server.MCPServer, manager *kc.Manager, excludedTools str
 	allTools := GetAllTools()
 	filteredTools, registeredCount, excludedCount := filterTools(allTools, excludedSet)
 
-	// Register filtered tools
+	// Register filtered tools with session-aware login tool handling
 	for _, tool := range filteredTools {
-		srv.AddTool(tool.Tool(), tool.Handler(manager))
+		if tool.Tool().Name == "login" {
+			// Register login tool with session-aware handler that can reject calls
+			srv.AddTool(tool.Tool(), createSessionAwareLoginHandler(tool.Handler(manager), manager, logger))
+		} else {
+			srv.AddTool(tool.Tool(), tool.Handler(manager))
+		}
 	}
 
 	logger.Info("Tool registration complete",
 		"registered", registeredCount,
 		"excluded", excludedCount,
 		"total_available", len(allTools))
+}
+
+// createSessionAwareLoginHandler creates a handler that rejects login tool calls when user is authenticated
+func createSessionAwareLoginHandler(originalHandler server.ToolHandlerFunc, manager *kc.Manager, logger *slog.Logger) server.ToolHandlerFunc {
+	return func(ctx context.Context, request gomcp.CallToolRequest) (*gomcp.CallToolResult, error) {
+		mcpSession := server.ClientSessionFromContext(ctx)
+		sessionID := mcpSession.SessionID()
+
+		// Check if user has valid session credentials
+		if _, err := manager.GetAuthenticatedClient(sessionID); err == nil {
+			// User is authenticated - reject the tool call
+			logger.Info("Login tool call rejected - user has valid session", "session_id", sessionID)
+			return gomcp.NewToolResultError("Tool unavailable: User is already authenticated. The login tool is disabled for authenticated sessions."), nil
+		}
+
+		// User is not authenticated, proceed with original handler
+		return originalHandler(ctx, request)
+	}
 }
