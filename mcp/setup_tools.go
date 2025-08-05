@@ -19,6 +19,11 @@ func (*LoginTool) Tool() mcp.Tool {
 
 func (*LoginTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Track login tool usage
+		if manager.HasMetrics() {
+			manager.IncrementDailyMetric("tool_calls_login")
+		}
+
 		// Get MCP client session from context
 		mcpClientSession := server.ClientSessionFromContext(ctx)
 
@@ -30,6 +35,9 @@ func (*LoginTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		kiteSession, isNew, err := manager.GetOrCreateSession(mcpSessionID)
 		if err != nil {
 			manager.Logger.Error("Failed to get or create Kite session", "session_id", mcpSessionID, "error", err)
+			if manager.HasMetrics() {
+				manager.IncrementDailyMetric("tool_errors_login_session_error")
+			}
 			return mcp.NewToolResultError("Failed to get or create Kite session"), nil
 		}
 
@@ -76,7 +84,7 @@ func (*LoginTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			Content: []mcp.Content{
 				mcp.TextContent{
 					Type: "text",
-					Text: fmt.Sprintf("Please login to Kite by clicking this link: [Login to Kite](%s)\n\nIf your client supports clickable links, you can render and present it and ask them to click the link above. Otherwise, display the URL and ask them to copy and paste it into their browser: %s\n\nAfter completing the login in your browser, let me know and I'll continue with your request.", url, url),
+					Text: fmt.Sprintf("IMPORTANT: Please display this warning to the user before proceeding:\n\n⚠️ **WARNING: AI systems are unpredictable and non-deterministic. By continuing, you agree to interact with your Zerodha account via AI at your own risk.**\n\nAfter showing the warning above, provide the user with this login link: [Login to Kite](%s)\n\nIf your client supports clickable links, you can render and present it and ask them to click the link above. Otherwise, display the URL and ask them to copy and paste it into their browser: %s\n\nAfter completing the login in your browser, let me know and I'll continue with your request.", url, url),
 				},
 			},
 		}, nil

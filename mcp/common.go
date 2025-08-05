@@ -20,6 +20,20 @@ func NewToolHandler(manager *kc.Manager) *ToolHandler {
 	return &ToolHandler{manager: manager}
 }
 
+// trackToolCall increments the daily tool usage counter
+func (h *ToolHandler) trackToolCall(toolName string) {
+	if h.manager.HasMetrics() {
+		h.manager.IncrementDailyMetric(fmt.Sprintf("tool_calls_%s", toolName))
+	}
+}
+
+// trackToolError increments the daily tool error counter with error type
+func (h *ToolHandler) trackToolError(toolName, errorType string) {
+	if h.manager.HasMetrics() {
+		h.manager.IncrementDailyMetric(fmt.Sprintf("tool_errors_%s_%s", toolName, errorType))
+	}
+}
+
 // WithSession validates session and executes the provided function with a valid Kite session
 // This eliminates the TOCTOU race condition by consolidating session validation and usage
 func (h *ToolHandler) WithSession(ctx context.Context, toolName string, fn func(*kc.KiteSessionData) (*mcp.CallToolResult, error)) (*mcp.CallToolResult, error) {
@@ -31,11 +45,13 @@ func (h *ToolHandler) WithSession(ctx context.Context, toolName string, fn func(
 	kiteSession, isNew, err := h.manager.GetOrCreateSession(sessionID)
 	if err != nil {
 		h.manager.Logger.Error("Failed to establish session", "tool", toolName, "session_id", sessionID, "error", err)
+		h.trackToolError(toolName, "session_error")
 		return mcp.NewToolResultError("Failed to establish a session. Please try again."), nil
 	}
 
 	if isNew {
 		h.manager.Logger.Info("New session created, login required", "tool", toolName, "session_id", sessionID)
+		h.trackToolError(toolName, "auth_required")
 		return mcp.NewToolResultError("Please log in first using the login tool"), nil
 	}
 
@@ -283,7 +299,15 @@ func CreatePaginatedResponse(originalData interface{}, paginatedData interface{}
 func SimpleToolHandler(manager *kc.Manager, toolName string, apiCall func(*kc.KiteSessionData) (interface{}, error)) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return handler.HandleAPICall(ctx, toolName, apiCall)
+		// Track the tool call at the handler level
+		handler.trackToolCall(toolName)
+		result, err := handler.HandleAPICall(ctx, toolName, apiCall)
+		if err != nil {
+			handler.trackToolError(toolName, "execution_error")
+		} else if result != nil && result.IsError {
+			handler.trackToolError(toolName, "api_error")
+		}
+		return result, err
 	}
 }
 
@@ -291,11 +315,14 @@ func SimpleToolHandler(manager *kc.Manager, toolName string, apiCall func(*kc.Ki
 func PaginatedToolHandler[T any](manager *kc.Manager, toolName string, apiCall func(*kc.KiteSessionData) ([]T, error)) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return handler.WithSession(ctx, toolName, func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+		// Track the tool call at the handler level
+		handler.trackToolCall(toolName)
+		result, err := handler.WithSession(ctx, toolName, func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
 			// Get the data
 			data, err := apiCall(session)
 			if err != nil {
 				handler.manager.Logger.Error("API call failed", "tool", toolName, "error", err)
+				handler.trackToolError(toolName, "api_error")
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to execute %s", toolName)), nil
 			}
 
@@ -317,5 +344,12 @@ func PaginatedToolHandler[T any](manager *kc.Manager, toolName string, apiCall f
 
 			return handler.MarshalResponse(responseData, toolName)
 		})
+		
+		if err != nil {
+			handler.trackToolError(toolName, "execution_error")
+		} else if result != nil && result.IsError {
+			handler.trackToolError(toolName, "api_error")
+		}
+		return result, err
 	}
 }

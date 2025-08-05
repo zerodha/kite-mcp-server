@@ -431,6 +431,25 @@ func (m *Manager) StopCleanupRoutine() {
 	m.sessionManager.StopCleanupRoutine()
 }
 
+// HasMetrics returns true if metrics manager is available
+func (m *Manager) HasMetrics() bool {
+	return m.metrics != nil
+}
+
+// IncrementMetric increments a metric counter by 1
+func (m *Manager) IncrementMetric(key string) {
+	if m.metrics != nil {
+		m.metrics.Increment(key)
+	}
+}
+
+// IncrementDailyMetric increments a daily metric counter by 1
+func (m *Manager) IncrementDailyMetric(key string) {
+	if m.metrics != nil {
+		m.metrics.IncrementDaily(key)
+	}
+}
+
 // Shutdown gracefully shuts down the manager and all its components
 func (m *Manager) Shutdown() {
 	m.Logger.Info("Shutting down Kite manager...")

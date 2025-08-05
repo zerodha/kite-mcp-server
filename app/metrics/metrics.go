@@ -90,6 +90,19 @@ func (m *Manager) IncrementBy(key string, n int64) {
 	atomic.AddInt64(val.(*int64), n)
 }
 
+// IncrementDaily atomically increments a daily counter for today
+func (m *Manager) IncrementDaily(key string) {
+	m.IncrementDailyBy(key, 1)
+}
+
+// IncrementDailyBy atomically increments a daily counter by n for today
+func (m *Manager) IncrementDailyBy(key string, n int64) {
+	today := time.Now().UTC().Format("2006-01-02")
+	dailyKey := fmt.Sprintf("%s_%s", key, today)
+	val, _ := m.counters.LoadOrStore(dailyKey, new(int64))
+	atomic.AddInt64(val.(*int64), n)
+}
+
 // TrackDailyUser tracks a unique user login for today
 func (m *Manager) TrackDailyUser(userID string) {
 	if userID == "" {
@@ -194,6 +207,46 @@ func (m *Manager) Shutdown() {
 	})
 }
 
+// isDailyMetric checks if a metric key has a date suffix (YYYY-MM-DD format)
+func (m *Manager) isDailyMetric(key string) bool {
+	parts := strings.Split(key, "_")
+	if len(parts) < 2 {
+		return false
+	}
+	
+	// Check if we have a non-empty base name
+	baseName := strings.Join(parts[:len(parts)-1], "_")
+	if baseName == "" {
+		return false
+	}
+	
+	// Check if the last part looks like a date (YYYY-MM-DD)
+	lastPart := parts[len(parts)-1]
+	if len(lastPart) != 10 || strings.Count(lastPart, "-") != 2 {
+		return false
+	}
+	
+	// Basic validation that it looks like YYYY-MM-DD
+	dateParts := strings.Split(lastPart, "-")
+	if len(dateParts) != 3 || len(dateParts[0]) != 4 || len(dateParts[1]) != 2 || len(dateParts[2]) != 2 {
+		return false
+	}
+	
+	return true
+}
+
+// parseDailyMetric extracts base name and date from a daily metric key
+func (m *Manager) parseDailyMetric(key string) (baseName, date string) {
+	if !m.isDailyMetric(key) {
+		return "", ""
+	}
+	
+	parts := strings.Split(key, "_")
+	date = parts[len(parts)-1]
+	baseName = strings.Join(parts[:len(parts)-1], "_")
+	return baseName, date
+}
+
 // formatMetric formats a single metric in Prometheus format
 func (m *Manager) formatMetric(buf *bytes.Buffer, name string, labels map[string]string, value float64) {
 	if labels == nil {
@@ -215,14 +268,24 @@ func (m *Manager) WritePrometheus(buf *bytes.Buffer) {
 	now := time.Now().UTC()
 	today := now.Format("2006-01-02")
 
-	// Write counter metrics
+	// Write counter metrics - separate daily and total counters
 	m.counters.Range(func(key, val interface{}) bool {
 		name, ok := key.(string)
 		if !ok {
 			return true
 		}
 		value := atomic.LoadInt64(val.(*int64))
-		m.formatMetric(buf, fmt.Sprintf("%s_total", name), nil, float64(value))
+		
+		// Check if this is a daily metric (has date suffix)
+		if m.isDailyMetric(name) {
+			baseName, date := m.parseDailyMetric(name)
+			if baseName != "" && date != "" {
+				m.formatMetric(buf, fmt.Sprintf("%s_total", baseName), map[string]string{"date": date}, float64(value))
+			}
+		} else {
+			// Regular total counter without date label
+			m.formatMetric(buf, fmt.Sprintf("%s_total", name), nil, float64(value))
+		}
 		return true
 	})
 
