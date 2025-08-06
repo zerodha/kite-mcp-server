@@ -403,6 +403,16 @@ func (m *Manager) CompleteSession(mcpSessionID, kiteRequestToken string) error {
 	m.Logger.Info("Setting Kite access token for MCP session", "session_id", mcpSessionID)
 	kiteData.Kite.Client.SetAccessToken(userSess.AccessToken)
 
+	// Compliance log for successful login
+	m.Logger.Info("COMPLIANCE: User login completed successfully",
+		"event", "user_login_success",
+		"user_id", userSess.UserID,
+		"session_id", mcpSessionID,
+		"timestamp", time.Now().UTC().Format(time.RFC3339),
+		"user_name", userSess.UserName,
+		"user_type", userSess.UserType,
+	)
+
 	// Track successful login
 	if m.metrics != nil {
 		m.metrics.TrackDailyUser(userSess.UserID)
