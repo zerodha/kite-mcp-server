@@ -83,6 +83,7 @@ func (*PlaceOrderTool) Tool() mcp.Tool {
 func (*PlaceOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handler.trackToolCall("place_order")
 		args := request.GetArguments()
 
 		// Validate required parameters
@@ -164,6 +165,7 @@ func (*ModifyOrderTool) Tool() mcp.Tool {
 func (*ModifyOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handler.trackToolCall("modify_order")
 		args := request.GetArguments()
 
 		// Validate required parameters
@@ -216,6 +218,7 @@ func (*CancelOrderTool) Tool() mcp.Tool {
 func (*CancelOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handler.trackToolCall("cancel_order")
 		args := request.GetArguments()
 
 		// Validate required parameters
@@ -307,6 +310,7 @@ func (*PlaceGTTOrderTool) Tool() mcp.Tool {
 func (*PlaceGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handler.trackToolCall("place_gtt_order")
 		args := request.GetArguments()
 
 		// Validate required parameters
@@ -379,6 +383,7 @@ func (*DeleteGTTOrderTool) Tool() mcp.Tool {
 func (*DeleteGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handler.trackToolCall("delete_gtt_order")
 		args := request.GetArguments()
 
 		// Validate required parameters
@@ -469,6 +474,7 @@ func (*ModifyGTTOrderTool) Tool() mcp.Tool {
 func (*ModifyGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handler.trackToolCall("modify_gtt_order")
 		args := request.GetArguments()
 
 		// Validate required parameters

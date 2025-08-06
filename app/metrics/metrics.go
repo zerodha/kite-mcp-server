@@ -213,25 +213,25 @@ func (m *Manager) isDailyMetric(key string) bool {
 	if len(parts) < 2 {
 		return false
 	}
-	
+
 	// Check if we have a non-empty base name
 	baseName := strings.Join(parts[:len(parts)-1], "_")
 	if baseName == "" {
 		return false
 	}
-	
+
 	// Check if the last part looks like a date (YYYY-MM-DD)
 	lastPart := parts[len(parts)-1]
 	if len(lastPart) != 10 || strings.Count(lastPart, "-") != 2 {
 		return false
 	}
-	
+
 	// Basic validation that it looks like YYYY-MM-DD
 	dateParts := strings.Split(lastPart, "-")
 	if len(dateParts) != 3 || len(dateParts[0]) != 4 || len(dateParts[1]) != 2 || len(dateParts[2]) != 2 {
 		return false
 	}
-	
+
 	return true
 }
 
@@ -240,7 +240,7 @@ func (m *Manager) parseDailyMetric(key string) (baseName, date string) {
 	if !m.isDailyMetric(key) {
 		return "", ""
 	}
-	
+
 	parts := strings.Split(key, "_")
 	date = parts[len(parts)-1]
 	baseName = strings.Join(parts[:len(parts)-1], "_")
@@ -275,7 +275,7 @@ func (m *Manager) WritePrometheus(buf *bytes.Buffer) {
 			return true
 		}
 		value := atomic.LoadInt64(val.(*int64))
-		
+
 		// Check if this is a daily metric (has date suffix)
 		if m.isDailyMetric(name) {
 			baseName, date := m.parseDailyMetric(name)

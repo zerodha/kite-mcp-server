@@ -122,7 +122,7 @@ func TestParseDailyMetric(t *testing.T) {
 	}{
 		{"tool_calls_quotes_2025-08-05", "tool_calls_quotes", "2025-08-05"},
 		{"tool_errors_login_session_error_2025-12-31", "tool_errors_login_session_error", "2025-12-31"},
-		{"legacy_counter", "", ""}, // Not a daily metric
+		{"legacy_counter", "", ""},             // Not a daily metric
 		{"tool_calls_quotes_20250805", "", ""}, // Wrong date format
 	}
 

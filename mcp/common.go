@@ -344,7 +344,7 @@ func PaginatedToolHandler[T any](manager *kc.Manager, toolName string, apiCall f
 
 			return handler.MarshalResponse(responseData, toolName)
 		})
-		
+
 		if err != nil {
 			handler.trackToolError(toolName, "execution_error")
 		} else if result != nil && result.IsError {
