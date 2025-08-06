@@ -207,6 +207,7 @@ func (*OrderTradesTool) Tool() mcp.Tool {
 func (*OrderTradesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handler.trackToolCall(ctx, "get_order_trades")
 		args := request.GetArguments()
 
 		// Validate required parameters
@@ -242,6 +243,7 @@ func (*OrderHistoryTool) Tool() mcp.Tool {
 func (*OrderHistoryTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handler.trackToolCall(ctx, "get_order_history")
 		args := request.GetArguments()
 
 		// Validate required parameters

@@ -10,6 +10,34 @@ import (
 	"github.com/zerodha/kite-mcp-server/kc"
 )
 
+// Context key for session type
+type contextKey string
+
+const (
+	sessionTypeKey contextKey = "session_type"
+)
+
+// Session type constants
+const (
+	SessionTypeSSE     = "sse"
+	SessionTypeMCP     = "mcp"
+	SessionTypeStdio   = "stdio"
+	SessionTypeUnknown = "unknown"
+)
+
+// WithSessionType adds session type to context
+func WithSessionType(ctx context.Context, sessionType string) context.Context {
+	return context.WithValue(ctx, sessionTypeKey, sessionType)
+}
+
+// SessionTypeFromContext extracts session type from context
+func SessionTypeFromContext(ctx context.Context) string {
+	if sessionType, ok := ctx.Value(sessionTypeKey).(string); ok {
+		return sessionType
+	}
+	return SessionTypeUnknown // default fallback for undetermined sessions
+}
+
 // ToolHandler provides common functionality for all MCP tools
 type ToolHandler struct {
 	manager *kc.Manager
@@ -20,17 +48,21 @@ func NewToolHandler(manager *kc.Manager) *ToolHandler {
 	return &ToolHandler{manager: manager}
 }
 
-// trackToolCall increments the daily tool usage counter
-func (h *ToolHandler) trackToolCall(toolName string) {
+// trackToolCall increments the daily tool usage counter with optional context for session type
+func (h *ToolHandler) trackToolCall(ctx context.Context, toolName string) {
 	if h.manager.HasMetrics() {
-		h.manager.IncrementDailyMetric(fmt.Sprintf("tool_calls_%s", toolName))
+		sessionType := SessionTypeFromContext(ctx)
+		metricName := fmt.Sprintf("tool_calls_%s_%s", toolName, sessionType)
+		h.manager.IncrementDailyMetric(metricName)
 	}
 }
 
-// trackToolError increments the daily tool error counter with error type
-func (h *ToolHandler) trackToolError(toolName, errorType string) {
+// trackToolError increments the daily tool error counter with error type and optional context for session type
+func (h *ToolHandler) trackToolError(ctx context.Context, toolName, errorType string) {
 	if h.manager.HasMetrics() {
-		h.manager.IncrementDailyMetric(fmt.Sprintf("tool_errors_%s_%s", toolName, errorType))
+		sessionType := SessionTypeFromContext(ctx)
+		metricName := fmt.Sprintf("tool_errors_%s_%s_%s", toolName, errorType, sessionType)
+		h.manager.IncrementDailyMetric(metricName)
 	}
 }
 
@@ -45,13 +77,13 @@ func (h *ToolHandler) WithSession(ctx context.Context, toolName string, fn func(
 	kiteSession, isNew, err := h.manager.GetOrCreateSession(sessionID)
 	if err != nil {
 		h.manager.Logger.Error("Failed to establish session", "tool", toolName, "session_id", sessionID, "error", err)
-		h.trackToolError(toolName, "session_error")
+		h.trackToolError(ctx, toolName, "session_error")
 		return mcp.NewToolResultError("Failed to establish a session. Please try again."), nil
 	}
 
 	if isNew {
 		h.manager.Logger.Info("New session created, login required", "tool", toolName, "session_id", sessionID)
-		h.trackToolError(toolName, "auth_required")
+		h.trackToolError(ctx, toolName, "auth_required")
 		return mcp.NewToolResultError("Please log in first using the login tool"), nil
 	}
 
@@ -300,12 +332,12 @@ func SimpleToolHandler(manager *kc.Manager, toolName string, apiCall func(*kc.Ki
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Track the tool call at the handler level
-		handler.trackToolCall(toolName)
+		handler.trackToolCall(ctx, toolName)
 		result, err := handler.HandleAPICall(ctx, toolName, apiCall)
 		if err != nil {
-			handler.trackToolError(toolName, "execution_error")
+			handler.trackToolError(ctx, toolName, "execution_error")
 		} else if result != nil && result.IsError {
-			handler.trackToolError(toolName, "api_error")
+			handler.trackToolError(ctx, toolName, "api_error")
 		}
 		return result, err
 	}
@@ -316,13 +348,13 @@ func PaginatedToolHandler[T any](manager *kc.Manager, toolName string, apiCall f
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Track the tool call at the handler level
-		handler.trackToolCall(toolName)
+		handler.trackToolCall(ctx, toolName)
 		result, err := handler.WithSession(ctx, toolName, func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
 			// Get the data
 			data, err := apiCall(session)
 			if err != nil {
 				handler.manager.Logger.Error("API call failed", "tool", toolName, "error", err)
-				handler.trackToolError(toolName, "api_error")
+				handler.trackToolError(ctx, toolName, "api_error")
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to execute %s", toolName)), nil
 			}
 
@@ -346,9 +378,9 @@ func PaginatedToolHandler[T any](manager *kc.Manager, toolName string, apiCall f
 		})
 
 		if err != nil {
-			handler.trackToolError(toolName, "execution_error")
+			handler.trackToolError(ctx, toolName, "execution_error")
 		} else if result != nil && result.IsError {
-			handler.trackToolError(toolName, "api_error")
+			handler.trackToolError(ctx, toolName, "api_error")
 		}
 		return result, err
 	}

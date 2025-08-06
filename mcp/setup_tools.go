@@ -19,10 +19,9 @@ func (*LoginTool) Tool() mcp.Tool {
 
 func (*LoginTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Track login tool usage
-		if manager.HasMetrics() {
-			manager.IncrementDailyMetric("tool_calls_login")
-		}
+		// Track login tool usage with session context
+		handler := NewToolHandler(manager)
+		handler.trackToolCall(ctx, "login")
 
 		// Get MCP client session from context
 		mcpClientSession := server.ClientSessionFromContext(ctx)
@@ -35,9 +34,7 @@ func (*LoginTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		kiteSession, isNew, err := manager.GetOrCreateSession(mcpSessionID)
 		if err != nil {
 			manager.Logger.Error("Failed to get or create Kite session", "session_id", mcpSessionID, "error", err)
-			if manager.HasMetrics() {
-				manager.IncrementDailyMetric("tool_errors_login_session_error")
-			}
+			handler.trackToolError(ctx, "login", "session_error")
 			return mcp.NewToolResultError("Failed to get or create Kite session"), nil
 		}
 

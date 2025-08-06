@@ -128,10 +128,35 @@ func TestParseDailyMetric(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
-			gotBase, gotDate := m.parseDailyMetric(tt.key)
+			gotBase, _, gotDate := m.parseDailyMetric(tt.key)
 			if gotBase != tt.expectedBase || gotDate != tt.expectedDate {
 				t.Errorf("parseDailyMetric(%q) = (%q, %q), want (%q, %q)",
 					tt.key, gotBase, gotDate, tt.expectedBase, tt.expectedDate)
+			}
+		})
+	}
+
+	// Test session type parsing
+	sessionTypeTests := []struct {
+		key             string
+		expectedBase    string
+		expectedSession string
+		expectedDate    string
+	}{
+		{"tool_calls_quotes_sse_2025-08-05", "tool_calls_quotes", "sse", "2025-08-05"},
+		{"tool_calls_quotes_mcp_2025-08-05", "tool_calls_quotes", "mcp", "2025-08-05"},
+		{"tool_calls_quotes_stdio_2025-08-05", "tool_calls_quotes", "stdio", "2025-08-05"},
+		{"tool_calls_quotes_unknown_2025-08-05", "tool_calls_quotes", "unknown", "2025-08-05"},
+		{"tool_calls_quotes_2025-08-05", "tool_calls_quotes", "", "2025-08-05"}, // No session type
+		{"tool_errors_login_session_error_sse_2025-12-31", "tool_errors_login_session_error", "sse", "2025-12-31"},
+	}
+
+	for _, tt := range sessionTypeTests {
+		t.Run(tt.key+"_session_type", func(t *testing.T) {
+			gotBase, gotSession, gotDate := m.parseDailyMetric(tt.key)
+			if gotBase != tt.expectedBase || gotSession != tt.expectedSession || gotDate != tt.expectedDate {
+				t.Errorf("parseDailyMetric(%q) = (%q, %q, %q), want (%q, %q, %q)",
+					tt.key, gotBase, gotSession, gotDate, tt.expectedBase, tt.expectedSession, tt.expectedDate)
 			}
 		})
 	}

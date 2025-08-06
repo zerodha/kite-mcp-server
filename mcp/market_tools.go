@@ -29,6 +29,7 @@ func (*QuotesTool) Tool() mcp.Tool {
 func (*QuotesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handler.trackToolCall(ctx, "get_quotes")
 		args := request.GetArguments()
 
 		// Validate required parameters
@@ -74,6 +75,7 @@ func (*InstrumentsSearchTool) Tool() mcp.Tool {
 func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handler.trackToolCall(ctx, "search_instruments")
 		args := request.GetArguments()
 
 		// Validate required parameters
@@ -193,6 +195,7 @@ func (*HistoricalDataTool) Tool() mcp.Tool {
 func (*HistoricalDataTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handler.trackToolCall(ctx, "get_historical_data")
 		args := request.GetArguments()
 
 		// Validate required parameters
@@ -256,6 +259,7 @@ func (*LTPTool) Tool() mcp.Tool {
 func (*LTPTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handler.trackToolCall(ctx, "get_ltp")
 		args := request.GetArguments()
 
 		// Validate required parameters
@@ -297,6 +301,7 @@ func (*OHLCTool) Tool() mcp.Tool {
 func (*OHLCTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		handler.trackToolCall(ctx, "get_ohlc")
 		args := request.GetArguments()
 
 		// Validate required parameters

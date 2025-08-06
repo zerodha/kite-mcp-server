@@ -268,10 +268,19 @@ func (app *App) createStreamableHTTPServer(mcpServer *server.MCPServer, kcManage
 	)
 }
 
+// withSessionType adds session type to context based on URL path
+func withSessionType(sessionType string, handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := mcp.WithSessionType(r.Context(), sessionType)
+		r = r.WithContext(ctx)
+		handler(w, r)
+	}
+}
+
 // registerSSEEndpoints registers SSE-specific endpoints on the mux
 func (app *App) registerSSEEndpoints(mux *http.ServeMux, sse *server.SSEServer) {
-	mux.HandleFunc("/sse", sse.ServeHTTP)
-	mux.HandleFunc("/message", sse.ServeHTTP)
+	mux.HandleFunc("/sse", withSessionType(mcp.SessionTypeSSE, sse.ServeHTTP))
+	mux.HandleFunc("/message", withSessionType(mcp.SessionTypeSSE, sse.ServeHTTP))
 }
 
 // configureAndStartServer sets up server handler and starts it
@@ -293,7 +302,7 @@ func (app *App) startHybridServer(srv *http.Server, kcManager *kc.Manager, mcpSe
 
 	// Register endpoints
 	app.registerSSEEndpoints(mux, sse)
-	mux.HandleFunc("/mcp", streamable.ServeHTTP)
+	mux.HandleFunc("/mcp", withSessionType(mcp.SessionTypeMCP, streamable.ServeHTTP))
 
 	app.logger.Info("Hybrid mode enabled with both SSE and MCP endpoints on the same server")
 	app.logger.Info("SSE endpoints available", "url", fmt.Sprintf("http://%s/sse and http://%s/message", url, url))
@@ -338,7 +347,7 @@ func (app *App) startHTTPServer(srv *http.Server, kcManager *kc.Manager, mcpServ
 
 	// Setup mux with common handlers
 	mux := app.setupMux(kcManager)
-	mux.HandleFunc("/mcp", streamable.ServeHTTP)
+	mux.HandleFunc("/mcp", withSessionType(mcp.SessionTypeMCP, streamable.ServeHTTP))
 
 	app.logger.Info("MCP session manager configured with automatic cleanup for both MCP and Kite sessions")
 	app.logger.Info("MCP Session manager configured", "session_expiry", kc.DefaultSessionDuration)
