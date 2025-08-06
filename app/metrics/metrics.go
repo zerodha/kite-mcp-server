@@ -228,11 +228,7 @@ func (m *Manager) isDailyMetric(key string) bool {
 
 	// Check if we have a non-empty base name after removing date
 	baseName := strings.Join(parts[:len(parts)-1], "_")
-	if baseName == "" {
-		return false
-	}
-
-	return true
+	return baseName != ""
 }
 
 // parseDailyMetric extracts base name, session type and date from a daily metric key
@@ -244,7 +240,7 @@ func (m *Manager) parseDailyMetric(key string) (baseName, sessionType, date stri
 
 	parts := strings.Split(key, "_")
 	date = parts[len(parts)-1]
-	
+
 	// Check if the second-to-last part is a session type
 	if len(parts) >= 3 {
 		potentialSessionType := parts[len(parts)-2]
@@ -254,7 +250,7 @@ func (m *Manager) parseDailyMetric(key string) (baseName, sessionType, date stri
 			return baseName, sessionType, date
 		}
 	}
-	
+
 	// No session type found, return base name without session type
 	baseName = strings.Join(parts[:len(parts)-1], "_")
 	return baseName, "", date
