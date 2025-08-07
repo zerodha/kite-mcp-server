@@ -87,6 +87,23 @@ The server will start and serve a status page at `http://localhost:8080/`
 - [Claude Desktop (stdio Mode)](#claude-desktop-stdio-mode)
 - [Other MCP Clients](#other-mcp-clients)
 
+### Cursor integration
+```json
+{
+  "mcpServers": {
+     "kite": {
+      "command": "env",
+      "args": [
+        "NODE_TLS_REJECT_UNAUTHORIZED=0",
+        "npx",
+        "mcp-remote",
+        "https://mcp.kite.trade/sse"
+      ]
+    }
+  }
+}
+```
+
 ### Claude Desktop (Hosted Mode)
 
 For the hosted version, add to your Claude Desktop configuration (`~/.config/Claude/claude_desktop_config.json`):
