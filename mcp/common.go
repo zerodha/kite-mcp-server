@@ -52,8 +52,11 @@ func NewToolHandler(manager *kc.Manager) *ToolHandler {
 func (h *ToolHandler) trackToolCall(ctx context.Context, toolName string) {
 	if h.manager.HasMetrics() {
 		sessionType := SessionTypeFromContext(ctx)
-		metricName := fmt.Sprintf("tool_calls_%s_%s", toolName, sessionType)
-		h.manager.IncrementDailyMetric(metricName)
+		labels := map[string]string{
+			"tool":         toolName,
+			"session_type": sessionType,
+		}
+		h.manager.IncrementDailyMetricWithLabels("tool_calls", labels)
 	}
 }
 
@@ -61,8 +64,12 @@ func (h *ToolHandler) trackToolCall(ctx context.Context, toolName string) {
 func (h *ToolHandler) trackToolError(ctx context.Context, toolName, errorType string) {
 	if h.manager.HasMetrics() {
 		sessionType := SessionTypeFromContext(ctx)
-		metricName := fmt.Sprintf("tool_errors_%s_%s_%s", toolName, errorType, sessionType)
-		h.manager.IncrementDailyMetric(metricName)
+		labels := map[string]string{
+			"tool":         toolName,
+			"error_type":   errorType,
+			"session_type": sessionType,
+		}
+		h.manager.IncrementDailyMetricWithLabels("tool_errors", labels)
 	}
 }
 
