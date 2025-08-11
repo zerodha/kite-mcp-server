@@ -460,6 +460,13 @@ func (m *Manager) IncrementDailyMetric(key string) {
 	}
 }
 
+// IncrementDailyMetricWithLabels increments a daily metric counter with labels by 1
+func (m *Manager) IncrementDailyMetricWithLabels(key string, labels map[string]string) {
+	if m.metrics != nil {
+		m.metrics.IncrementDailyWithLabels(key, labels)
+	}
+}
+
 // Shutdown gracefully shuts down the manager and all its components
 func (m *Manager) Shutdown() {
 	m.Logger.Info("Shutting down Kite manager...")
