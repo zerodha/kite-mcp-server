@@ -142,7 +142,7 @@ func (m *Manager) IncrementBy(key string, n int64) {
 
 	if counter, ok := counterInterface.(prometheus.Counter); ok {
 		// Try to register the counter (ignore already registered errors)
-		m.registry.Register(counter)
+		m.registry.Register(counter) //nolint:all
 		counter.Add(float64(n))
 	}
 }
@@ -171,7 +171,7 @@ func (m *Manager) IncrementDailyBy(key string, n int64) {
 
 	if counter, ok := counterInterface.(prometheus.Counter); ok {
 		// Try to register the counter (ignore already registered errors)
-		m.registry.Register(counter)
+		m.registry.Register(counter) //nolint:all
 		counter.Add(float64(n))
 	}
 }
