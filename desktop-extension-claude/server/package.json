@@ -1,0 +1,11 @@
+{
+  "name": "kite-mcp-server-extension",
+  "version": "1.0.0",
+  "description": "Desktop extension wrapper for Kite Connect MCP server",
+  "main": "index.js",
+  "author": "Zerodha",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
