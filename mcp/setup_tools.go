@@ -14,6 +14,7 @@ type LoginTool struct{}
 func (*LoginTool) Tool() mcp.Tool {
 	return mcp.NewTool("login",
 		mcp.WithDescription("Login to Kite API. This tool helps you log in to the Kite API. If you are starting off a new conversation call this tool before hand. Call this if you get a session error. Returns a link that the user should click to authorize access, present as markdown if your client supports so that they can click it easily when rendered."),
+		mcp.WithOpenWorldHintAnnotation(true),
 	)
 }
 

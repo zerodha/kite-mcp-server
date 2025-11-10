@@ -9,8 +9,6 @@ import (
 	"github.com/zerodha/kite-mcp-server/kc"
 )
 
-// TODO: add destructive, openworld and readonly hints where applicable.
-
 type Tool interface {
 	Tool() gomcp.Tool
 	Handler(*kc.Manager) server.ToolHandlerFunc

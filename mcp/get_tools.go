@@ -13,6 +13,7 @@ type ProfileTool struct{}
 func (*ProfileTool) Tool() mcp.Tool {
 	return mcp.NewTool("get_profile",
 		mcp.WithDescription("Retrieve the user's profile information, including user ID, name, email, and account details like products orders, and exchanges available to the user. Use this to get basic user details."),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 
@@ -27,6 +28,7 @@ type MarginsTool struct{}
 func (*MarginsTool) Tool() mcp.Tool {
 	return mcp.NewTool("get_margins",
 		mcp.WithDescription("Get margins"),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 
@@ -47,6 +49,7 @@ func (*HoldingsTool) Tool() mcp.Tool {
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of holdings to return. If not specified, returns all holdings. When specified, response includes pagination metadata."),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 
@@ -77,6 +80,7 @@ func (*PositionsTool) Tool() mcp.Tool {
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of positions to return. If not specified, returns all positions. When specified, response includes pagination metadata."),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 
@@ -113,6 +117,7 @@ func (*TradesTool) Tool() mcp.Tool {
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of trades to return. If not specified, returns all trades. When specified, response includes pagination metadata."),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 
@@ -143,6 +148,7 @@ func (*OrdersTool) Tool() mcp.Tool {
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of orders to return. If not specified, returns all orders. When specified, response includes pagination metadata."),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 
@@ -173,6 +179,7 @@ func (*GTTOrdersTool) Tool() mcp.Tool {
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of GTT orders to return. If not specified, returns all GTT orders. When specified, response includes pagination metadata."),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 
@@ -201,6 +208,7 @@ func (*OrderTradesTool) Tool() mcp.Tool {
 			mcp.Description("ID of the order to fetch trades for"),
 			mcp.Required(),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 
@@ -237,6 +245,7 @@ func (*OrderHistoryTool) Tool() mcp.Tool {
 			mcp.Description("ID of the order to fetch history for"),
 			mcp.Required(),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 

@@ -77,6 +77,7 @@ func (*PlaceOrderTool) Tool() mcp.Tool {
 			mcp.Description("An optional tag to apply to an order to identify it (alphanumeric, max 20 chars)"),
 			mcp.MaxLength(20),
 		),
+		mcp.WithDestructiveHintAnnotation(true),
 	)
 }
 
@@ -159,6 +160,7 @@ func (*ModifyOrderTool) Tool() mcp.Tool {
 		mcp.WithNumber("disclosed_quantity",
 			mcp.Description("Quantity to disclose publicly (for equity trades)"),
 		),
+		mcp.WithDestructiveHintAnnotation(true),
 	)
 }
 
@@ -212,6 +214,7 @@ func (*CancelOrderTool) Tool() mcp.Tool {
 			mcp.Description("Order ID"),
 			mcp.Required(),
 		),
+		mcp.WithDestructiveHintAnnotation(true),
 	)
 }
 
@@ -304,6 +307,7 @@ func (*PlaceGTTOrderTool) Tool() mcp.Tool {
 		mcp.WithNumber("lower_limit_price",
 			mcp.Description("Limit price for the lower trigger order (for two-leg)"),
 		),
+		mcp.WithDestructiveHintAnnotation(true),
 	)
 }
 
@@ -377,6 +381,7 @@ func (*DeleteGTTOrderTool) Tool() mcp.Tool {
 			mcp.Description("The ID of the GTT order to delete"),
 			mcp.Required(),
 		),
+		mcp.WithDestructiveHintAnnotation(true),
 	)
 }
 
@@ -468,6 +473,7 @@ func (*ModifyGTTOrderTool) Tool() mcp.Tool {
 		mcp.WithNumber("lower_limit_price",
 			mcp.Description("Limit price for the lower trigger order (for two-leg)"),
 		),
+		mcp.WithDestructiveHintAnnotation(true),
 	)
 }
 
