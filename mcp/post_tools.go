@@ -14,6 +14,8 @@ type PlaceOrderTool struct{}
 func (*PlaceOrderTool) Tool() mcp.Tool {
 	return mcp.NewTool("place_order",
 		mcp.WithDescription("Place an order"),
+		mcp.WithTitleAnnotation("Place Order"),
+		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithString("variety",
 			mcp.Description("Order variety"),
 			mcp.Required(),
@@ -126,6 +128,8 @@ type ModifyOrderTool struct{}
 func (*ModifyOrderTool) Tool() mcp.Tool {
 	return mcp.NewTool("modify_order",
 		mcp.WithDescription("Modify an existing order"),
+		mcp.WithTitleAnnotation("Modify Order"),
+		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithString("variety",
 			mcp.Description("Order variety"),
 			mcp.Required(),
@@ -202,6 +206,8 @@ type CancelOrderTool struct{}
 func (*CancelOrderTool) Tool() mcp.Tool {
 	return mcp.NewTool("cancel_order",
 		mcp.WithDescription("Cancel an existing order"),
+		mcp.WithTitleAnnotation("Cancel Order"),
+		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithString("variety",
 			mcp.Description("Order variety"),
 			mcp.Required(),
@@ -246,6 +252,8 @@ type PlaceGTTOrderTool struct{}
 func (*PlaceGTTOrderTool) Tool() mcp.Tool {
 	return mcp.NewTool("place_gtt_order",
 		mcp.WithDescription("Place a GTT (Good Till Triggered) order"),
+		mcp.WithTitleAnnotation("Place GTT Order"),
+		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithString("exchange",
 			mcp.Description("The exchange to which the order should be placed"),
 			mcp.Required(),
@@ -373,6 +381,8 @@ type DeleteGTTOrderTool struct{}
 func (*DeleteGTTOrderTool) Tool() mcp.Tool {
 	return mcp.NewTool("delete_gtt_order",
 		mcp.WithDescription("Delete an existing GTT (Good Till Triggered) order"),
+		mcp.WithTitleAnnotation("Delete GTT Order"),
+		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithNumber("trigger_id",
 			mcp.Description("The ID of the GTT order to delete"),
 			mcp.Required(),
@@ -411,6 +421,8 @@ type ModifyGTTOrderTool struct{}
 func (*ModifyGTTOrderTool) Tool() mcp.Tool {
 	return mcp.NewTool("modify_gtt_order",
 		mcp.WithDescription("Modify an existing GTT (Good Till Triggered) order"),
+		mcp.WithTitleAnnotation("Modify GTT Order"),
+		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithNumber("trigger_id",
 			mcp.Description("The ID of the GTT order to modify"),
 			mcp.Required(),
