@@ -16,13 +16,11 @@ func (*PlaceOrderTool) Tool() mcp.Tool {
 		mcp.WithDescription("Place an order"),
 		mcp.WithString("variety",
 			mcp.Description("Order variety"),
-			mcp.Required(),
 			mcp.DefaultString("regular"),
 			mcp.Enum("regular", "co", "amo", "iceberg", "auction"),
 		),
 		mcp.WithString("exchange",
 			mcp.Description("The exchange to which the order should be placed"),
-			mcp.Required(),
 			mcp.DefaultString("NSE"),
 			mcp.Enum("NSE", "BSE", "MCX", "NFO", "BFO"),
 		),
@@ -37,7 +35,6 @@ func (*PlaceOrderTool) Tool() mcp.Tool {
 		),
 		mcp.WithNumber("quantity",
 			mcp.Description("Quantity"),
-			mcp.Required(),
 			mcp.DefaultString("1"),
 			mcp.Min(1),
 		),
@@ -87,7 +84,7 @@ func (*PlaceOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		args := request.GetArguments()
 
 		// Validate required parameters
-		if err := ValidateRequired(args, "variety", "exchange", "tradingsymbol", "transaction_type", "quantity", "product", "order_type"); err != nil {
+		if err := ValidateRequired(args, "tradingsymbol", "transaction_type", "product", "order_type"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
@@ -128,7 +125,6 @@ func (*ModifyOrderTool) Tool() mcp.Tool {
 		mcp.WithDescription("Modify an existing order"),
 		mcp.WithString("variety",
 			mcp.Description("Order variety"),
-			mcp.Required(),
 			mcp.DefaultString("regular"),
 			mcp.Enum("regular", "co", "amo", "iceberg", "auction"),
 		),
@@ -169,7 +165,7 @@ func (*ModifyOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		args := request.GetArguments()
 
 		// Validate required parameters
-		if err := ValidateRequired(args, "variety", "order_id", "order_type"); err != nil {
+		if err := ValidateRequired(args, "order_id", "order_type"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
@@ -204,7 +200,6 @@ func (*CancelOrderTool) Tool() mcp.Tool {
 		mcp.WithDescription("Cancel an existing order"),
 		mcp.WithString("variety",
 			mcp.Description("Order variety"),
-			mcp.Required(),
 			mcp.DefaultString("regular"),
 			mcp.Enum("regular", "co", "amo", "iceberg", "auction"),
 		),
@@ -222,7 +217,7 @@ func (*CancelOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		args := request.GetArguments()
 
 		// Validate required parameters
-		if err := ValidateRequired(args, "variety", "order_id"); err != nil {
+		if err := ValidateRequired(args, "order_id"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
@@ -248,7 +243,6 @@ func (*PlaceGTTOrderTool) Tool() mcp.Tool {
 		mcp.WithDescription("Place a GTT (Good Till Triggered) order"),
 		mcp.WithString("exchange",
 			mcp.Description("The exchange to which the order should be placed"),
-			mcp.Required(),
 			mcp.DefaultString("NSE"),
 			mcp.Enum("NSE", "BSE", "MCX", "NFO", "BFO"),
 		),
@@ -314,7 +308,7 @@ func (*PlaceGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		args := request.GetArguments()
 
 		// Validate required parameters
-		if err := ValidateRequired(args, "exchange", "tradingsymbol", "last_price", "transaction_type", "product", "trigger_type"); err != nil {
+		if err := ValidateRequired(args, "tradingsymbol", "last_price", "transaction_type", "product", "trigger_type"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
@@ -417,7 +411,6 @@ func (*ModifyGTTOrderTool) Tool() mcp.Tool {
 		),
 		mcp.WithString("exchange",
 			mcp.Description("The exchange to which the order should be placed"),
-			mcp.Required(),
 			mcp.DefaultString("NSE"),
 			mcp.Enum("NSE", "BSE", "MCX", "NFO", "BFO"),
 		),
@@ -478,7 +471,7 @@ func (*ModifyGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		args := request.GetArguments()
 
 		// Validate required parameters
-		if err := ValidateRequired(args, "trigger_id", "exchange", "tradingsymbol", "last_price", "transaction_type", "trigger_type"); err != nil {
+		if err := ValidateRequired(args, "trigger_id", "tradingsymbol", "last_price", "transaction_type", "trigger_type"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
