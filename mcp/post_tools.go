@@ -110,10 +110,33 @@ func (*PlaceOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		}
 
 		return handler.WithSession(ctx, "place_order", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
+			sess := server.ClientSessionFromContext(ctx)
+			sessionID := sess.SessionID()
+
+			var estimated float64
+			if blocked, est, ok := checkAgenticBudget(
+				handler.manager,
+				sessionID,
+				session,
+				orderParams.Exchange,
+				orderParams.Tradingsymbol,
+				orderParams.OrderType,
+				orderParams.Quantity,
+				orderParams.Price,
+			); !ok {
+				return blocked, nil
+			} else {
+				estimated = est
+			}
+
 			resp, err := session.Kite.Client.PlaceOrder(variety, orderParams)
 			if err != nil {
 				handler.manager.Logger.Error("Failed to place order", "error", err)
 				return mcp.NewToolResultError("Failed to place order"), nil
+			}
+
+			if handler.manager.Agentic != nil && estimated > 0 {
+				handler.manager.Agentic.RecordSpend(sessionID, estimated)
 			}
 
 			return handler.MarshalResponse(resp, "place_order")

@@ -22,6 +22,11 @@ func GetAllTools() []Tool {
 		// Tools for setting up the client
 		&LoginTool{},
 
+		// Agentic account (optional budget + disconnect)
+		&SetupAgentAccountTool{},
+		&GetAgentAccountTool{},
+		&DisconnectAgentTool{},
+
 		// Tools that get data from Kite Connect
 		&ProfileTool{},
 		&MarginsTool{},
