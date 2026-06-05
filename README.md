@@ -9,7 +9,7 @@ Want to use AI with your Kite trading account? Just add `https://mcp.kite.trade/
 ## Features
 
 - **Portfolio Management**: View holdings, positions, margins, and mutual fund investments
-- **Order Management**: Place, modify, and cancel orders with full order history
+- **Order Management**: Place, modify, and cancel orders, and inspect current-day order/trade activity
 - **GTT Orders**: Good Till Triggered order management
 - **Market Data Access**: Real-time quotes, historical data, OHLC data
 - **Pagination Support**: Automatic pagination for large datasets (holdings, orders, trades)
@@ -204,10 +204,11 @@ For other MCP-compatible clients, use the hosted endpoint `https://mcp.kite.trad
 - `place_order` - Place new orders
 - `modify_order` - Modify existing orders
 - `cancel_order` - Cancel orders
-- `get_orders` - List all orders
-- `get_trades` - Trading history
-- `get_order_history` - Order execution history
-- `get_order_trades` - Get trades for a specific order
+- `get_orders` - List current trading day's orders
+- `get_trades` - List current trading day's executed trades
+- `get_order_history` - Get status history for a specific current-day order
+- `get_order_trades` - Get trades for a specific current-day order
+- `get_tradebook` - Explain Kite tradebook availability and current-day alternatives
 
 ### GTT Orders
 

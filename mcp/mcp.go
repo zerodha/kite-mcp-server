@@ -31,6 +31,7 @@ func GetAllTools() []Tool {
 		&OrdersTool{},
 		&OrderHistoryTool{},
 		&OrderTradesTool{},
+		&TradebookAvailabilityTool{},
 		&GTTOrdersTool{},
 		&MFHoldingsTool{},
 
