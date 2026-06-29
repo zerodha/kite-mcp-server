@@ -24,6 +24,9 @@ jobs:
     - name: Setup Nix environment
       run: nix develop --command echo "Nix environment ready"
     
+    - name: Generate docs
+      run: nix develop --command just generate
+    
     - name: Run tests
       run: nix develop --command just test
     
