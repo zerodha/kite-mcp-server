@@ -62,7 +62,7 @@ jobs:
           kite-mcp-server-darwin-arm64
           kite-mcp-server-windows-amd64.exe
         generate_release_notes: true
-        draft: ${{ contains(github.ref_name, '-dev') }}
+        draft: false
         prerelease: ${{ contains(github.ref_name, '-dev') }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
