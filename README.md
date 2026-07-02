@@ -311,10 +311,10 @@ By default, the OAuth server only allows loopback redirect URIs for native clien
 For hosted MCP clients like Claude Web and ChatGPT Web, configure exact callback URIs explicitly:
 
 ```env
-ALLOWED_REDIRECT_PATTERNS=localhost,https://claude.ai/api/mcp/auth_callback,https://chatgpt.com/connector_platform_oauth_redirect
+ALLOWED_REDIRECT_PATTERNS=localhost,https://claude.ai/api/mcp/auth_callback,https://claude.com/api/mcp/auth_callback,https://chatgpt.com/connector_platform_oauth_redirect,prefix:https://chatgpt.com/connector/oauth/
 ```
 
-Exact callback URIs are preferred over broad hostname allowlists.
+Exact callback URIs are preferred. Use prefix patterns only for trusted providers with documented dynamic callback paths, such as ChatGPT connector callbacks under `https://chatgpt.com/connector/oauth/`.
 
 ## OAuth 2.1 Authentication
 

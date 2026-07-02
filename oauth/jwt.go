@@ -38,8 +38,10 @@ type Config struct {
 	AuthCodeTTL time.Duration
 	// AllowedRedirectPatterns defines allowed redirect URI patterns for DCR.
 	// Default is "localhost", which matches http://localhost:* and http://127.0.0.1:*
-	// for native/loopback clients. Additional entries must be exact redirect URIs,
-	// e.g. https://claude.ai/api/mcp/auth_callback
+	// for native/loopback clients. Additional entries may be either:
+	// - exact redirect URIs, e.g. https://claude.ai/api/mcp/auth_callback
+	// - prefix:... patterns for known hosted providers with dynamic callback paths,
+	//   e.g. prefix:https://chatgpt.com/connector/oauth/
 	AllowedRedirectPatterns []string
 }
 
@@ -149,7 +151,8 @@ func (rl *RateLimiter) Allow(ip string) bool {
 
 // ValidateRedirectURI checks if a redirect URI matches allowed patterns.
 // Default behavior allows loopback redirects for native clients. Hosted clients
-// like Claude Web and ChatGPT Web must be explicitly allowlisted by exact URI.
+// like Claude Web and ChatGPT Web must be explicitly allowlisted by exact URI
+// or an approved prefix: pattern.
 func (s *Server) ValidateRedirectURI(redirectURI string) error {
 	parsed, err := url.Parse(redirectURI)
 	if err != nil {
@@ -173,6 +176,13 @@ func (s *Server) ValidateRedirectURI(redirectURI string) error {
 				return nil
 			}
 		default:
+			if strings.HasPrefix(pattern, "prefix:") {
+				prefix := strings.TrimPrefix(pattern, "prefix:")
+				if prefix != "" && strings.HasPrefix(redirectURI, prefix) {
+					return nil
+				}
+				continue
+			}
 			if redirectURI == pattern {
 				return nil
 			}
