@@ -36,6 +36,8 @@ The JSON structure varies by client, but the `command` and `args` values remain 
 
 - [[Claude Desktop]] (stdio + mcp-remote)
 - [[Claude Code]] (native HTTP)
+- [[Claude Web]] (hosted remote MCP)
+- [[ChatGPT Web]] (hosted remote MCP)
 - [[Cursor]] (stdio + mcp-remote)
 - [[VS Code]] (native HTTP via Copilot)
 - [[Windsurf]] (streamable-http or mcp-remote)

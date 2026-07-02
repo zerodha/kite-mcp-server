@@ -308,13 +308,15 @@ The hosted version at `mcp.kite.trade` excludes potentially destructive trading 
 
 By default, the OAuth server only allows loopback redirect URIs for native clients via the special `localhost` allowlist token.
 
-For hosted MCP clients like Claude Web and ChatGPT Web, configure exact callback URIs explicitly:
+For hosted MCP clients like Claude Web and ChatGPT Web, configure the callback allowlist explicitly:
 
 ```env
 ALLOWED_REDIRECT_PATTERNS=localhost,https://claude.ai/api/mcp/auth_callback,https://claude.com/api/mcp/auth_callback,https://chatgpt.com/connector_platform_oauth_redirect,prefix:https://chatgpt.com/connector/oauth/
 ```
 
 Exact callback URIs are preferred. Use prefix patterns only for trusted providers with documented dynamic callback paths, such as ChatGPT connector callbacks under `https://chatgpt.com/connector/oauth/`.
+
+Hosted remote MCP clients generally handle OAuth and dynamic client registration automatically. The user usually only needs to enter the MCP server URL and complete the Kite login flow in the browser.
 
 ## OAuth 2.1 Authentication
 

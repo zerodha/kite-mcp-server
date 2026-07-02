@@ -8,12 +8,21 @@ description: Set up Kite MCP with your AI assistant
 ## Prerequisites
 
 - A Zerodha account with Kite
-- [Node.js](https://nodejs.org/) (required for some clients)
 - An MCP-compatible AI client
+
+Optional, depending on client:
+
+- [Node.js](https://nodejs.org/) if your client needs `mcp-remote`
+- A desktop MCP client such as Claude Desktop, Claude Code, VS Code, or Cursor if you are not using a hosted web client
 
 ## Supported clients
 
-Detailed setup instructions are available for each client:
+If you want the easiest setup, start with hosted remote clients:
+
+- [[ChatGPT Web]]
+- [[Claude Web]]
+
+Detailed setup instructions are also available for:
 
 - [[Claude Desktop]]
 - [[Claude Code]]
@@ -32,10 +41,25 @@ All clients connect to the same endpoint:
 https://mcp.kite.trade/mcp
 ```
 
+### Fastest setup path
+
+For most users, [[ChatGPT Web]] and [[Claude Web]] are the fastest setup path because they use a hosted remote MCP flow and handle OAuth in the UI.
+
 Clients with native HTTP transport support (VS Code, Claude Code, Windsurf) can connect directly. Clients that use stdio transport (Claude Desktop, Cursor) require [mcp-remote](https://www.npmjs.com/package/mcp-remote) as a bridge.
 
 ## Authentication
 
-On first use, the AI assistant will provide a login link. Open it in your browser to authenticate with your Zerodha credentials on Kite's login page. The AI client receives a temporary session token after authorization. Sessions last approximately 12 hours.
+Most MCP clients handle OAuth automatically. On first use, the AI client will either open a browser window or show a login link. Sign in with your Zerodha credentials on Kite's login page and approve the connection. The client receives a temporary session token after authorization. Sessions last approximately 12 hours.
 
 Your Zerodha credentials are never sent to the AI client or the MCP server. Authentication happens directly with Kite.
+
+### Hosted remote MCP clients
+
+Hosted clients such as [[ChatGPT Web]] and [[Claude Web]] usually use OAuth dynamic client registration automatically. In practice, this means:
+
+- you provide the MCP server URL
+- the client registers its own redirect URI with the server
+- the server redirects you to Kite for login
+- the client completes the OAuth flow after the browser callback
+
+No manual client ID or JSON configuration is normally required on the user side.
