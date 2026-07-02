@@ -291,7 +291,7 @@ func (h *Handlers) HandleRegister(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("rejected DCR redirect_uri", "redirect_uri", uri, "error", err)
 			WriteJSON(w, http.StatusBadRequest, map[string]string{
 				"error":             "invalid_redirect_uri",
-				"error_description": "Only localhost redirect URIs are allowed for MCP clients.",
+				"error_description": "The redirect URI is not allowed for this MCP server.",
 			})
 			return
 		}

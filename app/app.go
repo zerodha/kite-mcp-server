@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -34,14 +35,15 @@ type App struct {
 
 // Config holds the application configuration
 type Config struct {
-	KiteAPIKey      string
-	KiteAPISecret   string
-	AppPort         string
-	AppHost         string
-	ExcludedTools   string
-	AdminSecretPath string
-	JWTSecret       string
-	OAuthIssuer     string
+	KiteAPIKey              string
+	KiteAPISecret           string
+	AppPort                 string
+	AppHost                 string
+	ExcludedTools           string
+	AdminSecretPath         string
+	JWTSecret               string
+	OAuthIssuer             string
+	AllowedRedirectPatterns []string
 }
 
 const (
@@ -52,19 +54,36 @@ const (
 func NewApp(logger *slog.Logger) *App {
 	return &App{
 		Config: &Config{
-			KiteAPIKey:      os.Getenv("KITE_API_KEY"),
-			KiteAPISecret:   os.Getenv("KITE_API_SECRET"),
-			AppPort:         os.Getenv("APP_PORT"),
-			AppHost:         os.Getenv("APP_HOST"),
-			ExcludedTools:   os.Getenv("EXCLUDED_TOOLS"),
-			AdminSecretPath: os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
-			JWTSecret:       os.Getenv("JWT_SECRET"),
-			OAuthIssuer:     os.Getenv("OAUTH_ISSUER"),
+			KiteAPIKey:              os.Getenv("KITE_API_KEY"),
+			KiteAPISecret:           os.Getenv("KITE_API_SECRET"),
+			AppPort:                 os.Getenv("APP_PORT"),
+			AppHost:                 os.Getenv("APP_HOST"),
+			ExcludedTools:           os.Getenv("EXCLUDED_TOOLS"),
+			AdminSecretPath:         os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
+			JWTSecret:               os.Getenv("JWT_SECRET"),
+			OAuthIssuer:             os.Getenv("OAUTH_ISSUER"),
+			AllowedRedirectPatterns: parseCSVEnv(os.Getenv("ALLOWED_REDIRECT_PATTERNS")),
 		},
 		Version:   "v0.0.0",
 		startTime: time.Now(),
 		logger:    logger,
 	}
+}
+
+func parseCSVEnv(value string) []string {
+	if value == "" {
+		return nil
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
+	}
+	return result
 }
 
 func (app *App) SetVersion(version string) {
@@ -142,9 +161,10 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 
 	// --- JWT OAuth Server ---
 	app.oauthServer = oauth.New(oauth.Config{
-		Issuer:    app.Config.OAuthIssuer,
-		JWTSecret: []byte(app.Config.JWTSecret),
-		TokenTTL:  6 * time.Hour,
+		Issuer:                  app.Config.OAuthIssuer,
+		JWTSecret:               []byte(app.Config.JWTSecret),
+		TokenTTL:                6 * time.Hour,
+		AllowedRedirectPatterns: app.Config.AllowedRedirectPatterns,
 	})
 	app.jwtOauthHandlers = oauth.NewHandlers(app.oauthServer, app.kcManager, app.logger)
 

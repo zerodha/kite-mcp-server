@@ -286,8 +286,9 @@ The justfile automatically includes `GOEXPERIMENT=synctest` in all test commands
 | `OAUTH_ISSUER`       | _(auto)_    | OAuth issuer URL (defaults to http://host:port)            |
 | `APP_MODE`           | `http`      | Server mode: `stdio`, `http`, `sse`, or `hybrid`           |
 | `APP_PORT`           | `8080`      | Server port (HTTP/SSE/hybrid modes)                        |
-| `APP_HOST`           | `localhost` | Server host (HTTP/SSE/hybrid modes)                        |
-| `EXCLUDED_TOOLS`     | _(empty)_   | Comma-separated list of tools to exclude from registration |
+| `APP_HOST`                  | `localhost` | Server host (HTTP/SSE/hybrid modes)                        |
+| `ALLOWED_REDIRECT_PATTERNS` | `localhost` | Comma-separated redirect URI allowlist patterns            |
+| `EXCLUDED_TOOLS`            | _(empty)_   | Comma-separated list of tools to exclude from registration |
 
 **Note:** In production, we use hybrid mode which supports both `/sse` and `/mcp` endpoints, making both HTTP and SSE protocols available for different client needs.
 
@@ -302,6 +303,18 @@ EXCLUDED_TOOLS=place_order,modify_order,cancel_order
 ```
 
 The hosted version at `mcp.kite.trade` excludes potentially destructive trading operations for security. For accessing the other operations you can generate your own API keys and run the server locally.
+
+### Redirect URI Allowlist
+
+By default, the OAuth server only allows loopback redirect URIs for native clients via the special `localhost` allowlist token.
+
+For hosted MCP clients like Claude Web and ChatGPT Web, configure exact callback URIs explicitly:
+
+```env
+ALLOWED_REDIRECT_PATTERNS=localhost,https://claude.ai/api/mcp/auth_callback,https://chatgpt.com/connector_platform_oauth_redirect
+```
+
+Exact callback URIs are preferred over broad hostname allowlists.
 
 ## OAuth 2.1 Authentication
 

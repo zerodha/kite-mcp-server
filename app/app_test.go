@@ -137,6 +137,38 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_AllowedRedirectPatterns(t *testing.T) {
+	_ = os.Setenv("KITE_API_KEY", "test_key")
+	_ = os.Setenv("KITE_API_SECRET", "test_secret")
+	_ = os.Setenv("JWT_SECRET", "test-jwt-secret-32-bytes-minimum")
+	_ = os.Setenv("ALLOWED_REDIRECT_PATTERNS", "localhost, https://claude.ai/api/mcp/auth_callback, https://chatgpt.com/connector_platform_oauth_redirect ")
+	defer func() {
+		_ = os.Unsetenv("KITE_API_KEY")
+		_ = os.Unsetenv("KITE_API_SECRET")
+		_ = os.Unsetenv("JWT_SECRET")
+		_ = os.Unsetenv("ALLOWED_REDIRECT_PATTERNS")
+	}()
+
+	app := NewApp(testLogger())
+	if err := app.LoadConfig(); err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	expected := []string{
+		"localhost",
+		"https://claude.ai/api/mcp/auth_callback",
+		"https://chatgpt.com/connector_platform_oauth_redirect",
+	}
+	if len(app.Config.AllowedRedirectPatterns) != len(expected) {
+		t.Fatalf("Expected %d patterns, got %d", len(expected), len(app.Config.AllowedRedirectPatterns))
+	}
+	for i := range expected {
+		if app.Config.AllowedRedirectPatterns[i] != expected[i] {
+			t.Fatalf("Expected pattern %q at index %d, got %q", expected[i], i, app.Config.AllowedRedirectPatterns[i])
+		}
+	}
+}
+
 func TestNewApp(t *testing.T) {
 	app := NewApp(testLogger())
 

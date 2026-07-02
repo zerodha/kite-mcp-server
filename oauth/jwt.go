@@ -37,8 +37,9 @@ type Config struct {
 	// AuthCodeTTL is how long authorization codes are valid
 	AuthCodeTTL time.Duration
 	// AllowedRedirectPatterns defines allowed redirect URI patterns for DCR.
-	// Only localhost URIs are allowed by default (standard for MCP clients).
-	// Patterns: "localhost" matches http://localhost:* and http://127.0.0.1:*
+	// Default is "localhost", which matches http://localhost:* and http://127.0.0.1:*
+	// for native/loopback clients. Additional entries must be exact redirect URIs,
+	// e.g. https://claude.ai/api/mcp/auth_callback
 	AllowedRedirectPatterns []string
 }
 
@@ -147,14 +148,23 @@ func (rl *RateLimiter) Allow(ip string) bool {
 // --- Redirect URI Validation ---
 
 // ValidateRedirectURI checks if a redirect URI matches allowed patterns.
-// For MCP clients, only localhost URIs are allowed (http://localhost:PORT or http://127.0.0.1:PORT).
+// Default behavior allows loopback redirects for native clients. Hosted clients
+// like Claude Web and ChatGPT Web must be explicitly allowlisted by exact URI.
 func (s *Server) ValidateRedirectURI(redirectURI string) error {
 	parsed, err := url.Parse(redirectURI)
 	if err != nil {
 		return fmt.Errorf("invalid redirect_uri: %w", err)
 	}
+	if parsed.Scheme == "" || parsed.Hostname() == "" {
+		return fmt.Errorf("invalid redirect_uri: missing scheme or hostname")
+	}
 
 	for _, pattern := range s.config.AllowedRedirectPatterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+
 		switch pattern {
 		case "localhost":
 			host := parsed.Hostname()
@@ -163,14 +173,13 @@ func (s *Server) ValidateRedirectURI(redirectURI string) error {
 				return nil
 			}
 		default:
-			// Exact domain match
-			if parsed.Hostname() == pattern {
+			if redirectURI == pattern {
 				return nil
 			}
 		}
 	}
 
-	return fmt.Errorf("redirect_uri not allowed: only localhost URIs are permitted for MCP clients")
+	return fmt.Errorf("redirect_uri not allowed: must match configured allowlist")
 }
 
 // --- Auto Registration ---
