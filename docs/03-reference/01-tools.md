@@ -164,8 +164,11 @@ Retrieve market data and search instruments.
 | `exch_token` | number | - | Exchange token. For get_by_exch_token |
 | `from` | number | 0 | Pagination start index |
 | `limit` | number | - | Maximum items to return |
+| `include_live_quote` | boolean | `false` | Enrich returned search results with live quote data such as latest `last_price`, `lower_circuit_limit`, and `upper_circuit_limit` |
 
 ---
+
+Search responses include a `meta` block. By default, `instrument_data_source` is `bod_instruments`, which means fields such as circuit limits come from the beginning-of-day instrument master. When `include_live_quote=true`, the response also sets `live_quote_enriched=true` and merges selected live quote fields into the returned page of results.
 
 ## alerts
 

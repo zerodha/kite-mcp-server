@@ -159,6 +159,7 @@ func newTestHarness(t *testing.T) *testHarness {
 		KiteBaseURI: kiteServer.URL,
 	})
 	require.NoError(t, err)
+	require.NoError(t, instManager.UpdateInstruments())
 
 	// 4. Pre-seed a session with valid credentials.
 	sess, _, err := kcManager.SessionManager().GetOrCreate("test-session")
@@ -458,6 +459,49 @@ func TestMarket_OHLC(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assertNotError(t, result)
+}
+
+func TestMarket_SearchIncludesSourceMetadata(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	result, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "market",
+		Arguments: map[string]any{
+			"mode":        "search",
+			"search_mode": "get_by_id",
+			"id":          "NSE:INFY",
+			"verbosity":   "full",
+		},
+	})
+	require.NoError(t, err)
+	assertNotError(t, result)
+
+	response := parseJSONResponse(t, result)
+	meta := response["meta"].(map[string]interface{})
+	assert.Equal(t, "bod_instruments", meta["instrument_data_source"])
+	assert.Equal(t, false, meta["live_quote_enriched"])
+}
+
+func TestMarket_SearchLiveQuoteEnrichment(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	result, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "market",
+		Arguments: map[string]any{
+			"mode":               "search",
+			"search_mode":        "get_by_id",
+			"id":                 "NSE:INFY",
+			"verbosity":          "full",
+			"include_live_quote": true,
+		},
+	})
+	require.NoError(t, err)
+	assertNotError(t, result)
+	assertTextContentContains(t, result, `"live_quote_enriched":true`)
+	assertTextContentContains(t, result, `"upper_circuit_limit":1528.6`)
+	assertTextContentContains(t, result, `"lower_circuit_limit":1250.7`)
 }
 
 func TestAlerts_Get(t *testing.T) {

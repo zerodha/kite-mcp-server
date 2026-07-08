@@ -106,6 +106,11 @@ var marketSchema = json.RawMessage(`{
 		"limit": {
 			"type": "number",
 			"description": "Maximum number of items to return. When specified, response includes pagination metadata"
+		},
+		"include_live_quote": {
+			"type": "boolean",
+			"description": "For mode=search, optionally enrich returned results with live quote fields like last_price and circuit limits using the quote endpoint",
+			"default": false
 		}
 	},
 	"required": ["mode"]
@@ -113,7 +118,7 @@ var marketSchema = json.RawMessage(`{
 
 func (*MarketTool) Definition() *mcp.Tool {
 	return NewTool("market",
-		"Retrieve market data and search instruments. Use mode=quote for full market snapshots (OHLC, volume, bid/ask depth, OI) for up to 500 instruments, mode=ltp for last traded price only (lighter), mode=ohlc for today's OHLC, mode=historical for historical candle data, mode=search to find instruments by name, symbol, ISIN, or token across all exchanges.",
+		"Retrieve market data and search instruments. Use mode=quote for full market snapshots (OHLC, volume, bid/ask depth, OI) for up to 500 instruments, mode=ltp for last traded price only (lighter), mode=ohlc for today's OHLC, mode=historical for historical candle data, mode=search to find instruments by name, symbol, ISIN, or token across all exchanges. Search results come from the BOD instrument master by default; set include_live_quote=true to enrich returned results with live quote fields.",
 		marketSchema,
 	)
 }
@@ -320,29 +325,66 @@ func handleMarketSearch(handler *BaseToolHandler, manager *kc.Manager, args map[
 	params := ParsePaginationParams(args)
 	originalLength := len(out)
 	paginatedData := ApplyPagination(out, params)
+	includeLiveQuote := SafeAssertBool(args["include_live_quote"], false)
 
-	var finalData []interface{}
-	if verbosity == "compact" {
-		compacts := make([]instruments.Compact, len(paginatedData))
-		for i, instrument := range paginatedData {
-			compacts[i] = instrument.ToCompact()
+	var liveQuotes kiteconnect.Quote
+	if includeLiveQuote && len(paginatedData) > 0 {
+		client, authErr := manager.GetAuthenticatedClient(GetSessionID(request))
+		if authErr != nil {
+			return NewToolResultError(authErr.Error()), nil
 		}
-		finalData = make([]interface{}, len(compacts))
-		for i, compact := range compacts {
-			finalData[i] = compact
+
+		instrumentIDs := make([]string, 0, len(paginatedData))
+		for _, instrument := range paginatedData {
+			instrumentIDs = append(instrumentIDs, instrument.ID)
 		}
-	} else {
-		finalData = make([]interface{}, len(paginatedData))
-		for i, instrument := range paginatedData {
-			finalData[i] = instrument
+
+		liveQuotes, err = client.GetQuote(instrumentIDs...)
+		if err != nil {
+			return NewToolResultError("Failed to get live quotes for search enrichment"), nil
 		}
+	}
+
+	finalData := make([]interface{}, len(paginatedData))
+	for i, instrument := range paginatedData {
+		if verbosity == "compact" {
+			item := marketSearchCompactResult(instrument)
+			if includeLiveQuote {
+				quote := liveQuotes[instrument.ID]
+				enrichMarketSearchResult(item, quote.LastPrice, quote.LowerCircuitLimit, quote.UpperCircuitLimit, quote.OHLC, quote.Timestamp)
+			}
+			finalData[i] = item
+		} else {
+			item := marketSearchFullResult(instrument)
+			if includeLiveQuote {
+				quote := liveQuotes[instrument.ID]
+				enrichMarketSearchResult(item, quote.LastPrice, quote.LowerCircuitLimit, quote.UpperCircuitLimit, quote.OHLC, quote.Timestamp)
+			}
+			finalData[i] = item
+		}
+	}
+
+	meta := map[string]interface{}{
+		"instrument_data_source": "bod_instruments",
+		"live_quote_enriched":    includeLiveQuote,
+	}
+	if includeLiveQuote {
+		meta["live_quote_fields"] = []string{"last_price", "lower_circuit_limit", "upper_circuit_limit", "ohlc", "timestamp"}
 	}
 
 	var responseData interface{}
 	if params.Limit > 0 {
-		responseData = CreatePaginatedResponse(out, finalData, params, originalLength)
+		paginatedResponse := CreatePaginatedResponse(out, finalData, params, originalLength)
+		responseData = map[string]interface{}{
+			"data":       paginatedResponse.Data,
+			"pagination": paginatedResponse.Pagination,
+			"meta":       meta,
+		}
 	} else {
-		responseData = finalData
+		responseData = map[string]interface{}{
+			"data": finalData,
+			"meta": meta,
+		}
 	}
 
 	if manager.Metrics() != nil {
@@ -354,4 +396,61 @@ func handleMarketSearch(handler *BaseToolHandler, manager *kc.Manager, args map[
 	}
 
 	return handler.MarshalResponse(responseData, "market_search")
+}
+
+func marketSearchCompactResult(instrument instruments.Instrument) map[string]interface{} {
+	compact := instrument.ToCompact()
+	return map[string]interface{}{
+		"id":               compact.ID,
+		"instrument_token": compact.InstrumentToken,
+		"tradingsymbol":    compact.Tradingsymbol,
+		"exchange":         compact.Exchange,
+		"name":             compact.Name,
+		"instrument_type":  compact.InstrumentType,
+		"segment":          compact.Segment,
+		"lot_size":         compact.LotSize,
+		"active":           compact.Active,
+	}
+}
+
+func marketSearchFullResult(instrument instruments.Instrument) map[string]interface{} {
+	return map[string]interface{}{
+		"id":                  instrument.ID,
+		"instrument_token":    instrument.InstrumentToken,
+		"exchange_token":      instrument.ExchangeToken,
+		"tradingsymbol":       instrument.Tradingsymbol,
+		"exchange":            instrument.Exchange,
+		"isin":                instrument.ISIN,
+		"name":                instrument.Name,
+		"series":              instrument.Series,
+		"last_price":          instrument.LastPrice,
+		"strike":              instrument.Strike,
+		"tick_size":           instrument.TickSize,
+		"lot_size":            instrument.LotSize,
+		"multiplier":          instrument.Multiplier,
+		"instrument_type":     instrument.InstrumentType,
+		"segment":             instrument.Segment,
+		"delivery_units":      instrument.DeliveryUnits,
+		"price_units":         instrument.PriceUnits,
+		"freeze_quantity":     instrument.FreezeQuantity,
+		"max_order_quantity":  instrument.MaxOrderQuantity,
+		"expiry_type":         instrument.ExpiryType,
+		"expiry_date":         instrument.ExpiryDate,
+		"exercise_start_date": instrument.ExerciseStartDate,
+		"exercise_end_date":   instrument.ExerciseEndDate,
+		"issue_date":          instrument.IssueDate,
+		"listing_date":        instrument.ListingDate,
+		"maturity_date":       instrument.MaturityDate,
+		"lower_circuit_limit": instrument.LowerCircuitLimit,
+		"upper_circuit_limit": instrument.UpperCircuitLimit,
+		"active":              instrument.Active,
+	}
+}
+
+func enrichMarketSearchResult(item map[string]interface{}, lastPrice, lowerCircuitLimit, upperCircuitLimit float64, ohlc interface{}, timestamp interface{}) {
+	item["last_price"] = lastPrice
+	item["lower_circuit_limit"] = lowerCircuitLimit
+	item["upper_circuit_limit"] = upperCircuitLimit
+	item["ohlc"] = ohlc
+	item["quote_timestamp"] = timestamp
 }
