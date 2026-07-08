@@ -41,6 +41,19 @@ All clients connect to the same endpoint:
 https://mcp.kite.trade/mcp
 ```
 
+If your client supports project-local MCP config, this is a standard setup:
+
+```json
+{
+  "mcpServers": {
+    "kite-mcp": {
+      "type": "http",
+      "url": "https://mcp.kite.trade/mcp"
+    }
+  }
+}
+```
+
 ### Fastest setup path
 
 For most users, [[ChatGPT Web]] and [[Claude Web]] are the fastest setup path because they use a hosted remote MCP flow and handle OAuth in the UI.
@@ -49,7 +62,7 @@ Clients with native HTTP transport support (VS Code, Claude Code, Windsurf) can 
 
 ## Authentication
 
-Most MCP clients handle OAuth automatically. On first use, the AI client will either open a browser window or show a login link. Sign in with your Zerodha credentials on Kite's login page and approve the connection. The client receives a temporary session token after authorization. Sessions last approximately 12 hours.
+Most MCP clients handle OAuth automatically. On first use, the AI client will either open a browser window or show a login link. You will first see a short authorize interstitial with an AI-risk disclaimer, then continue to Kite's login page. After you approve the connection, the client receives a temporary session token. Sessions last approximately 12 hours.
 
 Your Zerodha credentials are never sent to the AI client or the MCP server. Authentication happens directly with Kite.
 

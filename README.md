@@ -21,15 +21,28 @@ Want to use AI with your Kite trading account? Just add `https://mcp.kite.trade/
 
 ### Hosted Version (Recommended)
 
-The easiest way to get started is with our hosted version at `mcp.kite.trade`. Both `/mcp` and `/sse` endpoints are available - no installation or API keys required on your end.
+The easiest way to get started is with our hosted version at `mcp.kite.trade`. The primary hosted endpoint is `https://mcp.kite.trade/mcp` - no installation or API keys required on your end.
 
-**Quick Setup:** Add the following to your MCP configuration:
+**Quick setup:** point your MCP client at:
 
-```
+```text
 https://mcp.kite.trade/mcp
 ```
 
-**Recommended:** Use the new HTTP mode (`/mcp` endpoint) for better performance and reliability. You can use [mcp-remote](https://github.com/modelcontextprotocol/mcp-remote) to connect to the hosted server.
+If your client supports project-local HTTP MCP config, you can also add a `.mcp.json` file like this:
+
+```json
+{
+  "mcpServers": {
+    "kite-mcp": {
+      "type": "http",
+      "url": "https://mcp.kite.trade/mcp"
+    }
+  }
+}
+```
+
+Clients without native HTTP transport support can use [mcp-remote](https://github.com/modelcontextprotocol/mcp-remote) as a bridge.
 
 For self-hosting with your own API keys, follow the installation steps below.
 
@@ -81,8 +94,8 @@ The server will start and serve a status page at `http://localhost:8080/`
 
 ### Setup Guide
 
-- [Claude Desktop (Hosted Mode)](#claude-desktop-http-mode) - Recommended
-- [Claude Desktop (HTTP Mode)](#claude-desktop-http-mode) - Recommended
+- [Claude Desktop (Hosted Mode)](#claude-desktop-hosted-mode)
+- [Claude Desktop (HTTP Mode)](#claude-desktop-http-mode)
 - [Claude Desktop (SSE Mode)](#claude-desktop-sse-mode)
 - [Claude Desktop (stdio Mode)](#claude-desktop-stdio-mode)
 - [Other MCP Clients](#other-mcp-clients)
@@ -177,44 +190,32 @@ Then add to your Claude Desktop configuration (`~/.config/Claude/claude_desktop_
 
 For other MCP-compatible clients, use the hosted endpoint `https://mcp.kite.trade/mcp` with [mcp-remote](https://github.com/modelcontextprotocol/mcp-remote) or configure your client to connect directly to the HTTP endpoint.
 
+If your client supports project-local MCP config, the following works well:
+
+```json
+{
+  "mcpServers": {
+    "kite-mcp": {
+      "type": "http",
+      "url": "https://mcp.kite.trade/mcp"
+    }
+  }
+}
+```
+
 ## Available Tools
 
-### Setup & Authentication
+Kite MCP currently exposes 7 grouped tools:
 
-- `login` - Login to Kite API and generate authorization link
+- `portfolio` - Profile, margins, holdings, and positions
+- `orders` - Order listing, history, trades, place, modify, cancel
+- `gtt` - GTT listing, create, modify, delete
+- `market` - Quote, LTP, OHLC, historical data, instrument search
+- `alerts` - Alert listing, create, modify, delete
+- `mutual_funds` - Mutual fund holdings
+- `session` - Session status and logout
 
-### Market Data
-
-- `get_quotes` - Get real-time market quotes
-- `get_ltp` - Get last traded price
-- `get_ohlc` - Get OHLC data
-- `get_historical_data` - Historical price data
-- `search_instruments` - Search trading instruments
-
-### Portfolio & Account
-
-- `get_profile` - User profile information
-- `get_margins` - Account margins
-- `get_holdings` - Portfolio holdings
-- `get_positions` - Current positions
-- `get_mf_holdings` - Mutual fund holdings
-
-### Orders & Trading
-
-- `place_order` - Place new orders
-- `modify_order` - Modify existing orders
-- `cancel_order` - Cancel orders
-- `get_orders` - List all orders
-- `get_trades` - Trading history
-- `get_order_history` - Order execution history
-- `get_order_trades` - Get trades for a specific order
-
-### GTT Orders
-
-- `get_gtts` - List GTT orders
-- `place_gtt_order` - Create GTT orders
-- `modify_gtt_order` - Modify GTT orders
-- `delete_gtt_order` - Delete GTT orders
+See `docs/03-reference/01-tools.md` for the full mode and parameter reference.
 
 ## API Coverage
 
@@ -299,7 +300,7 @@ You can exclude specific tools by setting the `EXCLUDED_TOOLS` environment varia
 **Example:**
 
 ```env
-EXCLUDED_TOOLS=place_order,modify_order,cancel_order
+EXCLUDED_TOOLS=orders,gtt,alerts
 ```
 
 The hosted version at `mcp.kite.trade` excludes potentially destructive trading operations for security. For accessing the other operations you can generate your own API keys and run the server locally.
@@ -316,7 +317,7 @@ ALLOWED_REDIRECT_PATTERNS=localhost,https://claude.ai/api/mcp/auth_callback,http
 
 Exact callback URIs are preferred. Use prefix patterns only for trusted providers with documented dynamic callback paths, such as ChatGPT connector callbacks under `https://chatgpt.com/connector/oauth/`.
 
-Hosted remote MCP clients generally handle OAuth and dynamic client registration automatically. The user usually only needs to enter the MCP server URL and complete the Kite login flow in the browser.
+Hosted remote MCP clients generally handle OAuth and dynamic client registration automatically. The user usually only needs to enter the MCP server URL, review the authorize disclaimer interstitial, and complete the Kite login flow in the browser.
 
 ## OAuth 2.1 Authentication
 

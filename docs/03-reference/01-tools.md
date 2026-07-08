@@ -5,7 +5,7 @@ description: Complete reference for all MCP tools and their parameters
 
 # Tools
 
-Kite MCP exposes 6 tools. Each tool handles a group of related operations via a `mode` parameter. The AI assistant selects the appropriate tool and mode based on the user's request.
+Kite MCP exposes 7 tools. Each tool handles a group of related operations via a `mode` parameter. The AI assistant selects the appropriate tool and mode based on the user's request.
 
 ## portfolio
 
@@ -215,3 +215,20 @@ Retrieve mutual fund data from Coin.
 | Parameter | Type | Modes | Description |
 |-----------|------|-------|-------------|
 | `mode` | string | all | **Required.** Operation mode |
+
+---
+
+## session
+
+Inspect or invalidate the current authenticated session.
+
+| Mode | Description |
+|------|-------------|
+| `status` | Show the current session state, including whether it is authenticated |
+| `logout` | Invalidate the current session so future tool calls require re-authentication |
+
+**Parameters:**
+
+| Parameter | Type | Modes | Description |
+|-----------|------|-------|-------------|
+| `mode` | string | all | **Required.** Operation mode: `status` or `logout` |
