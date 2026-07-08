@@ -8,7 +8,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
-	github.com/zerodha/gokiteconnect/v4 v4.4.1
+	github.com/zerodha/gokiteconnect/v4 v4.4.2
 	golang.org/x/time v0.15.0
 )
 
