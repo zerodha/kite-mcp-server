@@ -50,7 +50,6 @@ func mockKiteServer(t *testing.T) *httptest.Server {
 		"POST /gtt/triggers":              "gtt_place_order.json",
 		"DELETE /gtt/triggers/123":        "gtt_delete_order.json",
 		"GET /alerts":                     "alerts_get.json",
-		"POST /alerts":                    "alerts_create.json",
 	}
 
 	// Quote/LTP/OHLC endpoints need query string handling.
@@ -62,6 +61,25 @@ func mockKiteServer(t *testing.T) *httptest.Server {
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := r.Method + " " + r.URL.Path
+
+		if key == "POST /alerts" {
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
+			if r.FormValue("type") == "ato" {
+				serveMockFile(t, w, "alerts_create_ato.json")
+			} else {
+				serveMockFile(t, w, "alerts_create.json")
+			}
+			return
+		}
+
+		if key == "DELETE /alerts" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":null}`))
+			return
+		}
 
 		// Try exact match first.
 		if file, ok := routes[key]; ok {
@@ -455,6 +473,73 @@ func TestAlerts_Get(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assertNotError(t, result)
+}
+
+func TestAlerts_CreateATO(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	basket := `{"name":"buy gold","type":"basket","tags":[],"items":[{"type":"instrument","tradingsymbol":"GOLDBEES","exchange":"NSE","weight":10000,"instrument_token":3693569,"params":{"transaction_type":"BUY","product":"CNC","order_type":"LIMIT","validity":"DAY","validity_ttl":0,"quantity":10000,"price":72.22,"trigger_price":0,"disclosed_quantity":0,"last_price":72.22,"variety":"regular","tags":[]}}]}`
+
+	result, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "alerts",
+		Arguments: map[string]any{
+			"mode":              "create",
+			"uuids":             []any{},
+			"name":              "buy gold",
+			"alert_type":        "ato",
+			"lhs_exchange":      "NSE",
+			"lhs_tradingsymbol": "GOLDBEES",
+			"lhs_attribute":     "LastTradedPrice",
+			"operator":          "<=",
+			"rhs_type":          "constant",
+			"rhs_constant":      float64(71.8),
+			"basket":            basket,
+		},
+	})
+	require.NoError(t, err)
+	assertNotError(t, result)
+	assertTextContentContains(t, result, `"type":"ato"`)
+}
+
+func TestAlerts_CreateATORequiresBasket(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	result, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "alerts",
+		Arguments: map[string]any{
+			"mode":              "create",
+			"uuids":             []any{},
+			"name":              "buy gold",
+			"alert_type":        "ato",
+			"lhs_exchange":      "NSE",
+			"lhs_tradingsymbol": "GOLDBEES",
+			"lhs_attribute":     "LastTradedPrice",
+			"operator":          "<=",
+			"rhs_type":          "constant",
+			"rhs_constant":      float64(71.8),
+		},
+	})
+	require.NoError(t, err)
+	assertIsError(t, result)
+	assertTextContentContains(t, result, "basket is required when alert_type=ato")
+}
+
+func TestAlerts_Delete(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	result, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "alerts",
+		Arguments: map[string]any{
+			"mode":  "delete",
+			"uuids": []any{"6cff3180-38cb-463f-8925-6a4d77da5144"},
+		},
+	})
+	require.NoError(t, err)
+	assertNotError(t, result)
+	assertTextContentContains(t, result, `"deleted_count":1`)
 }
 
 func TestMutualFunds_Holdings(t *testing.T) {

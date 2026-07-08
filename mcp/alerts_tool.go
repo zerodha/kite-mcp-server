@@ -89,7 +89,7 @@ var alertsSchema = json.RawMessage(`{
 		},
 		"basket": {
 			"type": "string",
-			"description": "JSON string containing basket configuration for ATO alerts (optional, only for alert_type=ato)"
+			"description": "JSON string containing basket configuration. Required when alert_type=ato"
 		}
 	},
 	"required": ["mode", "uuids"]
@@ -314,12 +314,17 @@ func validateAlertParams(args map[string]interface{}, isCreate bool) error {
 	// Validate basket for ATO alerts
 	alertType := SafeAssertString(args["alert_type"], "")
 	if alertType == "ato" {
-		if basketStr, ok := args["basket"]; ok && SafeAssertString(basketStr, "") != "" {
-			// Validate that basket is valid JSON
-			var basket kiteconnect.Basket
-			if err := json.Unmarshal([]byte(SafeAssertString(basketStr, "")), &basket); err != nil {
-				return ValidationError{Parameter: "basket", Message: "must be valid JSON"}
-			}
+		basketStr := SafeAssertString(args["basket"], "")
+		if basketStr == "" {
+			return ValidationError{Parameter: "basket", Message: "is required when alert_type=ato"}
+		}
+
+		var basket kiteconnect.Basket
+		if err := json.Unmarshal([]byte(basketStr), &basket); err != nil {
+			return ValidationError{Parameter: "basket", Message: "must be valid JSON"}
+		}
+		if len(basket.Items) == 0 {
+			return ValidationError{Parameter: "basket", Message: "must contain at least one basket item when alert_type=ato"}
 		}
 	}
 
@@ -327,6 +332,7 @@ func validateAlertParams(args map[string]interface{}, isCreate bool) error {
 }
 
 func buildAlertParams(args map[string]interface{}) (kiteconnect.AlertParams, error) {
+	// Validation should have already guaranteed basket presence for ATO alerts.
 	params := kiteconnect.AlertParams{
 		Name:             SafeAssertString(args["name"], ""),
 		Type:             kiteconnect.AlertType(SafeAssertString(args["alert_type"], "")),

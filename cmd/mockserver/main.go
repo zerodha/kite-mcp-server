@@ -184,24 +184,23 @@ func main() {
 // on a random port. Returns the base URL.
 func startMockKiteServer(logger *slog.Logger, mockDir string) string {
 	routes := map[string]string{
-		"GET /user/profile":              "profile.json",
-		"GET /user/margins":              "margins.json",
-		"GET /user/margins/equity":       "margins_equity.json",
+		"GET /user/profile":               "profile.json",
+		"GET /user/margins":               "margins.json",
+		"GET /user/margins/equity":        "margins_equity.json",
 		"GET /portfolio/holdings":         "holdings.json",
 		"GET /portfolio/holdings/summary": "holdings_summary.json",
 		"GET /portfolio/holdings/compact": "holdings_compact.json",
 		"GET /portfolio/positions":        "positions.json",
 		"GET /orders":                     "orders.json",
 		"GET /trades":                     "trades.json",
-		"GET /gtt/triggers":              "gtt_get_orders.json",
-		"GET /mf/holdings":               "mf_holdings.json",
+		"GET /gtt/triggers":               "gtt_get_orders.json",
+		"GET /mf/holdings":                "mf_holdings.json",
 		"POST /orders/regular":            "order_response.json",
 		"PUT /orders/regular/test":        "order_modify.json",
 		"DELETE /orders/regular/test":     "order_cancel.json",
-		"POST /gtt/triggers":             "gtt_place_order.json",
+		"POST /gtt/triggers":              "gtt_place_order.json",
 		"DELETE /gtt/triggers/123":        "gtt_delete_order.json",
 		"GET /alerts":                     "alerts_get.json",
-		"POST /alerts":                    "alerts_create.json",
 	}
 
 	quoteRoutes := map[string]string{
@@ -211,9 +210,9 @@ func startMockKiteServer(logger *slog.Logger, mockDir string) string {
 	}
 
 	prefixRoutes := map[string]string{
-		"GET /orders/":                "order_info.json",
-		"GET /gtt/triggers/":          "gtt_get_order.json",
-		"PUT /gtt/triggers/":          "gtt_modify_order.json",
+		"GET /orders/":                 "order_info.json",
+		"GET /gtt/triggers/":           "gtt_get_order.json",
+		"PUT /gtt/triggers/":           "gtt_modify_order.json",
 		"DELETE /gtt/triggers/":        "gtt_delete_order.json",
 		"GET /instruments/historical/": "historical_minute.json",
 	}
@@ -221,6 +220,25 @@ func startMockKiteServer(logger *slog.Logger, mockDir string) string {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		key := r.Method + " " + r.URL.Path
+
+		if key == "POST /alerts" {
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
+			if r.FormValue("type") == "ato" {
+				serveMock(w, mockDir, "alerts_create_ato.json")
+			} else {
+				serveMock(w, mockDir, "alerts_create.json")
+			}
+			return
+		}
+
+		if key == "DELETE /alerts" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":null}`))
+			return
+		}
 
 		if file, ok := routes[key]; ok {
 			serveMock(w, mockDir, file)
