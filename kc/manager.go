@@ -70,7 +70,8 @@ type KiteCredentials struct {
 }
 
 const (
-	indexTemplate = "login_success.html"
+	indexTemplate     = "login_success.html"
+	authorizeTemplate = "authorize_interstitial.html"
 )
 
 // Manager orchestrates Kite Connect interactions and session management.
@@ -216,9 +217,25 @@ func (m *Manager) RenderSuccessTemplate(w http.ResponseWriter) error {
 	return templ.ExecuteTemplate(w, "base", struct{ Title string }{"Login Successful"})
 }
 
+// RenderAuthorizeInterstitial renders the explicit user-consent interstitial before redirecting to Kite.
+func (m *Manager) RenderAuthorizeInterstitial(w http.ResponseWriter, kiteLoginURL string) error {
+	templ, ok := m.templates[authorizeTemplate]
+	if !ok {
+		return errors.New("template not found")
+	}
+	data := struct {
+		Title        string
+		KiteLoginURL string
+	}{
+		Title:        "Continue to Kite Login",
+		KiteLoginURL: kiteLoginURL,
+	}
+	return templ.ExecuteTemplate(w, "base", data)
+}
+
 func setupTemplates() (map[string]*template.Template, error) {
 	out := make(map[string]*template.Template)
-	templateList := []string{indexTemplate}
+	templateList := []string{indexTemplate, authorizeTemplate}
 	for _, templateName := range templateList {
 		templ, err := template.ParseFS(templates.FS, "base.html", templateName)
 		if err != nil {

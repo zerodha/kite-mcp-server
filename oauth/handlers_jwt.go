@@ -66,7 +66,7 @@ func (h *Handlers) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// Generate a temporary session to track this OAuth flow
 	tempSessionID := h.kcManager.SessionManager().GenerateWithData(pending)
 
-	// Redirect to KiteConnect OAuth
+	// Generate the downstream Kite login URL and render an explicit interstitial.
 	kiteLoginURL, err := h.kcManager.GenerateLoginURL(tempSessionID)
 	if err != nil {
 		h.logger.Error("failed to generate Kite login URL", "error", err)
@@ -74,8 +74,12 @@ func (h *Handlers) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info("redirecting to Kite OAuth", "client_id", req.ClientID)
-	http.Redirect(w, r, kiteLoginURL, http.StatusFound)
+	h.logger.Info("rendering authorize interstitial", "client_id", req.ClientID)
+	if err := h.kcManager.RenderAuthorizeInterstitial(w, kiteLoginURL); err != nil {
+		h.logger.Error("failed to render authorize interstitial", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // callbackRateLimiter limits /callback requests (30 per IP per minute)

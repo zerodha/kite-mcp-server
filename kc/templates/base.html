@@ -7,16 +7,18 @@
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <style>
             :root {
-                --primary: #ff5722;
-                --success: #4caf50;
-                --bg: #f8f9fa;
+                --primary: #387ed1;
+                --primary-dark: #2f6db6;
+                --accent: #ff6b35;
+                --success: #00b386;
+                --bg: #fafbfc;
                 --card-bg: #ffffff;
-                --heading: #212121;
-                --text: #666666;
-                --text-muted: #999999;
-                --border: #e0e0e0;
-                --radius: 8px;
-                --shadow: 0 2px 8px rgba(0,0,0,0.1);
+                --heading: #1f2937;
+                --text: #4b5563;
+                --text-muted: #94a3b8;
+                --border: #e5eaf0;
+                --radius: 12px;
+                --shadow: 0 16px 40px rgba(31, 41, 55, 0.08);
             }
 
             *,
@@ -32,10 +34,13 @@
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
-                background: var(--bg);
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                background:
+                    radial-gradient(circle at top, rgba(56, 126, 209, 0.08), transparent 36%),
+                    var(--bg);
+                font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                 color: var(--text);
                 line-height: 1.6;
+                padding: 24px;
             }
 
             .card {
@@ -43,16 +48,16 @@
                 border: 1px solid var(--border);
                 border-radius: var(--radius);
                 box-shadow: var(--shadow);
-                padding: 2rem 1.5rem;
+                padding: 2rem;
                 width: 100%;
-                max-width: 400px;
+                max-width: 440px;
                 text-align: center;
             }
 
             .icon {
-                width: 48px;
-                height: 48px;
-                margin: 0 auto 1rem;
+                width: 56px;
+                height: 56px;
+                margin: 0 auto 0.5rem;
             }
 
             .icon svg {
@@ -62,34 +67,106 @@
             }
 
             h1 {
-                margin: 0 0 1rem;
-                font-size: 1.5rem;
+                margin: 0 0 0.25rem;
+                font-size: 1.75rem;
                 font-weight: 600;
                 color: var(--heading);
                 line-height: 1.2;
+                letter-spacing: -0.02em;
             }
 
             .status {
-                display: flex;
+                display: inline-flex;
                 align-items: center;
                 justify-content: center;
                 gap: 8px;
-                font-size: 1rem;
-                font-weight: 500;
-                color: var(--success);
-                margin-bottom: 1.5rem;
+                align-self: center;
+                font-size: 0.9rem;
+                font-weight: 600;
+                color: var(--primary);
+                background: rgba(56, 126, 209, 0.08);
+                border: 1px solid rgba(56, 126, 209, 0.14);
+                border-radius: 999px;
+                padding: 0.4rem 0.75rem;
+                margin: 0 auto 0.5rem;
             }
 
             .status::before {
-                content: "●";
-                font-size: 1.2em;
+                content: "";
+                width: 8px;
+                height: 8px;
+                border-radius: 999px;
+                background: var(--accent);
+                display: inline-block;
             }
 
             p {
                 margin: 0;
-                font-size: 0.875rem;
-                line-height: 1.5;
+                font-size: 0.95rem;
+                line-height: 1.65;
                 color: var(--text);
+            }
+
+            .stack {
+                display: flex;
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .eyebrow {
+                font-size: 0.78rem;
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                color: var(--primary);
+            }
+
+            .actions {
+                display: flex;
+                justify-content: center;
+                margin-top: 1.5rem;
+            }
+
+            .button {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 46px;
+                padding: 0.8rem 1.15rem;
+                border-radius: 10px;
+                border: 1px solid var(--primary);
+                background: var(--primary);
+                color: #fff;
+                font-size: 0.95rem;
+                font-weight: 600;
+                text-decoration: none;
+                box-shadow: 0 10px 22px rgba(56, 126, 209, 0.18);
+                transition: background 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+            }
+
+            .button:hover {
+                background: var(--primary-dark);
+                transform: translateY(-1px);
+                box-shadow: 0 14px 26px rgba(56, 126, 209, 0.22);
+            }
+
+            .notice {
+                text-align: left;
+                background: linear-gradient(180deg, #fff8f4 0%, #fff5ee 100%);
+                border: 1px solid #ffd8c8;
+                border-radius: 10px;
+                padding: 0.95rem 1rem;
+                font-size: 0.9rem;
+                color: #7c4a2d;
+            }
+
+            .notice strong {
+                display: block;
+                margin-bottom: 0.35rem;
+                color: var(--heading);
+                font-size: 0.82rem;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
             }
 
             .info {
@@ -115,6 +192,20 @@
                 width: 100%;
                 font-size: 0.75rem;
                 color: var(--text-muted);
+            }
+
+            @media (max-width: 480px) {
+                body {
+                    padding: 16px;
+                }
+
+                .card {
+                    padding: 1.5rem 1.25rem;
+                }
+
+                h1 {
+                    font-size: 1.5rem;
+                }
             }
         </style>
     </head>

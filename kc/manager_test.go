@@ -3,6 +3,7 @@ package kc
 import (
 	"io"
 	"log/slog"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -133,6 +134,30 @@ func TestGetAuthenticatedClient(t *testing.T) {
 
 	// We can't easily test successful authentication without Kite API credentials
 	// The main functionality is verified in integration tests
+}
+
+func TestRenderAuthorizeInterstitial(t *testing.T) {
+	manager, err := newTestManager("test_key", "test_secret")
+	if err != nil {
+		t.Fatalf("Expected no error creating manager, got: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	err = manager.RenderAuthorizeInterstitial(recorder, "https://kite.example/login")
+	if err != nil {
+		t.Fatalf("Expected no error rendering interstitial, got: %v", err)
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, "Continue to Kite") {
+		t.Error("Expected interstitial body to contain heading")
+	}
+	if !strings.Contains(body, "AI systems are unpredictable and non-deterministic") {
+		t.Error("Expected interstitial body to contain disclaimer")
+	}
+	if !strings.Contains(body, "https://kite.example/login") {
+		t.Error("Expected interstitial body to contain login URL")
+	}
 }
 
 func TestGenerateLoginURL(t *testing.T) {
