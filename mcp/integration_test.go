@@ -263,17 +263,17 @@ func TestToolListing(t *testing.T) {
 	result, err := h.session.ListTools(ctx, nil)
 	require.NoError(t, err)
 
-	// Verify all 6 tools are present.
+	// Verify all 7 tools are present.
 	toolNames := make(map[string]bool)
 	for _, tool := range result.Tools {
 		toolNames[tool.Name] = true
 	}
 
-	expected := []string{"portfolio", "orders", "gtt", "market", "alerts", "mutual_funds"}
+	expected := []string{"portfolio", "orders", "gtt", "market", "alerts", "mutual_funds", "session"}
 	for _, name := range expected {
 		assert.True(t, toolNames[name], "Missing tool: %s", name)
 	}
-	assert.Equal(t, 6, len(result.Tools), "Expected exactly 6 tools")
+	assert.Equal(t, 7, len(result.Tools), "Expected exactly 7 tools")
 }
 
 func TestPortfolio_Profile(t *testing.T) {
@@ -540,6 +540,52 @@ func TestAlerts_Delete(t *testing.T) {
 	require.NoError(t, err)
 	assertNotError(t, result)
 	assertTextContentContains(t, result, `"deleted_count":1`)
+}
+
+func TestSession_Status(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	result, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "session",
+		Arguments: map[string]any{"mode": "status"},
+	})
+	require.NoError(t, err)
+	assertNotError(t, result)
+
+	response := parseJSONResponse(t, result)
+	assert.Equal(t, "authenticated", response["status"])
+	assert.Equal(t, true, response["authenticated"])
+	assert.Equal(t, "test-session", response["session_id"])
+}
+
+func TestSession_Logout(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	logoutResult, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "session",
+		Arguments: map[string]any{"mode": "logout"},
+	})
+	require.NoError(t, err)
+	assertNotError(t, logoutResult)
+	assertTextContentContains(t, logoutResult, `"status":"logged_out"`)
+
+	statusResult, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "session",
+		Arguments: map[string]any{"mode": "status"},
+	})
+	require.NoError(t, err)
+	assertNotError(t, statusResult)
+	assertTextContentContains(t, statusResult, `"status":"logged_out"`)
+
+	portfolioResult, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "portfolio",
+		Arguments: map[string]any{"mode": "profile"},
+	})
+	require.NoError(t, err)
+	assertIsError(t, portfolioResult)
+	assertTextContentContains(t, portfolioResult, "failed to get or create session")
 }
 
 func TestMutualFunds_Holdings(t *testing.T) {

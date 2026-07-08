@@ -19,19 +19,28 @@ func NewToolHandler(manager *kc.Manager) *BaseToolHandler {
 	return &BaseToolHandler{manager: manager}
 }
 
+// GetSessionID extracts the current session ID from the request.
+// It prefers the OAuth middleware header and falls back to the MCP session ID.
+func GetSessionID(request *mcp.CallToolRequest) string {
+	if request == nil {
+		return ""
+	}
+	if request.Extra != nil && request.Extra.Header != nil {
+		if sessionID := request.Extra.Header.Get("X-Kite-Session-Id"); sessionID != "" {
+			return sessionID
+		}
+	}
+	if request.Session != nil {
+		return request.Session.ID()
+	}
+	return ""
+}
+
 // WithKiteClient gets an authenticated Kite client and executes the provided function.
 // It handles authentication errors and provides clear instructions to the user.
 // The session ID is extracted from the X-Kite-Session-Id header set by OAuth middleware.
 func (h *BaseToolHandler) WithKiteClient(request *mcp.CallToolRequest, toolName string, fn func(client *kiteconnect.Client) (*mcp.CallToolResult, error)) (*mcp.CallToolResult, error) {
-	// Get session ID from custom header set by OAuth middleware
-	var sessionID string
-	if request.Extra != nil && request.Extra.Header != nil {
-		sessionID = request.Extra.Header.Get("X-Kite-Session-Id")
-	}
-	if sessionID == "" {
-		// Fallback to MCP session ID (for stdio mode without OAuth)
-		sessionID = request.Session.ID()
-	}
+	sessionID := GetSessionID(request)
 
 	h.manager.Logger.Debug("Tool request with session", "tool", toolName, "session_id", sessionID)
 

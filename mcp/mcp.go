@@ -42,6 +42,7 @@ func GetAllTools() []Tool {
 		&MarketTool{},
 		&AlertsTool{},
 		&MutualFundsTool{},
+		&SessionTool{},
 	}
 }
 
