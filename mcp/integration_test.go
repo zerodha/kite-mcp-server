@@ -567,7 +567,7 @@ func TestAlerts_CreateATORequiresBasket(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assertIsError(t, result)
-	assertTextContentContains(t, result, "basket is required when alert_type=ato")
+	assertTextContentContains(t, result, "parameter 'basket': is required when alert_type=ato")
 }
 
 func TestAlerts_Delete(t *testing.T) {
@@ -629,7 +629,7 @@ func TestSession_Logout(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assertIsError(t, portfolioResult)
-	assertTextContentContains(t, portfolioResult, "failed to get or create session")
+	assertTextContentContains(t, portfolioResult, "not logged into Kite. Please authenticate via the OAuth flow")
 }
 
 func TestMutualFunds_Holdings(t *testing.T) {
