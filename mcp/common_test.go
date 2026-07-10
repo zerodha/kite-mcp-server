@@ -217,7 +217,7 @@ func TestToolExclusion(t *testing.T) {
 		}
 
 		// Verify essential tools exist
-		essential := []string{"login", "get_profile", "place_order", "get_quotes"}
+		essential := []string{"login", "get_profile", "place_order", "get_quotes", "setup_agent_account", "get_agent_account", "disconnect_agent"}
 		for _, toolName := range essential {
 			assert.True(t, toolNames[toolName], "Essential tool missing: %s", toolName)
 		}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/mark3labs/mcp-go/util"
+	"github.com/zerodha/kite-mcp-server/agentic"
 	"github.com/zerodha/kite-mcp-server/app/metrics"
 	"github.com/zerodha/kite-mcp-server/kc"
 	"github.com/zerodha/kite-mcp-server/kc/templates"
@@ -47,8 +48,9 @@ type Config struct {
 	AppHost       string
 	PublicBaseURL string
 
-	ExcludedTools   string
-	AdminSecretPath string
+	ExcludedTools    string
+	AdminSecretPath  string
+	AgenticEnabled   bool
 }
 
 // Server mode constants
@@ -77,6 +79,7 @@ func NewApp(logger *slog.Logger) *App {
 
 			ExcludedTools:   os.Getenv("EXCLUDED_TOOLS"),
 			AdminSecretPath: os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
+			AgenticEnabled:  os.Getenv("AGENTIC_ENABLED") == "true",
 		},
 		Version:   "v0.0.0", // Ideally injected at build time
 		startTime: time.Now(),
@@ -180,6 +183,11 @@ func (app *App) initializeServices() (*kc.Manager, *server.MCPServer, error) {
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create Kite Connect manager: %w", err)
+	}
+
+	if app.Config.AgenticEnabled {
+		kcManager.Agentic = agentic.NewStore()
+		app.logger.Info("Agentic account mode enabled")
 	}
 
 	// Store reference for template data

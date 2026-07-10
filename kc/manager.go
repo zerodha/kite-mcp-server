@@ -12,6 +12,7 @@ import (
 	"time"
 
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
+	"github.com/zerodha/kite-mcp-server/agentic"
 	"github.com/zerodha/kite-mcp-server/app/metrics"
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
 	"github.com/zerodha/kite-mcp-server/kc/templates"
@@ -126,6 +127,7 @@ type Manager struct {
 	Instruments    *instruments.Manager
 	sessionManager *SessionRegistry
 	sessionSigner  *SessionSigner
+	Agentic        *agentic.Store
 }
 
 // NewManager creates a new manager with default configuration
@@ -179,6 +181,9 @@ func (m *Manager) initializeSessionManager() {
 
 // kiteSessionCleanupHook handles cleanup of Kite sessions
 func (m *Manager) kiteSessionCleanupHook(session *MCPSession) {
+	if m.Agentic != nil {
+		m.Agentic.Remove(session.ID)
+	}
 	if kiteData, ok := session.Data.(*KiteSessionData); ok && kiteData != nil && kiteData.Kite != nil {
 		m.Logger.Info("Cleaning up Kite session for MCP session ID", "session_id", session.ID)
 		_, _ = kiteData.Kite.Client.InvalidateAccessToken()

@@ -6,6 +6,8 @@ A Model Context Protocol (MCP) server that provides AI assistants with secure ac
 
 Want to use AI with your Kite trading account? Just add `https://mcp.kite.trade/mcp` to your AI client configuration. No installation or API keys required - it's hosted and ready to use.
 
+**Agentic account MVP** (Robinhood-style agent with a trading budget): see [docs/AGENTIC_MVP.md](docs/AGENTIC_MVP.md). Run self-hosted with `AGENTIC_ENABLED=true` and `place_order` enabled.
+
 ## Features
 
 - **Portfolio Management**: View holdings, positions, margins, and mutual fund investments
