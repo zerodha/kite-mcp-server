@@ -20,8 +20,8 @@ var (
 )
 
 const (
-	// Default expiry for signed session parameters (30 minutes)
-	DefaultSignatureExpiry = 30 * time.Minute
+	// Default expiry for signed session parameters (5 minutes)
+	DefaultSignatureExpiry = 5 * time.Minute
 
 	// Maximum allowed clock skew for signature validation
 	MaxClockSkew = 5 * time.Minute
@@ -111,7 +111,7 @@ func (s *SessionSigner) VerifySessionID(signedParam string) (string, error) {
 	signatureTime := time.Unix(timestamp, 0)
 	now := time.Now()
 
-	if now.Sub(signatureTime) > s.signatureExpiry+MaxClockSkew {
+	if now.Sub(signatureTime) > s.signatureExpiry {
 		return "", ErrExpiredSignature
 	}
 
