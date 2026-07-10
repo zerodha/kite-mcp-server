@@ -56,6 +56,7 @@ KITE_API_SECRET=your_api_secret
 APP_MODE=http
 APP_PORT=8080
 APP_HOST=localhost
+PUBLIC_BASE_URL=http://localhost:8080
 ```
 
 You can also use the provided `justfile` to initialize the config.
@@ -284,7 +285,8 @@ The justfile automatically includes `GOEXPERIMENT=synctest` in all test commands
 | `KITE_API_SECRET`    | Required    | Your Kite Connect API secret                               |
 | `APP_MODE`           | `http`      | Server mode: `stdio`, `http`, `sse`, or `hybrid`           |
 | `APP_PORT`           | `8080`      | Server port (HTTP/SSE/hybrid modes)                        |
-| `APP_HOST`           | `localhost` | Server host (HTTP/SSE/hybrid modes)                        |
+| `APP_HOST`           | `localhost` | Server host / bind address (HTTP/SSE/hybrid modes)         |
+| `PUBLIC_BASE_URL`    | derived     | Public base URL used for browser-facing auth links         |
 | `EXCLUDED_TOOLS`     | _(empty)_   | Comma-separated list of tools to exclude from registration |
 
 **Note:** In production, we use hybrid mode which supports both `/sse` and `/mcp` endpoints, making both HTTP and SSE protocols available for different client needs.

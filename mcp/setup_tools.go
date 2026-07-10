@@ -69,14 +69,14 @@ func (*LoginTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			}
 		}
 
-		// Proceed with Kite login URL generation using the MCP session
-		url, err := manager.SessionLoginURL(mcpSessionID)
+		// Proceed with browser authorize URL generation using the MCP session
+		url, err := manager.SessionAuthorizeURL(mcpSessionID)
 		if err != nil {
-			manager.Logger.Error("Error generating Kite login URL", "session_id", mcpSessionID, "error", err)
-			return mcp.NewToolResultError("Failed to generate Kite login URL"), nil
+			manager.Logger.Error("Error generating authorize URL", "session_id", mcpSessionID, "error", err)
+			return mcp.NewToolResultError("Failed to generate authorize URL"), nil
 		}
 
-		manager.Logger.Info("Successfully generated Kite login URL", "session_id", mcpSessionID)
+		manager.Logger.Info("Successfully generated authorize URL", "session_id", mcpSessionID)
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				mcp.TextContent{

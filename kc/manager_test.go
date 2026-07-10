@@ -3,6 +3,10 @@ package kc
 import (
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
@@ -254,6 +258,105 @@ func TestSessionLoginURL(t *testing.T) {
 
 	if !managerContains(loginURL, "session_id%3D"+sessionID) {
 		t.Errorf("Expected login URL to contain URL-encoded session ID. URL: %s, SessionID: %s", loginURL, sessionID)
+	}
+}
+
+func TestSessionAuthorizeURL(t *testing.T) {
+	manager, err := New(Config{
+		APIKey:             "test_key",
+		APISecret:          "test_secret",
+		InstrumentsManager: newTestInstrumentsManager(),
+		Logger:             testLogger(),
+		PublicBaseURL:      "https://mcp.kite.trade/",
+	})
+	if err != nil {
+		t.Fatalf("Expected no error creating manager, got: %v", err)
+	}
+
+	_, err = manager.SessionAuthorizeURL("")
+	if err != ErrInvalidSessionID {
+		t.Errorf("Expected ErrInvalidSessionID for empty session ID, got: %v", err)
+	}
+
+	_, err = manager.SessionAuthorizeURL("non-existent-session")
+	if err != ErrSessionNotFound {
+		t.Errorf("Expected ErrSessionNotFound for non-existent session, got: %v", err)
+	}
+
+	sessionID := manager.GenerateSession()
+	authorizeURL, err := manager.SessionAuthorizeURL(sessionID)
+	if err != nil {
+		t.Fatalf("Expected no error for valid session, got: %v", err)
+	}
+	if !strings.HasPrefix(authorizeURL, "https://mcp.kite.trade/authorize?session_id=") {
+		t.Fatalf("Unexpected authorize URL: %s", authorizeURL)
+	}
+
+	parsed, err := url.Parse(authorizeURL)
+	if err != nil {
+		t.Fatalf("Failed to parse authorize URL: %v", err)
+	}
+	signedSessionID := parsed.Query().Get("session_id")
+	if signedSessionID == "" {
+		t.Fatal("Expected authorize URL to include signed session_id")
+	}
+	verifiedSessionID, err := manager.sessionSigner.VerifySessionID(signedSessionID)
+	if err != nil {
+		t.Fatalf("Expected signed session_id to verify, got: %v", err)
+	}
+	if verifiedSessionID != sessionID {
+		t.Errorf("Expected verified session ID %s, got %s", sessionID, verifiedSessionID)
+	}
+
+	managerNoBaseURL, err := newTestManager("test_key", "test_secret")
+	if err != nil {
+		t.Fatalf("Expected no error creating manager without public base URL, got: %v", err)
+	}
+	validSessionID := managerNoBaseURL.GenerateSession()
+	_, err = managerNoBaseURL.SessionAuthorizeURL(validSessionID)
+	if err == nil || err.Error() != "public base URL not configured" {
+		t.Errorf("Expected public base URL configuration error, got: %v", err)
+	}
+}
+
+func TestHandleAuthorizeInterstitial(t *testing.T) {
+	manager, err := New(Config{
+		APIKey:             "test_key",
+		APISecret:          "test_secret",
+		InstrumentsManager: newTestInstrumentsManager(),
+		Logger:             testLogger(),
+		PublicBaseURL:      "https://mcp.kite.trade",
+	})
+	if err != nil {
+		t.Fatalf("Expected no error creating manager, got: %v", err)
+	}
+
+	sessionID := manager.GenerateSession()
+	signedSessionID := manager.sessionSigner.SignSessionID(sessionID)
+	req := httptest.NewRequest(http.MethodGet, "/authorize?session_id="+url.QueryEscape(signedSessionID), nil)
+	recorder := httptest.NewRecorder()
+
+	manager.HandleAuthorizeInterstitial()(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("Expected 200 response, got %d", recorder.Code)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, "Continue to Kite") {
+		t.Error("Expected authorize interstitial body to contain heading")
+	}
+	if !strings.Contains(body, "authorize this MCP connection") {
+		t.Error("Expected authorize interstitial body to describe MCP authorization")
+	}
+	if !strings.Contains(body, "kite.zerodha.com/connect/login") {
+		t.Error("Expected authorize interstitial body to contain Kite login URL")
+	}
+
+	badReq := httptest.NewRequest(http.MethodGet, "/authorize?session_id=invalid", nil)
+	badRecorder := httptest.NewRecorder()
+	manager.HandleAuthorizeInterstitial()(badRecorder, badReq)
+	if badRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("Expected 400 for invalid authorize session, got %d", badRecorder.Code)
 	}
 }
 

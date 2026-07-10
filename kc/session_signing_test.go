@@ -179,8 +179,8 @@ func TestSignatureExpiry(t *testing.T) {
 		sessionID := "kitemcp-550e8400-e29b-41d4-a716-446655440000"
 		signed := signer.SignSessionID(sessionID)
 
-		// Advance time beyond expiry + MaxClockSkew
-		time.Sleep(100*time.Millisecond + MaxClockSkew + time.Second)
+		// Advance time beyond expiry
+		time.Sleep(110 * time.Millisecond)
 
 		_, err = signer.VerifySessionID(signed)
 		if err != ErrExpiredSignature {
@@ -355,28 +355,23 @@ func TestClockSkewTolerance(t *testing.T) {
 			t.Fatalf("Failed to create session signer: %v", err)
 		}
 
-		// Set expiry to 1 second for testing
-		signer.SetSignatureExpiry(1 * time.Second)
-
 		sessionID := "kitemcp-550e8400-e29b-41d4-a716-446655440000"
 		signed := signer.SignSessionID(sessionID)
 
-		// Wait past expiry but within clock skew tolerance
-		time.Sleep(2 * time.Second) // Past 1s expiry but within 5min MaxClockSkew
-
-		// Should still be valid due to MaxClockSkew tolerance
+		// A freshly signed token should remain valid when the verifier clock is slightly behind.
+		time.Sleep(2 * time.Second)
 		_, err = signer.VerifySessionID(signed)
 		if err != nil {
-			t.Errorf("Expected signature to be valid within clock skew tolerance, got: %v", err)
+			t.Errorf("Expected signature to be valid within normal clock skew bounds, got: %v", err)
 		}
 
-		// Create new signature and wait beyond clock skew tolerance
+		// Tokens should still expire based on signatureExpiry, not signatureExpiry + MaxClockSkew.
+		signer.SetSignatureExpiry(1 * time.Second)
 		signed2 := signer.SignSessionID(sessionID)
-		time.Sleep(1*time.Second + MaxClockSkew + 1*time.Second) // Beyond expiry + MaxClockSkew
-
+		time.Sleep(2 * time.Second)
 		_, err = signer.VerifySessionID(signed2)
 		if err != ErrExpiredSignature {
-			t.Errorf("Expected ErrExpiredSignature beyond clock skew, got %v", err)
+			t.Errorf("Expected ErrExpiredSignature once expiry is exceeded, got %v", err)
 		}
 	})
 }

@@ -154,3 +154,46 @@ func TestSetVersion(t *testing.T) {
 		t.Errorf("Expected version '%s', got '%s'", testVersion, app.Version)
 	}
 }
+
+func TestBuildPublicBaseURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		config Config
+		want   string
+	}{
+		{
+			name:   "uses explicit public base url and trims trailing slash",
+			config: Config{PublicBaseURL: "https://mcp.kite.trade/", AppHost: "0.0.0.0", AppPort: "8080"},
+			want:   "https://mcp.kite.trade",
+		},
+		{
+			name:   "localhost derives http url",
+			config: Config{AppHost: "localhost", AppPort: "8080"},
+			want:   "http://localhost:8080",
+		},
+		{
+			name:   "bind all interfaces falls back to localhost",
+			config: Config{AppHost: "0.0.0.0", AppPort: "8080"},
+			want:   "http://localhost:8080",
+		},
+		{
+			name:   "non local host derives https url",
+			config: Config{AppHost: "mcp.kite.trade", AppPort: "8080"},
+			want:   "https://mcp.kite.trade:8080",
+		},
+		{
+			name:   "default https port is omitted",
+			config: Config{AppHost: "mcp.kite.trade", AppPort: "443"},
+			want:   "https://mcp.kite.trade",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := &App{Config: &tt.config}
+			if got := app.buildPublicBaseURL(); got != tt.want {
+				t.Errorf("Expected public base URL %q, got %q", tt.want, got)
+			}
+		})
+	}
+}

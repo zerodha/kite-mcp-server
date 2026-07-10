@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,6 +45,7 @@ type Config struct {
 	AppMode       string
 	AppPort       string
 	AppHost       string
+	PublicBaseURL string
 
 	ExcludedTools   string
 	AdminSecretPath string
@@ -71,6 +73,7 @@ func NewApp(logger *slog.Logger) *App {
 			AppMode:       os.Getenv("APP_MODE"),
 			AppPort:       os.Getenv("APP_PORT"),
 			AppHost:       os.Getenv("APP_HOST"),
+			PublicBaseURL: os.Getenv("PUBLIC_BASE_URL"),
 
 			ExcludedTools:   os.Getenv("EXCLUDED_TOOLS"),
 			AdminSecretPath: os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
@@ -140,14 +143,40 @@ func (app *App) configureHTTPClient() {
 	app.logger.Debug("HTTP client timeout set to 30 seconds")
 }
 
+func (app *App) buildPublicBaseURL() string {
+	if app.Config.PublicBaseURL != "" {
+		return strings.TrimRight(app.Config.PublicBaseURL, "/")
+	}
+
+	host := app.Config.AppHost
+	if host == "" {
+		host = DefaultHost
+	}
+	if host == "0.0.0.0" {
+		host = "localhost"
+	}
+
+	scheme := "https"
+	if host == "localhost" || host == "127.0.0.1" {
+		scheme = "http"
+	}
+
+	if (scheme == "http" && app.Config.AppPort == "80") || (scheme == "https" && app.Config.AppPort == "443") {
+		return fmt.Sprintf("%s://%s", scheme, host)
+	}
+
+	return fmt.Sprintf("%s://%s:%s", scheme, host, app.Config.AppPort)
+}
+
 // initializeServices creates and configures Kite Connect manager and MCP server
 func (app *App) initializeServices() (*kc.Manager, *server.MCPServer, error) {
 	app.logger.Info("Creating Kite Connect manager...")
 	kcManager, err := kc.New(kc.Config{
-		APIKey:    app.Config.KiteAPIKey,
-		APISecret: app.Config.KiteAPISecret,
-		Logger:    app.logger,
-		Metrics:   app.metrics,
+		APIKey:        app.Config.KiteAPIKey,
+		APISecret:     app.Config.KiteAPISecret,
+		Logger:        app.logger,
+		PublicBaseURL: app.buildPublicBaseURL(),
+		Metrics:       app.metrics,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create Kite Connect manager: %w", err)
@@ -237,6 +266,7 @@ func (app *App) startServer(srv *http.Server, kcManager *kc.Manager, mcpServer *
 // setupMux creates and configures a new HTTP mux with common handlers
 func (app *App) setupMux(kcManager *kc.Manager) *http.ServeMux {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/authorize", kcManager.HandleAuthorizeInterstitial())
 	mux.HandleFunc("/callback", kcManager.HandleKiteCallback())
 	if app.Config.AdminSecretPath != "" {
 		mux.HandleFunc("/admin/", app.metrics.AdminHTTPHandler())

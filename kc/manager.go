@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
@@ -21,6 +22,7 @@ type Config struct {
 	APIKey             string                    // required
 	APISecret          string                    // required
 	Logger             *slog.Logger              // required
+	PublicBaseURL      string                    // optional - public base URL used to build browser-facing auth links
 	InstrumentsConfig  *instruments.UpdateConfig // optional - defaults to instruments.DefaultUpdateConfig()
 	InstrumentsManager *instruments.Manager      // optional - if provided, skips creating new instruments manager
 	SessionSigner      *SessionSigner            // optional - if nil, creates new session signer
@@ -56,10 +58,11 @@ func New(cfg Config) (*Manager, error) {
 	}
 
 	m := &Manager{
-		apiKey:    cfg.APIKey,
-		apiSecret: cfg.APISecret,
-		Logger:    cfg.Logger,
-		metrics:   cfg.Metrics,
+		apiKey:        cfg.APIKey,
+		apiSecret:     cfg.APISecret,
+		Logger:        cfg.Logger,
+		metrics:       cfg.Metrics,
+		publicBaseURL: strings.TrimRight(cfg.PublicBaseURL, "/"),
 	}
 
 	if err := m.initializeTemplates(); err != nil {
@@ -93,7 +96,8 @@ func NewKiteConnect(apiKey string) *KiteConnect {
 
 const (
 	// Template names
-	indexTemplate = "login_success.html"
+	indexTemplate     = "login_success.html"
+	authorizeTemplate = "authorize_interstitial.html"
 
 	// HTTP error messages
 	missingParamsMessage  = "missing MCP session_id or Kite request_token"
@@ -111,10 +115,11 @@ type KiteSessionData struct {
 }
 
 type Manager struct {
-	apiKey    string
-	apiSecret string
-	Logger    *slog.Logger
-	metrics   *metrics.Manager
+	apiKey        string
+	apiSecret     string
+	publicBaseURL string
+	Logger        *slog.Logger
+	metrics       *metrics.Manager
 
 	templates map[string]*template.Template
 
@@ -379,6 +384,25 @@ func (m *Manager) SessionLoginURL(mcpSessionID string) (string, error) {
 	return loginURL, nil
 }
 
+func (m *Manager) SessionAuthorizeURL(mcpSessionID string) (string, error) {
+	if err := m.validateSessionID(mcpSessionID); err != nil {
+		m.Logger.Warn("SessionAuthorizeURL called with empty MCP session ID")
+		return "", err
+	}
+	if err := m.validateSession(mcpSessionID); err != nil {
+		m.Logger.Warn("SessionAuthorizeURL called with invalid MCP session ID", "session_id", mcpSessionID, "error", err)
+		return "", err
+	}
+	if m.publicBaseURL == "" {
+		return "", errors.New("public base URL not configured")
+	}
+
+	signedSessionID := m.sessionSigner.SignSessionID(mcpSessionID)
+	authorizeURL := m.publicBaseURL + "/authorize?session_id=" + url.QueryEscape(signedSessionID)
+	m.Logger.Info("Generated authorize URL for MCP session", "session_id", mcpSessionID)
+	return authorizeURL, nil
+}
+
 func (m *Manager) CompleteSession(mcpSessionID, kiteRequestToken string) error {
 	if err := m.validateSessionID(mcpSessionID); err != nil {
 		m.Logger.Warn("CompleteSession called with empty MCP session ID")
@@ -511,7 +535,7 @@ func (m *Manager) UpdateSessionSignerExpiry(duration time.Duration) {
 func setupTemplates() (map[string]*template.Template, error) {
 	out := map[string]*template.Template{}
 
-	templateList := []string{indexTemplate}
+	templateList := []string{indexTemplate, authorizeTemplate}
 
 	for _, templateName := range templateList {
 		// Parse template with base template for composition support
@@ -597,4 +621,56 @@ func (m *Manager) renderSuccessTemplate(w http.ResponseWriter) error {
 	}
 
 	return templ.ExecuteTemplate(w, "base", data)
+}
+
+func (m *Manager) renderAuthorizeInterstitial(w http.ResponseWriter, kiteLoginURL string) error {
+	templ, ok := m.templates[authorizeTemplate]
+	if !ok {
+		return errors.New(templateNotFoundError)
+	}
+
+	data := struct {
+		Title        string
+		KiteLoginURL string
+	}{
+		Title:        "Continue to Kite Login",
+		KiteLoginURL: kiteLoginURL,
+	}
+
+	return templ.ExecuteTemplate(w, "base", data)
+}
+
+func (m *Manager) HandleAuthorizeInterstitial() func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		signedSessionID := r.URL.Query().Get("session_id")
+		if signedSessionID == "" {
+			http.Error(w, "missing session_id", http.StatusBadRequest)
+			return
+		}
+
+		mcpSessionID, err := m.sessionSigner.VerifySessionID(signedSessionID)
+		if err != nil {
+			m.Logger.Warn("Invalid authorize session", "error", err)
+			http.Error(w, "invalid authorize session", http.StatusBadRequest)
+			return
+		}
+		if err := m.validateSession(mcpSessionID); err != nil {
+			m.Logger.Warn("Authorize session validation failed", "session_id", mcpSessionID, "error", err)
+			http.Error(w, "session error", http.StatusBadRequest)
+			return
+		}
+
+		loginURL, err := m.SessionLoginURL(mcpSessionID)
+		if err != nil {
+			m.Logger.Error("Failed to generate Kite login URL for authorize interstitial", "session_id", mcpSessionID, "error", err)
+			http.Error(w, "failed to generate Kite login URL", http.StatusInternalServerError)
+			return
+		}
+
+		if err := m.renderAuthorizeInterstitial(w, loginURL); err != nil {
+			m.Logger.Error("Failed to render authorize interstitial", "error", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+	}
 }

@@ -1,0 +1,22 @@
+{{define "content"}}
+<div class="card">
+    <h1>Continue to Kite</h1>
+    <div class="status">Review and continue</div>
+    <p>
+        You are about to sign in to your Zerodha account on Kite and authorize this MCP connection.
+        Continue only if you want to use your account through an AI client.
+    </p>
+    <p style="margin-top: 1rem;">
+        You will be taken to Kite's secure login page in the next step and then returned to your MCP client to complete setup.
+    </p>
+    <p style="margin-top: 1rem; padding: 0.85rem 1rem; border: 1px solid #ffd8c8; border-radius: 8px; background: #fff5ee; color: #7c4a2d; text-align: left;">
+        <strong style="display:block; margin-bottom: 0.35rem; color: #212121;">Disclaimer</strong>
+        AI systems are unpredictable and non-deterministic. By continuing, you agree to interact with your Zerodha account via AI at your own risk.
+    </p>
+    <p style="margin-top: 1.25rem;">
+        <a href="{{.KiteLoginURL}}" style="display:inline-block; padding: 0.75rem 1rem; border-radius: 8px; background: #ff5722; color: #fff; text-decoration: none; font-weight: 600;">Continue to Kite login</a>
+    </p>
+</div>
+{{end}}
+
+{{template "base" .}}
