@@ -178,6 +178,31 @@ Then add to your Claude Desktop configuration (`~/.config/Claude/claude_desktop_
 
 For other MCP-compatible clients, use the hosted endpoint `https://mcp.kite.trade/mcp` with [mcp-remote](https://github.com/modelcontextprotocol/mcp-remote) or configure your client to connect directly to the HTTP endpoint.
 
+### Cursor Setup
+
+The easiest way to get started is using Kite’s hosted MCP server at mcp.kite.trade.
+No local installation, Node.js setup, or API keys are required.
+
+Steps:
+
+1. Open Cursor Settings
+2. Navigate to `Tools & MCP`
+3. Click `New MCP Server`
+4. Add the following to your `mcp.json`
+
+```json
+{
+  "kite": {
+    "type": "http",
+    "url": "https://mcp.kite.trade/mcp"
+  }
+}
+```
+
+5. Save the file
+
+That’s it 🎉
+
 ## Available Tools
 
 ### Setup & Authentication
