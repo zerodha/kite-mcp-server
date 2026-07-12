@@ -23,6 +23,7 @@ func (*QuotesTool) Tool() mcp.Tool {
 				"type": "string",
 			}),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 
@@ -69,6 +70,7 @@ func (*InstrumentsSearchTool) Tool() mcp.Tool {
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of instruments to return. If not specified, returns all matching instruments. When specified, response includes pagination metadata."),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 
@@ -189,6 +191,7 @@ func (*HistoricalDataTool) Tool() mcp.Tool {
 			mcp.Description("Include open interest data"),
 			mcp.DefaultBool(false),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 
@@ -253,6 +256,7 @@ func (*LTPTool) Tool() mcp.Tool {
 				"type": "string",
 			}),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 
@@ -295,6 +299,7 @@ func (*OHLCTool) Tool() mcp.Tool {
 				"type": "string",
 			}),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 

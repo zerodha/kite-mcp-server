@@ -17,6 +17,7 @@ func (*MFHoldingsTool) Tool() mcp.Tool {
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of MF holdings to return. If not specified, returns all holdings. When specified, response includes pagination metadata."),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
 
