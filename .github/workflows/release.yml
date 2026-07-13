@@ -47,15 +47,77 @@ jobs:
         chmod +x kite-mcp-server-darwin-amd64
         chmod +x kite-mcp-server-darwin-arm64
         chmod +x kite-mcp-server-windows-amd64.exe
-    
+
+    # Desktop Extension Build (Conditional)
+    - name: Check for desktop extension
+      id: check_extension
+      run: |
+        if [ -d "desktop-extension-claude" ]; then
+          echo "extension_exists=true" >> $GITHUB_OUTPUT
+          echo "✅ Desktop extension directory found"
+        else
+          echo "extension_exists=false" >> $GITHUB_OUTPUT
+          echo "ℹ️ Desktop extension directory not found, skipping extension build"
+        fi
+
+    - name: Set up Node.js (for extension)
+      if: steps.check_extension.outputs.extension_exists == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install DXT CLI (for extension)
+      if: steps.check_extension.outputs.extension_exists == 'true'
+      run: npm install -g @anthropic-ai/dxt
+
+    - name: Build extension binaries
+      if: steps.check_extension.outputs.extension_exists == 'true'
+      run: |
+        cd desktop-extension-claude
+        chmod +x build-binaries.sh sync-version.sh
+        ./build-binaries.sh
+
+    - name: Package desktop extension
+      if: steps.check_extension.outputs.extension_exists == 'true'
+      run: |
+        cd desktop-extension-claude
+        dxt pack .
+        
+        # Find the generated .dxt file
+        DXT_FILE=$(find . -name "*.dxt" -type f | head -1)
+        if [ -z "$DXT_FILE" ]; then
+          echo "❌ No .dxt file generated"
+          exit 1
+        fi
+        
+        echo "✅ Extension packaged: $DXT_FILE"
+        echo "dxt_file=$DXT_FILE" >> $GITHUB_ENV
+
+    - name: Prepare release files
+      id: release_files
+      run: |
+        # Base files (always included)
+        FILES="kite-mcp-server-linux-amd64
+        kite-mcp-server-darwin-amd64
+        kite-mcp-server-darwin-arm64
+        kite-mcp-server-windows-amd64.exe"
+        
+        # Add extension file if it exists
+        if [ -n "${{ env.dxt_file }}" ] && [ -f "desktop-extension-claude/${{ env.dxt_file }}" ]; then
+          FILES="$FILES
+        desktop-extension-claude/${{ env.dxt_file }}"
+          echo "✅ Including extension file: ${{ env.dxt_file }}"
+        fi
+        
+        # Save files list for the release step
+        echo "files<<EOF" >> $GITHUB_OUTPUT
+        echo "$FILES" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        files: |
-          kite-mcp-server-linux-amd64
-          kite-mcp-server-darwin-amd64
-          kite-mcp-server-darwin-arm64
-          kite-mcp-server-windows-amd64.exe
+        files: ${{ steps.release_files.outputs.files }}
         generate_release_notes: true
         draft: false
         prerelease: false

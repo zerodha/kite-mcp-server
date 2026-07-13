@@ -1,0 +1,151 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/dxt/main/manifest.schema.json",
+  "dxt_version": "0.1",
+  "name": "kite-connect",
+  "display_name": "Kite Connect",
+  "version": "0.2.0-dev4.1-dirty",
+  "description": "Local MCP server for Kite Connect trading API with OAuth authentication",
+  "long_description": "This extension provides a local MCP server that connects to the Kite Connect trading API using OAuth authentication, enabling AI assistants to access market data, manage portfolios, and execute trades securely. The server runs locally and uses the standard Kite Connect OAuth flow for authentication.\n\n**Key Features:**\n- Real-time portfolio data and performance analysis\n- Live market quotes and instrument search\n- Trading positions and order history tracking\n- Available margins and funds monitoring\n- Historical price data for technical analysis\n- OAuth-based authentication (no API keys needed)\n- Complete order management (place, modify, cancel)\n- GTT (Good Till Triggered) order support\n- Mutual fund holdings and transactions\n\n**Trading Capabilities:**\n- View holdings, positions, and trades\n- Get real-time market quotes for NSE/BSE stocks\n- Search trading instruments across exchanges\n- Access historical price data and charts\n- Place, modify, and cancel orders\n- Manage GTT orders\n- Monitor mutual fund investments\n\n**Authentication:**\n- OAuth2 flow with Kite Connect\n- Secure session management\n- No API keys or credentials required in configuration\n- Browser-based authentication flow\n- Session tokens managed automatically\n\nPerfect for traders who want to leverage AI for portfolio analysis, market research, and trading decision support with secure OAuth authentication.",
+  "author": {
+    "name": "Zerodha",
+    "email": "support@zerodha.com",
+    "url": "https://zerodha.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zerodha/kite-mcp-server"
+  },
+  "homepage": "https://github.com/zerodha/kite-mcp-server",
+  "documentation": "https://github.com/zerodha/kite-mcp-server/blob/master/README.md",
+  "support": "https://github.com/zerodha/kite-mcp-server/issues",
+  "icon": "icon.png",
+  "license": "MIT",
+  "keywords": [
+    "trading",
+    "kite",
+    "zerodha",
+    "stocks",
+    "portfolio",
+    "market-data",
+    "india"
+  ],
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "node": ">=16.0.0"
+    }
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/index.js"
+      ],
+      "timeout": 30000,
+      "retries": 3,
+      "env": {
+        "APP_MODE": "stdio",
+        "LOG_LEVEL": "warn",
+        "NODE_ENV": "production"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "login",
+      "description": "Login to Kite API. This tool helps you log in to the Kite API. If you are starting off a new conversation call this tool before hand. Call this if you get a session error. Returns a link that the user should click to authorize access."
+    },
+    {
+      "name": "get_profile",
+      "description": "Get user profile information and account details"
+    },
+    {
+      "name": "get_margins",
+      "description": "Get available margins and funds for equity and commodity trading"
+    },
+    {
+      "name": "get_holdings",
+      "description": "View current stock holdings and demat account positions"
+    },
+    {
+      "name": "get_positions",
+      "description": "Get current open trading positions (intraday and carry forward)"
+    },
+    {
+      "name": "get_trades",
+      "description": "Get list of all executed trades for the current trading day"
+    },
+    {
+      "name": "get_orders",
+      "description": "Get complete order history and status for the trading day"
+    },
+    {
+      "name": "get_order_history",
+      "description": "Get detailed execution history for a specific order"
+    },
+    {
+      "name": "get_order_trades",
+      "description": "Get all trades executed for a specific order"
+    },
+    {
+      "name": "get_gtts",
+      "description": "Get list of Good Till Triggered (GTT) orders"
+    },
+    {
+      "name": "get_mf_holdings",
+      "description": "Get mutual fund holdings and investment details"
+    },
+    {
+      "name": "get_quotes",
+      "description": "Get real-time market quotes for NSE/BSE stocks and instruments"
+    },
+    {
+      "name": "get_ltp",
+      "description": "Get last traded price for specified instruments"
+    },
+    {
+      "name": "get_ohlc",
+      "description": "Get OHLC (Open, High, Low, Close) data for instruments"
+    },
+    {
+      "name": "get_historical_data",
+      "description": "Retrieve historical price data and charts for technical analysis"
+    },
+    {
+      "name": "search_instruments",
+      "description": "Search for trading instruments by name or symbol across exchanges"
+    },
+    {
+      "name": "place_order",
+      "description": "Place new buy/sell orders with market, limit, and stop-loss options"
+    },
+    {
+      "name": "modify_order",
+      "description": "Modify existing pending orders (price, quantity, order type)"
+    },
+    {
+      "name": "cancel_order",
+      "description": "Cancel pending or partially filled orders"
+    },
+    {
+      "name": "place_gtt_order",
+      "description": "Create Good Till Triggered orders for automated trading"
+    },
+    {
+      "name": "modify_gtt_order",
+      "description": "Modify existing GTT orders"
+    },
+    {
+      "name": "delete_gtt_order",
+      "description": "Delete Good Till Triggered orders"
+    }
+  ],
+  "tools_generated": false
+}
