@@ -86,6 +86,7 @@ The server will start and serve a status page at `http://localhost:8080/`
 - [Claude Desktop (HTTP Mode)](#claude-desktop-http-mode) - Recommended
 - [Claude Desktop (SSE Mode)](#claude-desktop-sse-mode)
 - [Claude Desktop (stdio Mode)](#claude-desktop-stdio-mode)
+- [MCPJungle (HTTP Mode)](#mcpjungle-http-mode)
 - [Other MCP Clients](#other-mcp-clients)
 
 ### Claude Desktop (Hosted Mode)
@@ -173,6 +174,25 @@ Then add to your Claude Desktop configuration (`~/.config/Claude/claude_desktop_
 - `/home/username/kite-mcp-server/kite-mcp-server` (Linux)
 - `/Users/username/kite-mcp-server/kite-mcp-server` (macOS)
 - `C:\Users\username\kite-mcp-server\kite-mcp-server.exe` (Windows)
+
+### MCPJungle (HTTP Mode)
+
+Add the following configuration to a new json file `kite.json`:
+
+```json
+{
+	"name": "kite",
+	"transport": "stdio",
+	"command": "npx",
+	"args": ["mcp-remote", "https://mcp.kite.trade/mcp"]
+}
+```
+
+Then register it in Mcpjungle
+
+```
+mcpjungle register -c kite.json
+```
 
 ### Other MCP Clients
 
