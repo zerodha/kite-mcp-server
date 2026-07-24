@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -106,12 +107,12 @@ type TradesTool struct{}
 
 func (*TradesTool) Tool() mcp.Tool {
 	return mcp.NewTool("get_trades",
-		mcp.WithDescription("Get trading history. Supports pagination for large datasets."),
+		mcp.WithDescription("Get executed trades for the current trading day only. Kite Connect's trades endpoint is a transient intraday tradebook and does not return historical trades or all account transactions. Supports pagination for large datasets."),
 		mcp.WithNumber("from",
 			mcp.Description("Starting index for pagination (0-based). Default: 0"),
 		),
 		mcp.WithNumber("limit",
-			mcp.Description("Maximum number of trades to return. If not specified, returns all trades. When specified, response includes pagination metadata."),
+			mcp.Description("Maximum number of current-day trades to return. If not specified, returns all current-day trades. When specified, response includes pagination metadata."),
 		),
 	)
 }
@@ -136,12 +137,12 @@ type OrdersTool struct{}
 
 func (*OrdersTool) Tool() mcp.Tool {
 	return mcp.NewTool("get_orders",
-		mcp.WithDescription("Get all orders. Supports pagination for large datasets."),
+		mcp.WithDescription("Get orders for the current trading day only, including open, pending, executed, cancelled, and rejected orders. Kite Connect's order book is transient and does not return historical orders across days. Supports pagination for large datasets."),
 		mcp.WithNumber("from",
 			mcp.Description("Starting index for pagination (0-based). Default: 0"),
 		),
 		mcp.WithNumber("limit",
-			mcp.Description("Maximum number of orders to return. If not specified, returns all orders. When specified, response includes pagination metadata."),
+			mcp.Description("Maximum number of current-day orders to return. If not specified, returns all current-day orders. When specified, response includes pagination metadata."),
 		),
 	)
 }
@@ -232,7 +233,7 @@ type OrderHistoryTool struct{}
 
 func (*OrderHistoryTool) Tool() mcp.Tool {
 	return mcp.NewTool("get_order_history",
-		mcp.WithDescription("Get order history for a specific order"),
+		mcp.WithDescription("Get status history for a specific current-day order. Requires an order_id and does not list historical orders across days."),
 		mcp.WithString("order_id",
 			mcp.Description("ID of the order to fetch history for"),
 			mcp.Required(),
@@ -261,5 +262,54 @@ func (*OrderHistoryTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 
 			return handler.MarshalResponse(orderHistory, "get_order_history")
 		})
+	}
+}
+
+type TradebookAvailabilityTool struct{}
+
+type tradebookAvailabilityResponse struct {
+	Available           bool     `json:"available"`
+	Scope               string   `json:"scope"`
+	CurrentDayTools     []string `json:"current_day_tools"`
+	HistoricalDataTools  []string `json:"historical_data_tools"`
+	Message             string   `json:"message"`
+	RecommendedResponse string   `json:"recommended_response"`
+}
+
+func (*TradebookAvailabilityTool) Tool() mcp.Tool {
+	return mcp.NewTool("get_tradebook",
+		mcp.WithDescription("Explain whether Kite MCP can fetch a complete historical stock transaction tradebook. This tool does not call a Kite API endpoint; it reports that Kite Connect exposes only current-day orders/trades through this server and points to the available alternatives."),
+	)
+}
+
+func (*TradebookAvailabilityTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
+	handler := NewToolHandler(manager)
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if manager != nil {
+			handler.trackToolCall(ctx, "get_tradebook")
+		}
+
+		response := tradebookAvailabilityResponse{
+			Available: false,
+			Scope:     "Kite Connect does not expose an API endpoint through this server for fetching all historical stock transactions or the full account tradebook across days.",
+			CurrentDayTools: []string{
+				"get_orders: current trading day's orders only",
+				"get_trades: current trading day's executed trades only",
+				"get_order_history: status history for one current-day order_id",
+				"get_order_trades: trades for one current-day order_id",
+			},
+			HistoricalDataTools: []string{
+				"get_historical_data: historical OHLC candle data for an instrument, not account transactions",
+			},
+			Message:             "There is no Kite MCP tool that fetches all historical stock transactions or the complete tradebook. Use the current-day order/trade tools for intraday activity; use Kite/Console reports outside Kite Connect for historical contract notes, ledger, tax P&L, or full transaction history.",
+			RecommendedResponse: "No. Kite MCP cannot fetch your complete historical stock transaction tradebook. get_orders and get_trades cover only the current trading day, while get_order_history and get_order_trades require a specific current-day order_id.",
+		}
+
+		v, err := json.Marshal(response)
+		if err != nil {
+			return mcp.NewToolResultError("Failed to process tradebook availability response"), nil
+		}
+
+		return mcp.NewToolResultText(string(v)), nil
 	}
 }
