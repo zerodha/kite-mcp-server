@@ -34,6 +34,8 @@ github.com/yosida95/uritemplate/v3 v3.0.2 h1:Ed3Oyj9yrmi9087+NczuL5BwkIc4wvTb5zI
 github.com/yosida95/uritemplate/v3 v3.0.2/go.mod h1:ILOh0sOhIJR3+L/8afwt/kE++YT040gmv5BQTMR2HP4=
 github.com/zerodha/gokiteconnect/v4 v4.3.5 h1:NIhcaNXeH/a6j3FBxPIwjh0Tx1ti4z2GODWdBoOHMFc=
 github.com/zerodha/gokiteconnect/v4 v4.3.5/go.mod h1:ym/xXldKyPzkpN7JZpg6Cbjs+nGfqvMC5X9BsHEil9s=
+github.com/zerodha/gokiteconnect/v4 v4.4.0 h1:LHuv7nUe520se6EEnRZLHMjOih4fo9OhnJnODN+ek2M=
+github.com/zerodha/gokiteconnect/v4 v4.4.0/go.mod h1:JsOFotex2pCS53EpYJADRpN5Xp4f5+jgAQsIjEWGFrw=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/jarcoal/httpmock.v1 v1.0.0-20180719183105-8007e27cdb32 h1:30DLrQoRqdUHslVMzxuKUnY4GKJGk1/FJtKy3yx4TKE=
 gopkg.in/jarcoal/httpmock.v1 v1.0.0-20180719183105-8007e27cdb32/go.mod h1:d3R+NllX3X5e0zlG1Rful3uLvsGC/Q3OHut5464DEQw=
