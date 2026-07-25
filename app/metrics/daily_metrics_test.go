@@ -1,8 +1,8 @@
 package metrics
 
 import (
-	"bytes"
 	"fmt"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -14,150 +14,85 @@ func TestDailyMetrics(t *testing.T) {
 		AutoCleanup: false,
 	})
 
-	today := time.Now().UTC().Format("2006-01-02")
-
 	// Test daily increment methods
 	m.IncrementDaily("tool_calls_quotes")
 	m.IncrementDaily("tool_calls_quotes")
 	m.IncrementDailyBy("tool_calls_login", 3)
 	m.IncrementDaily("tool_errors_quotes_api_error")
 
-	// Test regular increment (non-daily)
-	m.Increment("legacy_counter")
+	// Test that metrics were created by checking HTTP handler output
+	handler := m.HTTPHandler()
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	handler(w, req)
 
-	// Check internal storage with date suffix
-	expectedQuotesKey := fmt.Sprintf("tool_calls_quotes_%s", today)
-	expectedLoginKey := fmt.Sprintf("tool_calls_login_%s", today)
-	expectedErrorKey := fmt.Sprintf("tool_errors_quotes_api_error_%s", today)
+	output := w.Body.String()
 
-	if got := m.GetCounterValue(expectedQuotesKey); got != 2 {
-		t.Errorf("Expected tool_calls_quotes_%s = 2, got %d", today, got)
+	today := time.Now().UTC().Format("2006-01-02")
+
+	expectedMetrics := []struct {
+		name  string
+		value string
+	}{
+		{"tool_calls_quotes", "2"},            // incremented twice
+		{"tool_calls_login", "3"},             // incremented by 3
+		{"tool_errors_quotes_api_error", "1"}, // incremented once
 	}
 
-	if got := m.GetCounterValue(expectedLoginKey); got != 3 {
-		t.Errorf("Expected tool_calls_login_%s = 3, got %d", today, got)
-	}
-
-	if got := m.GetCounterValue(expectedErrorKey); got != 1 {
-		t.Errorf("Expected tool_errors_quotes_api_error_%s = 1, got %d", today, got)
-	}
-
-	if got := m.GetCounterValue("legacy_counter"); got != 1 {
-		t.Errorf("Expected legacy_counter = 1, got %d", got)
+	for _, metric := range expectedMetrics {
+		expectedPattern := fmt.Sprintf(`%s{date="%s",service="test-service"} %s`, metric.name, today, metric.value)
+		if !strings.Contains(output, expectedPattern) {
+			t.Errorf("Expected output to contain: %s\nGot: %s", expectedPattern, output)
+		}
 	}
 }
 
-func TestDailyMetricsPrometheusOutput(t *testing.T) {
+func TestDailyMetricsWithLabels(t *testing.T) {
 	m := New(Config{
 		ServiceName: "test-service",
 		AutoCleanup: false,
 	})
 
+	m.IncrementDailyWithLabels("tool_calls", map[string]string{
+		"tool":         "quotes",
+		"session_type": "mcp",
+	})
+	m.IncrementDailyWithLabels("tool_calls", map[string]string{
+		"tool":         "quotes",
+		"session_type": "mcp",
+	})
+
+	m.IncrementDailyWithLabels("tool_errors", map[string]string{
+		"tool":         "quotes",
+		"error_type":   "api_error",
+		"session_type": "mcp",
+	})
+
+	handler := m.HTTPHandler()
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	output := w.Body.String()
 	today := time.Now().UTC().Format("2006-01-02")
 
-	// Add some daily metrics
-	m.IncrementDaily("tool_calls_quotes")
-	m.IncrementDaily("tool_calls_quotes")
-	m.IncrementDaily("tool_errors_quotes_api_error")
-
-	// Add a regular metric
-	m.Increment("legacy_counter")
-
-	// Generate Prometheus output
-	var buf bytes.Buffer
-	m.WritePrometheus(&buf)
-	output := buf.String()
-
-	// Check that daily metrics have date labels
-	expectedQuotesLine := fmt.Sprintf(`tool_calls_quotes_total{date="%s",service="test-service"} 2`, today)
-	expectedErrorLine := fmt.Sprintf(`tool_errors_quotes_api_error_total{date="%s",service="test-service"} 1`, today)
-	expectedLegacyLine := `legacy_counter_total{service="test-service"} 1`
-
-	if !strings.Contains(output, expectedQuotesLine) {
-		t.Errorf("Expected output to contain: %s\nGot: %s", expectedQuotesLine, output)
-	}
-
-	if !strings.Contains(output, expectedErrorLine) {
-		t.Errorf("Expected output to contain: %s\nGot: %s", expectedErrorLine, output)
-	}
-
-	if !strings.Contains(output, expectedLegacyLine) {
-		t.Errorf("Expected output to contain: %s\nGot: %s", expectedLegacyLine, output)
-	}
-}
-
-func TestIsDailyMetric(t *testing.T) {
-	m := New(Config{ServiceName: "test"})
-
-	tests := []struct {
-		key      string
-		expected bool
+	expectedPatterns := []struct {
+		description string
+		pattern     string
 	}{
-		{"tool_calls_quotes_2025-08-05", true},
-		{"tool_errors_login_session_error_2025-12-31", true},
-		{"legacy_counter", false},
-		{"tool_calls_quotes", false},
-		{"tool_calls_quotes_20250805", false}, // Wrong date format
-		{"tool_calls_quotes_2025-8-5", false}, // Wrong date format
-		{"", false},
-		{"_2025-08-05", false}, // Empty base name
+		{
+			"tool calls with correct value and labels",
+			fmt.Sprintf(`tool_calls_total{date="%s",service="test-service",session_type="mcp",tool="quotes"} 2`, today),
+		},
+		{
+			"tool errors with correct value and labels",
+			fmt.Sprintf(`tool_errors_total{date="%s",error_type="api_error",service="test-service",session_type="mcp",tool="quotes"} 1`, today),
+		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.key, func(t *testing.T) {
-			if got := m.isDailyMetric(tt.key); got != tt.expected {
-				t.Errorf("isDailyMetric(%q) = %v, want %v", tt.key, got, tt.expected)
-			}
-		})
-	}
-}
-
-func TestParseDailyMetric(t *testing.T) {
-	m := New(Config{ServiceName: "test"})
-
-	tests := []struct {
-		key          string
-		expectedBase string
-		expectedDate string
-	}{
-		{"tool_calls_quotes_2025-08-05", "tool_calls_quotes", "2025-08-05"},
-		{"tool_errors_login_session_error_2025-12-31", "tool_errors_login_session_error", "2025-12-31"},
-		{"legacy_counter", "", ""},             // Not a daily metric
-		{"tool_calls_quotes_20250805", "", ""}, // Wrong date format
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.key, func(t *testing.T) {
-			gotBase, _, gotDate := m.parseDailyMetric(tt.key)
-			if gotBase != tt.expectedBase || gotDate != tt.expectedDate {
-				t.Errorf("parseDailyMetric(%q) = (%q, %q), want (%q, %q)",
-					tt.key, gotBase, gotDate, tt.expectedBase, tt.expectedDate)
-			}
-		})
-	}
-
-	// Test session type parsing
-	sessionTypeTests := []struct {
-		key             string
-		expectedBase    string
-		expectedSession string
-		expectedDate    string
-	}{
-		{"tool_calls_quotes_sse_2025-08-05", "tool_calls_quotes", "sse", "2025-08-05"},
-		{"tool_calls_quotes_mcp_2025-08-05", "tool_calls_quotes", "mcp", "2025-08-05"},
-		{"tool_calls_quotes_stdio_2025-08-05", "tool_calls_quotes", "stdio", "2025-08-05"},
-		{"tool_calls_quotes_unknown_2025-08-05", "tool_calls_quotes", "unknown", "2025-08-05"},
-		{"tool_calls_quotes_2025-08-05", "tool_calls_quotes", "", "2025-08-05"}, // No session type
-		{"tool_errors_login_session_error_sse_2025-12-31", "tool_errors_login_session_error", "sse", "2025-12-31"},
-	}
-
-	for _, tt := range sessionTypeTests {
-		t.Run(tt.key+"_session_type", func(t *testing.T) {
-			gotBase, gotSession, gotDate := m.parseDailyMetric(tt.key)
-			if gotBase != tt.expectedBase || gotSession != tt.expectedSession || gotDate != tt.expectedDate {
-				t.Errorf("parseDailyMetric(%q) = (%q, %q, %q), want (%q, %q, %q)",
-					tt.key, gotBase, gotSession, gotDate, tt.expectedBase, tt.expectedSession, tt.expectedDate)
-			}
-		})
+	for _, expected := range expectedPatterns {
+		if !strings.Contains(output, expected.pattern) {
+			t.Errorf("Expected output to contain %s: %s\nFull output: %s", expected.description, expected.pattern, output)
+		}
 	}
 }

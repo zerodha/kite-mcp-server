@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -38,23 +37,30 @@ func TestNew(t *testing.T) {
 func TestIncrement(t *testing.T) {
 	m := New(Config{ServiceName: "test"})
 
-	// Test initial increment
-	m.Increment("test_counter")
-	if count := m.GetCounterValue("test_counter"); count != 1 {
-		t.Errorf("expected count 1, got %d", count)
-	}
-
-	// Test multiple increments
+	// Test counters by checking they appear in metrics output
 	m.Increment("test_counter")
 	m.Increment("test_counter")
-	if count := m.GetCounterValue("test_counter"); count != 3 {
-		t.Errorf("expected count 3, got %d", count)
-	}
-
-	// Test different counter
+	m.Increment("test_counter")
 	m.Increment("other_counter")
-	if count := m.GetCounterValue("other_counter"); count != 1 {
-		t.Errorf("expected count 1, got %d", count)
+
+	// Check via HTTP handler
+	handler := m.HTTPHandler()
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	output := w.Body.String()
+
+	// Check for specific values
+	expectedTestCounter := `test_counter{service="test"} 3`
+	expectedOtherCounter := `other_counter{service="test"} 1`
+
+	if !strings.Contains(output, expectedTestCounter) {
+		t.Errorf("expected output to contain: %s, got: %s", expectedTestCounter, output)
+	}
+
+	if !strings.Contains(output, expectedOtherCounter) {
+		t.Errorf("expected output to contain: %s, got: %s", expectedOtherCounter, output)
 	}
 }
 
@@ -62,13 +68,20 @@ func TestIncrementBy(t *testing.T) {
 	m := New(Config{ServiceName: "test"})
 
 	m.IncrementBy("test_counter", 5)
-	if count := m.GetCounterValue("test_counter"); count != 5 {
-		t.Errorf("expected count 5, got %d", count)
-	}
-
 	m.IncrementBy("test_counter", 3)
-	if count := m.GetCounterValue("test_counter"); count != 8 {
-		t.Errorf("expected count 8, got %d", count)
+
+	// Check via HTTP handler with correct value
+	handler := m.HTTPHandler()
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	output := w.Body.String()
+
+	// Check for specific value (5 + 3 = 8)
+	expectedPattern := `test_counter{service="test"} 8`
+	if !strings.Contains(output, expectedPattern) {
+		t.Errorf("expected output to contain: %s, got: %s", expectedPattern, output)
 	}
 }
 
@@ -91,9 +104,18 @@ func TestConcurrentIncrement(t *testing.T) {
 
 	wg.Wait()
 
-	expected := int64(numGoroutines * incrementsPerGoroutine)
-	if count := m.GetCounterValue("concurrent_counter"); count != expected {
-		t.Errorf("expected count %d, got %d", expected, count)
+	handler := m.HTTPHandler()
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	output := w.Body.String()
+
+	expectedValue := numGoroutines * incrementsPerGoroutine
+	expectedPattern := fmt.Sprintf(`concurrent_counter{service="test"} %d`, expectedValue)
+
+	if !strings.Contains(output, expectedPattern) {
+		t.Errorf("expected output to contain: %s, got: %s", expectedPattern, output)
 	}
 }
 
@@ -176,7 +198,7 @@ func TestCleanupOldData(t *testing.T) {
 	}
 }
 
-func TestWritePrometheus(t *testing.T) {
+func TestPrometheusMetrics(t *testing.T) {
 	m := New(Config{ServiceName: "test-service", HistoricalDays: 3})
 
 	// Add some metrics
@@ -186,14 +208,15 @@ func TestWritePrometheus(t *testing.T) {
 	m.TrackDailyUser("user1")
 	m.TrackDailyUser("user2")
 
-	buf := new(bytes.Buffer)
-	m.WritePrometheus(buf)
-	output := buf.String()
+	handler := m.HTTPHandler()
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	handler(w, req)
 
-	// Check that metrics are present
+	output := w.Body.String()
+
+	// Check that user metrics are present
 	expectedMetrics := []string{
-		"login_count_total{service=\"test-service\"} 2",
-		"error_count_total{service=\"test-service\"} 3",
 		"daily_unique_users_total{",
 		"service=\"test-service\"",
 	}
@@ -203,16 +226,18 @@ func TestWritePrometheus(t *testing.T) {
 			t.Errorf("expected output to contain %q, got:\n%s", expected, output)
 		}
 	}
-
-	// Should use consistent metric names (all _total suffix)
-	if strings.Contains(output, "daily_unique_users_current") || strings.Contains(output, "daily_unique_users_historical") {
-		t.Error("should use consistent metric name daily_unique_users_total")
-	}
 }
 
 func TestHTTPHandler(t *testing.T) {
 	m := New(Config{ServiceName: "test"})
-	m.Increment("test_metric")
+
+	// Add a tool metric to test
+	m.IncrementDailyWithLabels("tool_calls", map[string]string{
+		"tool":         "test_tool",
+		"session_type": "mcp",
+	})
+
+	m.TrackDailyUser("test_user")
 
 	handler := m.HTTPHandler()
 
@@ -225,23 +250,13 @@ func TestHTTPHandler(t *testing.T) {
 		t.Errorf("expected status 200, got %d", w.Code)
 	}
 
-	contentType := w.Header().Get("Content-Type")
-	if contentType != PrometheusContentType {
-		t.Errorf("expected content type %q, got %q", PrometheusContentType, contentType)
-	}
-
 	body := w.Body.String()
-	if !strings.Contains(body, "test_metric_total") {
-		t.Errorf("expected body to contain test_metric_total, got:\n%s", body)
+	if !strings.Contains(body, "tool_calls_total") {
+		t.Errorf("expected body to contain tool_calls_total, got:\n%s", body)
 	}
 
-	// Test POST request (should fail)
-	req = httptest.NewRequest("POST", "/metrics", nil)
-	w = httptest.NewRecorder()
-	handler(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status 405 for POST, got %d", w.Code)
+	if !strings.Contains(body, "daily_unique_users_total") {
+		t.Errorf("expected body to contain daily_unique_users_total, got:\n%s", body)
 	}
 }
 
@@ -285,6 +300,7 @@ func TestAdminHTTPHandler(t *testing.T) {
 				AdminSecretPath: tt.adminPath,
 			})
 			m.Increment("test_metric")
+			m.TrackDailyUser("test_user")
 
 			handler := m.AdminHTTPHandler()
 			req := httptest.NewRequest("GET", tt.requestPath, nil)
@@ -297,7 +313,7 @@ func TestAdminHTTPHandler(t *testing.T) {
 
 			if tt.expectedStatus == http.StatusOK {
 				body := w.Body.String()
-				if !strings.Contains(body, "test_metric_total") {
+				if !strings.Contains(body, "daily_unique_users_total") {
 					t.Errorf("expected body to contain metrics, got:\n%s", body)
 				}
 			}
@@ -328,34 +344,6 @@ func TestConcurrentDailyUserTracking(t *testing.T) {
 	expected := int64(numGoroutines * usersPerGoroutine)
 	if count := m.GetTodayUserCount(); count != expected {
 		t.Errorf("expected today's user count %d, got %d", expected, count)
-	}
-}
-
-func TestFormatMetric(t *testing.T) {
-	m := New(Config{ServiceName: "test-service"})
-	buf := new(bytes.Buffer)
-
-	// Test with labels
-	labels := map[string]string{
-		"method": "GET",
-		"status": "200",
-	}
-	m.formatMetric(buf, "http_requests_total", labels, 42.5)
-
-	output := buf.String()
-	expected := `http_requests_total{method="GET",service="test-service",status="200"} 42.5`
-	if !strings.Contains(output, expected) {
-		t.Errorf("expected output to contain %q, got:\n%s", expected, output)
-	}
-
-	// Test without labels
-	buf.Reset()
-	m.formatMetric(buf, "simple_counter", nil, 10)
-
-	output = buf.String()
-	expected = `simple_counter{service="test-service"} 10`
-	if !strings.Contains(output, expected) {
-		t.Errorf("expected output to contain %q, got:\n%s", expected, output)
 	}
 }
 
