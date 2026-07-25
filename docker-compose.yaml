@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  kite-mcp-server:
+    build: .
+    image: zerodha-mcp:prod
+    ports:
+      - "8080:8080"
+    environment:
+      KITE_API_KEY: ${KITE_API_KEY}
+      KITE_API_SECRET: ${KITE_API_SECRET}
+      APP_MODE: ${APP_MODE:-sse}
+      APP_HOST: ${APP_HOST:-0.0.0.0}
+      APP_PORT: ${APP_PORT:-8080} 
