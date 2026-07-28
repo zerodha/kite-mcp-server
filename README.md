@@ -1,5 +1,7 @@
 # Kite MCP Server
 
+[![MCP Toplist](https://mcptoplist.com/badge/mcp.so%2Fkite-mcp-server%2Fzerodha.svg)](https://mcptoplist.com/server/mcp.so%2Fkite-mcp-server%2Fzerodha)
+
 A Model Context Protocol (MCP) server that provides AI assistants with secure access to the Kite Connect trading API. This server enables AI agents to retrieve market data, manage portfolios, and execute trades through a standardized interface.
 
 ## TL;DR for Traders
