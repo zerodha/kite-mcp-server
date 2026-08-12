@@ -288,6 +288,7 @@ The justfile automatically includes `GOEXPERIMENT=synctest` in all test commands
 | `APP_MODE`           | `http`      | Server mode: `stdio`, `http`, `sse`, or `hybrid`           |
 | `APP_PORT`           | `8080`      | Server port (HTTP/SSE/hybrid modes)                        |
 | `APP_HOST`                  | `localhost` | Server host (HTTP/SSE/hybrid modes)                        |
+| `MCP_SESSION_TIMEOUT`       | `24h`       | Streamable HTTP MCP session lifetime (Go duration format)  |
 | `ALLOWED_REDIRECT_PATTERNS` | `localhost` | Comma-separated redirect URI allowlist patterns            |
 | `EXCLUDED_TOOLS`            | _(empty)_   | Comma-separated list of tools to exclude from registration |
 

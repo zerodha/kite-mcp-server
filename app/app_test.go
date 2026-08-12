@@ -105,6 +105,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	_ = os.Unsetenv("APP_MODE")
 	_ = os.Unsetenv("APP_PORT")
 	_ = os.Unsetenv("APP_HOST")
+	t.Setenv("MCP_SESSION_TIMEOUT", "")
 	_ = os.Setenv("KITE_API_KEY", "test_key")
 	_ = os.Setenv("KITE_API_SECRET", "test_secret")
 	_ = os.Setenv("JWT_SECRET", "test-jwt-secret-32-bytes-minimum")
@@ -134,6 +135,41 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	expectedIssuer := "http://" + DefaultHost + ":" + DefaultPort
 	if app.Config.OAuthIssuer != expectedIssuer {
 		t.Errorf("Expected OAuth issuer '%s', got '%s'", expectedIssuer, app.Config.OAuthIssuer)
+	}
+
+	if app.Config.MCPSessionTimeout != DefaultMCPSessionTimeout {
+		t.Errorf("Expected default MCP session timeout %q, got %q", DefaultMCPSessionTimeout, app.Config.MCPSessionTimeout)
+	}
+}
+
+func TestLoadConfig_MCPSessionTimeout(t *testing.T) {
+	t.Setenv("KITE_API_KEY", "test_key")
+	t.Setenv("KITE_API_SECRET", "test_secret")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-32-bytes-minimum")
+	t.Setenv("MCP_SESSION_TIMEOUT", "45m")
+
+	app := NewApp(testLogger())
+	if err := app.LoadConfig(); err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if app.Config.MCPSessionTimeout != "45m" {
+		t.Errorf("Expected MCP session timeout %q, got %q", "45m", app.Config.MCPSessionTimeout)
+	}
+}
+
+func TestLoadConfig_InvalidMCPSessionTimeout(t *testing.T) {
+	t.Setenv("KITE_API_KEY", "test_key")
+	t.Setenv("KITE_API_SECRET", "test_secret")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-32-bytes-minimum")
+	t.Setenv("MCP_SESSION_TIMEOUT", "tomorrow")
+
+	app := NewApp(testLogger())
+	err := app.LoadConfig()
+	if err == nil {
+		t.Fatal("Expected error for invalid MCP session timeout")
+	}
+	if got, want := err.Error(), "invalid MCP_SESSION_TIMEOUT: time: invalid duration \"tomorrow\""; got != want {
+		t.Errorf("Expected error %q, got %q", want, got)
 	}
 }
 

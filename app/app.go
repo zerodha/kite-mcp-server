@@ -43,12 +43,14 @@ type Config struct {
 	AdminSecretPath         string
 	JWTSecret               string
 	OAuthIssuer             string
+	MCPSessionTimeout       string
 	AllowedRedirectPatterns []string
 }
 
 const (
-	DefaultPort = "8080"
-	DefaultHost = "localhost"
+	DefaultPort              = "8080"
+	DefaultHost              = "localhost"
+	DefaultMCPSessionTimeout = "24h"
 )
 
 func NewApp(logger *slog.Logger) *App {
@@ -62,6 +64,7 @@ func NewApp(logger *slog.Logger) *App {
 			AdminSecretPath:         os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
 			JWTSecret:               os.Getenv("JWT_SECRET"),
 			OAuthIssuer:             os.Getenv("OAUTH_ISSUER"),
+			MCPSessionTimeout:       os.Getenv("MCP_SESSION_TIMEOUT"),
 			AllowedRedirectPatterns: parseCSVEnv(os.Getenv("ALLOWED_REDIRECT_PATTERNS")),
 		},
 		Version:   "v0.0.0",
@@ -106,6 +109,12 @@ func (app *App) LoadConfig() error {
 	// Default OAuth issuer to local URL if not set
 	if app.Config.OAuthIssuer == "" {
 		app.Config.OAuthIssuer = "http://" + app.Config.AppHost + ":" + app.Config.AppPort
+	}
+	if app.Config.MCPSessionTimeout == "" {
+		app.Config.MCPSessionTimeout = DefaultMCPSessionTimeout
+	}
+	if _, err := time.ParseDuration(app.Config.MCPSessionTimeout); err != nil {
+		return fmt.Errorf("invalid MCP_SESSION_TIMEOUT: %w", err)
 	}
 	return nil
 }
@@ -244,11 +253,15 @@ func securityHeaders(next http.Handler) http.Handler {
 
 func (app *App) startServer(srv *http.Server, mcpServer *mcpsdk.Server, url string) error {
 	app.logger.Info("Starting MCP server", "url", "http://"+srv.Addr+"/mcp")
+	sessionTimeout, err := time.ParseDuration(app.Config.MCPSessionTimeout)
+	if err != nil {
+		return fmt.Errorf("invalid MCP_SESSION_TIMEOUT: %w", err)
+	}
 	streamable := mcpsdk.NewStreamableHTTPHandler(
 		func(r *http.Request) *mcpsdk.Server { return mcpServer },
 		&mcpsdk.StreamableHTTPOptions{
 			Logger:         app.logger,
-			SessionTimeout: 30 * time.Minute,
+			SessionTimeout: sessionTimeout,
 		},
 	)
 	mux := app.setupMux()
