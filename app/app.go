@@ -43,6 +43,7 @@ type Config struct {
 	AdminSecretPath         string
 	JWTSecret               string
 	OAuthIssuer             string
+	OAuthTokenTTL           string
 	MCPSessionTimeout       string
 	AllowedRedirectPatterns []string
 }
@@ -50,6 +51,7 @@ type Config struct {
 const (
 	DefaultPort              = "8080"
 	DefaultHost              = "localhost"
+	DefaultOAuthTokenTTL     = "24h"
 	DefaultMCPSessionTimeout = "24h"
 )
 
@@ -64,6 +66,7 @@ func NewApp(logger *slog.Logger) *App {
 			AdminSecretPath:         os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
 			JWTSecret:               os.Getenv("JWT_SECRET"),
 			OAuthIssuer:             os.Getenv("OAUTH_ISSUER"),
+			OAuthTokenTTL:           os.Getenv("OAUTH_TOKEN_TTL"),
 			MCPSessionTimeout:       os.Getenv("MCP_SESSION_TIMEOUT"),
 			AllowedRedirectPatterns: parseCSVEnv(os.Getenv("ALLOWED_REDIRECT_PATTERNS")),
 		},
@@ -109,6 +112,12 @@ func (app *App) LoadConfig() error {
 	// Default OAuth issuer to local URL if not set
 	if app.Config.OAuthIssuer == "" {
 		app.Config.OAuthIssuer = "http://" + app.Config.AppHost + ":" + app.Config.AppPort
+	}
+	if app.Config.OAuthTokenTTL == "" {
+		app.Config.OAuthTokenTTL = DefaultOAuthTokenTTL
+	}
+	if _, err := time.ParseDuration(app.Config.OAuthTokenTTL); err != nil {
+		return fmt.Errorf("invalid OAUTH_TOKEN_TTL: %w", err)
 	}
 	if app.Config.MCPSessionTimeout == "" {
 		app.Config.MCPSessionTimeout = DefaultMCPSessionTimeout
@@ -169,10 +178,14 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 	app.kcManager = kcManager
 
 	// --- JWT OAuth Server ---
+	tokenTTL, err := time.ParseDuration(app.Config.OAuthTokenTTL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid OAUTH_TOKEN_TTL: %w", err)
+	}
 	app.oauthServer = oauth.New(oauth.Config{
 		Issuer:                  app.Config.OAuthIssuer,
 		JWTSecret:               []byte(app.Config.JWTSecret),
-		TokenTTL:                6 * time.Hour,
+		TokenTTL:                tokenTTL,
 		AllowedRedirectPatterns: app.Config.AllowedRedirectPatterns,
 	})
 	app.jwtOauthHandlers = oauth.NewHandlers(app.oauthServer, app.kcManager, app.logger)

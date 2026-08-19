@@ -105,6 +105,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	_ = os.Unsetenv("APP_MODE")
 	_ = os.Unsetenv("APP_PORT")
 	_ = os.Unsetenv("APP_HOST")
+	t.Setenv("OAUTH_TOKEN_TTL", "")
 	t.Setenv("MCP_SESSION_TIMEOUT", "")
 	_ = os.Setenv("KITE_API_KEY", "test_key")
 	_ = os.Setenv("KITE_API_SECRET", "test_secret")
@@ -137,8 +138,43 @@ func TestLoadConfig_Defaults(t *testing.T) {
 		t.Errorf("Expected OAuth issuer '%s', got '%s'", expectedIssuer, app.Config.OAuthIssuer)
 	}
 
+	if app.Config.OAuthTokenTTL != DefaultOAuthTokenTTL {
+		t.Errorf("Expected default OAuth token TTL %q, got %q", DefaultOAuthTokenTTL, app.Config.OAuthTokenTTL)
+	}
+
 	if app.Config.MCPSessionTimeout != DefaultMCPSessionTimeout {
 		t.Errorf("Expected default MCP session timeout %q, got %q", DefaultMCPSessionTimeout, app.Config.MCPSessionTimeout)
+	}
+}
+
+func TestLoadConfig_OAuthTokenTTL(t *testing.T) {
+	t.Setenv("KITE_API_KEY", "test_key")
+	t.Setenv("KITE_API_SECRET", "test_secret")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-32-bytes-minimum")
+	t.Setenv("OAUTH_TOKEN_TTL", "12h")
+
+	app := NewApp(testLogger())
+	if err := app.LoadConfig(); err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if app.Config.OAuthTokenTTL != "12h" {
+		t.Errorf("Expected OAuth token TTL %q, got %q", "12h", app.Config.OAuthTokenTTL)
+	}
+}
+
+func TestLoadConfig_InvalidOAuthTokenTTL(t *testing.T) {
+	t.Setenv("KITE_API_KEY", "test_key")
+	t.Setenv("KITE_API_SECRET", "test_secret")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-32-bytes-minimum")
+	t.Setenv("OAUTH_TOKEN_TTL", "tomorrow")
+
+	app := NewApp(testLogger())
+	err := app.LoadConfig()
+	if err == nil {
+		t.Fatal("Expected error for invalid OAuth token TTL")
+	}
+	if got, want := err.Error(), "invalid OAUTH_TOKEN_TTL: time: invalid duration \"tomorrow\""; got != want {
+		t.Errorf("Expected error %q, got %q", want, got)
 	}
 }
 
