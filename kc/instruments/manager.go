@@ -131,9 +131,12 @@ func New(cfg Config) (*Manager, error) {
 	} else {
 		// Production mode - load from HTTP
 		if err := manager.UpdateInstruments(); err != nil {
+			manager.schedulerCancel()
+			close(manager.schedulerDone)
 			return nil, fmt.Errorf("failed to load initial data: %w", err)
 		}
 	}
+	manager.startSchedulerIfEnabled()
 
 	return manager, nil
 }
@@ -156,15 +159,20 @@ func newManagerWithConfig(config *UpdateConfig, logger *slog.Logger) *Manager {
 		schedulerDone:     make(chan struct{}),
 	}
 
-	// Start scheduler if enabled
-	if config.EnableScheduler {
-		go m.startScheduler()
-	} else {
-		// Close the done channel immediately if scheduler is not enabled
-		close(m.schedulerDone)
-	}
-
 	return m
+}
+
+// startSchedulerIfEnabled starts the scheduler after the initial catalog has
+// loaded, so a scheduled refresh cannot race the initial load.
+func (m *Manager) startSchedulerIfEnabled() {
+	m.mutex.RLock()
+	enabled := m.config.EnableScheduler
+	m.mutex.RUnlock()
+	if enabled {
+		go m.startScheduler()
+		return
+	}
+	close(m.schedulerDone)
 }
 
 func isPreviousDayIST(t time.Time) bool {
@@ -350,6 +358,10 @@ func (m *Manager) loadFromURL() (map[uint32]*Instrument, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("instruments endpoint returned HTTP %d", resp.StatusCode)
+	}
+
 	m.logger.Debug("Received HTTP response",
 		"status", resp.StatusCode,
 		"content-length", resp.Header.Get("Content-Length"),
@@ -401,6 +413,9 @@ func (m *Manager) parseInstrumentsJSON(reader io.Reader) (map[uint32]*Instrument
 			m.logger.Error("JSON unmarshal error", "error", err, "line", line)
 			return nil, fmt.Errorf("error parsing instrument JSON: %v (line: %s)", err, line)
 		}
+		if instrument.InstrumentToken == 0 || instrument.Tradingsymbol == "" || instrument.Exchange == "" || instrument.Segment == "" {
+			return nil, fmt.Errorf("invalid instrument record at line %d", count+1)
+		}
 
 		// Process each instrument
 		mp[instrument.InstrumentToken] = &instrument
@@ -414,6 +429,9 @@ func (m *Manager) parseInstrumentsJSON(reader io.Reader) (map[uint32]*Instrument
 	if err := scanner.Err(); err != nil {
 		m.logger.Error("Scanner error", "error", err)
 		return nil, fmt.Errorf("error reading instruments file: %v", err)
+	}
+	if count == 0 {
+		return nil, errors.New("instruments response contained no instrument records")
 	}
 
 	m.logger.Debug("Successfully parsed instruments", "count", len(mp))
@@ -561,23 +579,29 @@ func (m *Manager) startScheduler() {
 	m.logger.Info("Starting instruments update scheduler",
 		"update_time", fmt.Sprintf("%02d:%02d IST", updateHour, updateMinute))
 
-	ticker := time.NewTicker(5 * time.Minute) // Check every 5 minutes
-	defer ticker.Stop()
-
 	for {
+		m.mutex.RLock()
+		nextUpdate := nextScheduledUpdate(time.Now(), m.config.UpdateHour, m.config.UpdateMinute)
+		m.mutex.RUnlock()
+		timer := time.NewTimer(time.Until(nextUpdate))
+
 		select {
 		case <-m.schedulerCtx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 			m.logger.Info("Instruments scheduler stopped")
 			return
 
-		case <-ticker.C:
-			if m.shouldUpdate() {
-				m.logger.Info("Starting scheduled instrument update")
-				if err := m.ForceUpdateInstruments(); err != nil {
-					m.logger.Error("Scheduled instrument update failed", "error", err)
-				} else {
-					m.logger.Info("Scheduled instrument update completed successfully")
-				}
+		case <-timer.C:
+			m.logger.Info("Starting scheduled instrument update")
+			if err := m.ForceUpdateInstruments(); err != nil {
+				m.logger.Error("Scheduled instrument update failed", "error", err)
+			} else {
+				m.logger.Info("Scheduled instrument update completed successfully")
 			}
 		}
 	}
@@ -621,19 +645,20 @@ func (m *Manager) shouldUpdate() bool {
 // getNextScheduledUpdate calculates the next scheduled update time
 func (m *Manager) getNextScheduledUpdate() time.Time {
 	ist, _ := time.LoadLocation("Asia/Kolkata")
-	now := time.Now().In(ist)
+	return nextScheduledUpdate(time.Now().In(ist), m.config.UpdateHour, m.config.UpdateMinute)
+}
 
-	// Get config with lock protection (this method is called while holding RLock already)
-	// So we don't need additional locking here as it's called from GetUpdateStats which already has RLock
-	nextUpdate := time.Date(now.Year(), now.Month(), now.Day(),
-		m.config.UpdateHour, m.config.UpdateMinute, 0, 0, ist)
-
-	// If the time has already passed today, schedule for tomorrow
-	if nextUpdate.Before(now) {
-		nextUpdate = nextUpdate.Add(24 * time.Hour)
+// nextScheduledUpdate returns the first configured daily update at or after now.
+// Keeping this calculation separate from the scheduler makes the scheduling behaviour
+// independent of process start time and easy to exercise with a fixed clock.
+func nextScheduledUpdate(now time.Time, hour, minute int) time.Time {
+	ist, _ := time.LoadLocation("Asia/Kolkata")
+	now = now.In(ist)
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, ist)
+	if next.Before(now) {
+		next = next.AddDate(0, 0, 1)
 	}
-
-	return nextUpdate
+	return next
 }
 
 // GetSegmentID returns the segment ID for the instrument token.

@@ -1,7 +1,12 @@
 package oauth
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/auth"
 )
 
 func TestValidateRedirectURI_DefaultLocalhost(t *testing.T) {
@@ -26,6 +31,72 @@ func TestValidateRedirectURI_DefaultLocalhost(t *testing.T) {
 		if err := srv.ValidateRedirectURI(uri); err == nil {
 			t.Fatalf("expected %q to be rejected", uri)
 		}
+	}
+}
+
+func TestMiddlewareBindsSDKUserIdentity(t *testing.T) {
+	srv := New(Config{Issuer: "https://mcp.example", JWTSecret: []byte("01234567890123456789012345678901")})
+	token, err := srv.generateAccessToken("kite-user", "opaque-grant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := srv.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		info := auth.TokenInfoFromContext(r.Context())
+		if info == nil || info.UserID != "kite-user" {
+			t.Fatalf("SDK user identity was not bound: %#v", info)
+		}
+		if got := r.Header.Get("X-Kite-Session-Id"); got != "opaque-grant" {
+			t.Fatalf("Kite session header = %q", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("middleware response = %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestClientIPOnlyTrustsConfiguredProxy(t *testing.T) {
+	srv := New(Config{TrustedProxyCIDRs: []string{"10.0.0.0/8"}})
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "10.2.3.4:443"
+	req.Header.Set("X-Forwarded-For", "198.51.100.10, 10.1.1.1")
+	if got := srv.ClientIP(req); got != "198.51.100.10" {
+		t.Fatalf("trusted proxy client IP = %q, want 198.51.100.10", got)
+	}
+
+	req.RemoteAddr = "198.51.100.20:443"
+	req.Header.Set("X-Forwarded-For", "203.0.113.99")
+	if got := srv.ClientIP(req); got != "198.51.100.20" {
+		t.Fatalf("untrusted peer client IP = %q, want direct peer", got)
+	}
+}
+
+func TestRegisteredClientsAreBoundedAndExpire(t *testing.T) {
+	srv := New(Config{MaxClients: 2, ClientTTL: time.Nanosecond})
+	srv.RegisterClient([]string{"http://localhost:1/callback"})
+	time.Sleep(time.Millisecond)
+	srv.RegisterClient([]string{"http://localhost:2/callback"})
+
+	srv.mu.RLock()
+	count := len(srv.clients)
+	srv.mu.RUnlock()
+	if count != 1 {
+		t.Fatalf("expired clients retained: got %d, want 1", count)
+	}
+
+	srv = New(Config{MaxClients: 2})
+	srv.RegisterClient([]string{"http://localhost:1/callback"})
+	srv.RegisterClient([]string{"http://localhost:2/callback"})
+	srv.RegisterClient([]string{"http://localhost:3/callback"})
+	srv.mu.RLock()
+	count = len(srv.clients)
+	srv.mu.RUnlock()
+	if count != 2 {
+		t.Fatalf("client store exceeded cap: got %d, want 2", count)
 	}
 }
 

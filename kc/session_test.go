@@ -121,6 +121,30 @@ func TestGetOrCreate(t *testing.T) {
 	}
 }
 
+func TestUpdateCredentialsRefreshesSessionAndCopiesCredentials(t *testing.T) {
+	manager := NewSessionManagerWithDuration(testLogger(), time.Hour)
+	sessionID := manager.Generate()
+	before, err := manager.Get(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	creds := &KiteCredentials{AccessToken: "original", UserID: "user", ExpiresAt: time.Now().Add(time.Hour)}
+	if err := manager.UpdateCredentials(sessionID, creds); err != nil {
+		t.Fatal(err)
+	}
+	creds.AccessToken = "mutated-by-caller"
+	after, err := manager.Get(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Credentials.AccessToken != "original" {
+		t.Fatalf("session retained caller-owned credentials pointer")
+	}
+	if !after.ExpiresAt.After(before.ExpiresAt) {
+		t.Fatalf("reauthentication did not refresh session expiry: before=%v after=%v", before.ExpiresAt, after.ExpiresAt)
+	}
+}
+
 func TestValidate(t *testing.T) {
 	manager := NewSessionManager(testLogger())
 

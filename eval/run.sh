@@ -24,6 +24,9 @@ cleanup() {
         kill "$SERVER_PID" 2>/dev/null || true
         wait "$SERVER_PID" 2>/dev/null || true
     fi
+    if [[ -n "${CONN_INFO_FILE:-}" ]]; then
+        rm -f "$CONN_INFO_FILE"
+    fi
 }
 trap cleanup EXIT
 
@@ -31,35 +34,38 @@ trap cleanup EXIT
 if $START_SERVER; then
     echo "Starting mock server on port $PORT..."
     cd "$REPO_DIR"
-    go run ./cmd/mockserver -port "$PORT" -json 2>/dev/null &
+    CONN_INFO_FILE=$(mktemp)
+    go run -tags=testing ./cmd/mockserver -port "$PORT" -json >"$CONN_INFO_FILE" 2>/dev/null &
     SERVER_PID=$!
-    sleep 2
 
-    # Get connection info.
-    CONN_INFO=$(go run ./cmd/mockserver -port "$PORT" -json 2>/dev/null &
-    sleep 1; kill $! 2>/dev/null; wait $! 2>/dev/null || true)
+    # The mock server emits one JSON object before it starts listening. Wait for
+    # it and validate the fields before putting the bearer token in mcp.json.
+    for _ in {1..50}; do
+        if [[ -s "$CONN_INFO_FILE" ]]; then
+            break
+        fi
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            echo "Mock server exited before publishing connection info." >&2
+            exit 1
+        fi
+        sleep 0.1
+    done
+
+    if [[ ! -s "$CONN_INFO_FILE" ]]; then
+        echo "Timed out waiting for mock server connection info." >&2
+        exit 1
+    fi
+
+    ENDPOINT=$(jq -er '.endpoint | strings | select(startswith("http://"))' "$CONN_INFO_FILE")
+    KITE_MCP_TOKEN=$(jq -er '.token | strings | select(length > 0)' "$CONN_INFO_FILE")
 else
     echo "Assuming mock server is already running on port $PORT"
+    if [[ -z "${KITE_MCP_TOKEN:-}" ]]; then
+        echo "Set KITE_MCP_TOKEN when using an existing mock server." >&2
+        exit 1
+    fi
+    ENDPOINT="http://localhost:${PORT}/mcp"
 fi
-
-# Get token from running server.
-TOKEN=$(curl -s "http://localhost:${PORT}/mcp" -X POST \
-    -H "Content-Type: application/json" \
-    -d '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"eval","version":"1.0"}}}' \
-    2>/dev/null | head -c 1)
-
-# Actually, we need the token from the server. Let's generate it.
-# The mock server prints JSON with --json flag. For now, require manual token.
-if [[ -z "${KITE_MCP_TOKEN:-}" ]]; then
-    echo ""
-    echo "Set KITE_MCP_TOKEN to the bearer token from the mock server."
-    echo "Run: go run ./cmd/mockserver"
-    echo "Then: export KITE_MCP_TOKEN=<token from output>"
-    echo ""
-    exit 1
-fi
-
-ENDPOINT="http://localhost:${PORT}/mcp"
 
 # Write mcp.json for pi-mcp-adapter.
 cat > "$MCP_CONFIG" <<EOF

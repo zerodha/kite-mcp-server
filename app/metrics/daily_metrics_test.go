@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -94,5 +95,56 @@ func TestDailyMetricsWithLabels(t *testing.T) {
 		if !strings.Contains(output, expected.pattern) {
 			t.Errorf("Expected output to contain %s: %s\nFull output: %s", expected.description, expected.pattern, output)
 		}
+	}
+}
+
+func TestInstrumentSearchMetrics(t *testing.T) {
+	m := New(Config{ServiceName: "test-service"})
+	m.IncrementDailyWithLabels("instruments_search_mode", map[string]string{"mode": "get_by_id"})
+	m.IncrementDailyWithLabels("instruments_search_verbosity", map[string]string{"verbosity": "compact"})
+	m.IncrementDailyWithLabelsBy("instruments_search_results", map[string]string{
+		"mode":      "get_by_id",
+		"verbosity": "compact",
+		"count":     "3",
+	}, 3)
+
+	w := httptest.NewRecorder()
+	m.HTTPHandler()(w, httptest.NewRequest("GET", "/metrics", nil))
+
+	today := time.Now().UTC().Format("2006-01-02")
+	for _, expected := range []string{
+		fmt.Sprintf(`instruments_search_mode_total{date="%s",mode="get_by_id",service="test-service"} 1`, today),
+		fmt.Sprintf(`instruments_search_verbosity_total{date="%s",service="test-service",verbosity="compact"} 1`, today),
+		fmt.Sprintf(`instruments_search_results_total{count="3",date="%s",mode="get_by_id",service="test-service",verbosity="compact"} 3`, today),
+	} {
+		if !strings.Contains(w.Body.String(), expected) {
+			t.Errorf("expected metric %q in:\n%s", expected, w.Body.String())
+		}
+	}
+}
+
+func TestTrackDailyUserExportsLatestCountUnderConcurrency(t *testing.T) {
+	m := New(Config{ServiceName: "test-service"})
+	const users = 500
+
+	var wg sync.WaitGroup
+	wg.Add(users)
+	for i := 0; i < users; i++ {
+		go func(i int) {
+			defer wg.Done()
+			m.TrackDailyUser(fmt.Sprintf("user-%d", i))
+		}(i)
+	}
+	wg.Wait()
+
+	if got := m.GetTodayUserCount(); got != users {
+		t.Fatalf("unique user count = %d, want %d", got, users)
+	}
+	w := httptest.NewRecorder()
+	m.HTTPHandler()(w, httptest.NewRequest("GET", "/metrics", nil))
+	today := time.Now().UTC().Format("2006-01-02")
+	expected := fmt.Sprintf(`daily_unique_users_total{date="%s",service="test-service"} %d`, today, users)
+	if !strings.Contains(w.Body.String(), expected) {
+		t.Errorf("expected metric %q in:\n%s", expected, w.Body.String())
 	}
 }

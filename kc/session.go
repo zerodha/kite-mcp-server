@@ -12,7 +12,10 @@ import (
 
 const (
 	// Default session configuration
-	DefaultSessionDuration = 12 * time.Hour
+	// Keep the backing session alive for at least the default OAuth token
+	// lifetime. Callers that configure longer-lived tokens should pass that
+	// duration through NewSessionManagerWithDuration.
+	DefaultSessionDuration = 24 * time.Hour
 	DefaultCleanupInterval = 30 * time.Minute
 
 	// Error messages
@@ -47,10 +50,19 @@ type CleanupHook func(session *Session)
 
 // NewSessionManager creates a new manager for MCP sessions.
 func NewSessionManager(logger *slog.Logger) *SessionManager {
+	return NewSessionManagerWithDuration(logger, DefaultSessionDuration)
+}
+
+// NewSessionManagerWithDuration creates a session manager with the requested
+// session lifetime. A non-positive duration uses DefaultSessionDuration.
+func NewSessionManagerWithDuration(logger *slog.Logger, sessionDuration time.Duration) *SessionManager {
+	if sessionDuration <= 0 {
+		sessionDuration = DefaultSessionDuration
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &SessionManager{
 		sessions:        make(map[string]*Session),
-		sessionDuration: DefaultSessionDuration,
+		sessionDuration: sessionDuration,
 		cleanupHooks:    make([]CleanupHook, 0),
 		cleanupContext:  ctx,
 		cleanupCancel:   cancel,
@@ -125,7 +137,7 @@ func (sm *SessionManager) GetOrCreate(sessionID string) (*Session, bool, error) 
 	}
 	sm.sessions[sessionID] = session
 
-	return session, true, nil
+	return sm.copySession(session), true, nil
 }
 
 // Terminate marks a session as terminated and runs cleanup hooks.
@@ -190,7 +202,12 @@ func (sm *SessionManager) UpdateCredentials(sessionID string, creds *KiteCredent
 		return errors.New(errCannotUpdateTerminated)
 	}
 
-	session.Credentials = creds
+	// Credentials are caller-owned. Copy them so a caller cannot mutate session
+	// state after releasing this lock.
+	session.Credentials = copyCredentials(creds)
+	// A successful reauthentication starts a fresh session lifetime. This keeps
+	// the backing session available for tokens minted from the refreshed grant.
+	session.ExpiresAt = time.Now().Add(sm.sessionDuration)
 	return nil
 }
 
@@ -300,13 +317,18 @@ func (sm *SessionManager) copySession(original *Session) *Session {
 	}
 
 	// Deep copy credentials if present
-	if original.Credentials != nil {
-		copy.Credentials = &KiteCredentials{
-			AccessToken: original.Credentials.AccessToken,
-			UserID:      original.Credentials.UserID,
-			ExpiresAt:   original.Credentials.ExpiresAt,
-		}
-	}
+	copy.Credentials = copyCredentials(original.Credentials)
 
 	return copy
+}
+
+func copyCredentials(original *KiteCredentials) *KiteCredentials {
+	if original == nil {
+		return nil
+	}
+	return &KiteCredentials{
+		AccessToken: original.AccessToken,
+		UserID:      original.UserID,
+		ExpiresAt:   original.ExpiresAt,
+	}
 }

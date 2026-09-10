@@ -44,11 +44,14 @@ type Manager struct {
 	dailyUsers sync.Map // map[string]*userSet
 
 	// Prometheus metrics
-	registry        *prometheus.Registry
-	toolCallsVec    *prometheus.CounterVec
-	toolErrorsVec   *prometheus.CounterVec
-	dailyUsersVec   *prometheus.GaugeVec
-	genericCounters sync.Map // map[string]prometheus.Counter for dynamic counters
+	registry           *prometheus.Registry
+	toolCallsVec       *prometheus.CounterVec
+	toolErrorsVec      *prometheus.CounterVec
+	searchModeVec      *prometheus.CounterVec
+	searchVerbosityVec *prometheus.CounterVec
+	searchResultsVec   *prometheus.CounterVec
+	dailyUsersVec      *prometheus.GaugeVec
+	genericCounters    sync.Map // map[string]prometheus.Counter for dynamic counters
 
 	cleanupStop chan struct{}
 	cleanupOnce sync.Once
@@ -58,6 +61,7 @@ type Manager struct {
 type userSet struct {
 	users sync.Map // map[string]bool
 	count int64    // atomic counter
+	mu    sync.Mutex
 }
 
 // New creates a new metrics manager with the given configuration
@@ -100,8 +104,32 @@ func New(cfg Config) *Manager {
 		[]string{"date", "service"},
 	)
 
+	searchModeVec := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "instruments_search_mode_total",
+			Help: "Total instrument searches by lookup mode",
+		},
+		[]string{"mode", "date", "service"},
+	)
+
+	searchVerbosityVec := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "instruments_search_verbosity_total",
+			Help: "Total instrument searches by response verbosity",
+		},
+		[]string{"verbosity", "date", "service"},
+	)
+
+	searchResultsVec := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "instruments_search_results_total",
+			Help: "Total instrument searches by result count",
+		},
+		[]string{"mode", "verbosity", "count", "date", "service"},
+	)
+
 	// Register metrics
-	registry.MustRegister(toolCallsVec, toolErrorsVec, dailyUsersVec)
+	registry.MustRegister(toolCallsVec, toolErrorsVec, searchModeVec, searchVerbosityVec, searchResultsVec, dailyUsersVec)
 
 	m := &Manager{
 		serviceName:          cfg.ServiceName,
@@ -111,6 +139,9 @@ func New(cfg Config) *Manager {
 		registry:             registry,
 		toolCallsVec:         toolCallsVec,
 		toolErrorsVec:        toolErrorsVec,
+		searchModeVec:        searchModeVec,
+		searchVerbosityVec:   searchVerbosityVec,
+		searchResultsVec:     searchResultsVec,
 		dailyUsersVec:        dailyUsersVec,
 		cleanupStop:          make(chan struct{}),
 	}
@@ -185,7 +216,7 @@ func (m *Manager) IncrementDailyWithLabels(key string, labels map[string]string)
 func (m *Manager) IncrementDailyWithLabelsBy(key string, labels map[string]string, n int64) {
 	today := time.Now().UTC().Format("2006-01-02")
 
-	// Use Prometheus metrics for tool calls and errors
+	// Use Prometheus metrics for known daily metrics.
 	switch key {
 	case "tool_calls":
 		if tool, ok := labels["tool"]; ok {
@@ -207,6 +238,21 @@ func (m *Manager) IncrementDailyWithLabelsBy(key string, labels map[string]strin
 			}
 			m.toolErrorsVec.WithLabelValues(tool, errorType, sessionType, today, m.serviceName).Add(float64(n))
 		}
+	case "instruments_search_mode":
+		if mode := labels["mode"]; mode != "" {
+			m.searchModeVec.WithLabelValues(mode, today, m.serviceName).Add(float64(n))
+		}
+	case "instruments_search_verbosity":
+		if verbosity := labels["verbosity"]; verbosity != "" {
+			m.searchVerbosityVec.WithLabelValues(verbosity, today, m.serviceName).Add(float64(n))
+		}
+	case "instruments_search_results":
+		mode := labels["mode"]
+		verbosity := labels["verbosity"]
+		count := labels["count"]
+		if mode != "" && verbosity != "" && count != "" {
+			m.searchResultsVec.WithLabelValues(mode, verbosity, count, today, m.serviceName).Add(float64(n))
+		}
 	}
 }
 
@@ -224,10 +270,13 @@ func (m *Manager) TrackDailyUser(userID string) {
 		return // Skip if type assertion fails
 	}
 
+	// Keep the increment and gauge update ordered. Without this lock a goroutine
+	// which observed an earlier count can overwrite a newer gauge value.
+	dayUsers.mu.Lock()
+	defer dayUsers.mu.Unlock()
 	if _, exists := dayUsers.users.LoadOrStore(userID, true); !exists {
-		atomic.AddInt64(&dayUsers.count, 1)
-		// Update Prometheus gauge
-		m.dailyUsersVec.WithLabelValues(today, m.serviceName).Set(float64(atomic.LoadInt64(&dayUsers.count)))
+		count := atomic.AddInt64(&dayUsers.count, 1)
+		m.dailyUsersVec.WithLabelValues(today, m.serviceName).Set(float64(count))
 	}
 }
 

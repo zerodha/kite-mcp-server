@@ -3,6 +3,7 @@ package app
 import (
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"testing"
 )
@@ -178,6 +179,18 @@ func TestLoadConfig_InvalidOAuthTokenTTL(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_OAuthTokenTTLCannotExceedKiteSession(t *testing.T) {
+	t.Setenv("KITE_API_KEY", "test_key")
+	t.Setenv("KITE_API_SECRET", "test_secret")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-32-bytes-minimum")
+	t.Setenv("OAUTH_TOKEN_TTL", "25h")
+
+	err := NewApp(testLogger()).LoadConfig()
+	if err == nil {
+		t.Fatal("expected an error for a token longer than the Kite session")
+	}
+}
+
 func TestLoadConfig_MCPSessionTimeout(t *testing.T) {
 	t.Setenv("KITE_API_KEY", "test_key")
 	t.Setenv("KITE_API_SECRET", "test_secret")
@@ -266,5 +279,13 @@ func TestSetVersion(t *testing.T) {
 
 	if app.Version != testVersion {
 		t.Errorf("Expected version '%s', got '%s'", testVersion, app.Version)
+	}
+}
+
+func TestServeHTTPServerReturnsListenError(t *testing.T) {
+	app := NewApp(testLogger())
+	err := app.serveHTTPServer(&http.Server{Addr: "127.0.0.1:invalid-port"})
+	if err == nil {
+		t.Fatal("expected listen error")
 	}
 }

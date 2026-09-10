@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
@@ -46,6 +47,7 @@ type Config struct {
 	OAuthTokenTTL           string
 	MCPSessionTimeout       string
 	AllowedRedirectPatterns []string
+	TrustedProxyCIDRs       []string
 }
 
 const (
@@ -69,6 +71,7 @@ func NewApp(logger *slog.Logger) *App {
 			OAuthTokenTTL:           os.Getenv("OAUTH_TOKEN_TTL"),
 			MCPSessionTimeout:       os.Getenv("MCP_SESSION_TIMEOUT"),
 			AllowedRedirectPatterns: parseCSVEnv(os.Getenv("ALLOWED_REDIRECT_PATTERNS")),
+			TrustedProxyCIDRs:       parseCSVEnv(os.Getenv("TRUSTED_PROXY_CIDRS")),
 		},
 		Version:   "v0.0.0",
 		startTime: time.Now(),
@@ -119,11 +122,24 @@ func (app *App) LoadConfig() error {
 	if _, err := time.ParseDuration(app.Config.OAuthTokenTTL); err != nil {
 		return fmt.Errorf("invalid OAUTH_TOKEN_TTL: %w", err)
 	}
+	if tokenTTL, _ := time.ParseDuration(app.Config.OAuthTokenTTL); tokenTTL <= 0 {
+		return fmt.Errorf("OAUTH_TOKEN_TTL must be greater than zero")
+	} else if tokenTTL > kc.DefaultSessionDuration {
+		return fmt.Errorf("OAUTH_TOKEN_TTL must not exceed the Kite session lifetime of %s", kc.DefaultSessionDuration)
+	}
 	if app.Config.MCPSessionTimeout == "" {
 		app.Config.MCPSessionTimeout = DefaultMCPSessionTimeout
 	}
 	if _, err := time.ParseDuration(app.Config.MCPSessionTimeout); err != nil {
 		return fmt.Errorf("invalid MCP_SESSION_TIMEOUT: %w", err)
+	}
+	if sessionTimeout, _ := time.ParseDuration(app.Config.MCPSessionTimeout); sessionTimeout <= 0 {
+		return fmt.Errorf("MCP_SESSION_TIMEOUT must be greater than zero")
+	}
+	for _, cidr := range app.Config.TrustedProxyCIDRs {
+		if _, err := netip.ParsePrefix(cidr); err != nil {
+			return fmt.Errorf("invalid TRUSTED_PROXY_CIDRS entry %q: %w", cidr, err)
+		}
 	}
 	return nil
 }
@@ -150,6 +166,10 @@ func (app *App) configureHTTPClient() {
 
 func (app *App) initializeServices() (*mcpsdk.Server, error) {
 	app.logger.Info("Initializing services...")
+	tokenTTL, err := time.ParseDuration(app.Config.OAuthTokenTTL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid OAUTH_TOKEN_TTL: %w", err)
+	}
 	// --- Instruments Manager ---
 	instManager, err := instruments.New(instruments.Config{Logger: app.logger})
 	if err != nil {
@@ -162,15 +182,16 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 		AdminSecretPath: app.Config.AdminSecretPath,
 		AutoCleanup:     true,
 	})
-	app.rateLimiter = web.NewRateLimiter()
+	app.rateLimiter = web.NewRateLimiter(app.Config.TrustedProxyCIDRs...)
 
 	// --- Kite Connect Manager ---
 	kcManager, err := kc.New(kc.Config{
-		APIKey:      app.Config.KiteAPIKey,
-		APISecret:   app.Config.KiteAPISecret,
-		Logger:      app.logger,
-		Metrics:     app.metrics,
-		Instruments: instManager,
+		APIKey:          app.Config.KiteAPIKey,
+		APISecret:       app.Config.KiteAPISecret,
+		Logger:          app.logger,
+		Metrics:         app.metrics,
+		Instruments:     instManager,
+		SessionDuration: max(tokenTTL, kc.DefaultSessionDuration),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Kite Connect manager: %w", err)
@@ -178,15 +199,12 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 	app.kcManager = kcManager
 
 	// --- JWT OAuth Server ---
-	tokenTTL, err := time.ParseDuration(app.Config.OAuthTokenTTL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid OAUTH_TOKEN_TTL: %w", err)
-	}
 	app.oauthServer = oauth.New(oauth.Config{
 		Issuer:                  app.Config.OAuthIssuer,
 		JWTSecret:               []byte(app.Config.JWTSecret),
 		TokenTTL:                tokenTTL,
 		AllowedRedirectPatterns: app.Config.AllowedRedirectPatterns,
+		TrustedProxyCIDRs:       app.Config.TrustedProxyCIDRs,
 	})
 	app.jwtOauthHandlers = oauth.NewHandlers(app.oauthServer, app.kcManager, app.logger)
 
@@ -248,10 +266,12 @@ func (app *App) setupMux() *http.ServeMux {
 	return mux
 }
 
-func (app *App) serveHTTPServer(srv *http.Server) {
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		app.logger.Error("HTTP server error", "error", err)
+func (app *App) serveHTTPServer(srv *http.Server) error {
+	err := srv.ListenAndServe()
+	if err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("HTTP server error: %w", err)
 	}
+	return nil
 }
 
 // securityHeaders wraps a handler with standard security headers.
@@ -280,6 +300,5 @@ func (app *App) startServer(srv *http.Server, mcpServer *mcpsdk.Server, url stri
 	mux := app.setupMux()
 	mux.Handle("/mcp", app.oauthServer.Middleware(http.HandlerFunc(streamable.ServeHTTP)))
 	srv.Handler = securityHeaders(mux)
-	app.serveHTTPServer(srv)
-	return nil
+	return app.serveHTTPServer(srv)
 }

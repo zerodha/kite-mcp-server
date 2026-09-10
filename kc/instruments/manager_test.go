@@ -95,6 +95,78 @@ func hijackInstrumentsURL(testURL string) func() {
 	}
 }
 
+func TestUpdateRejectsInvalidResponsesWithoutReplacingCatalog(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "non-success status", status: http.StatusServiceUnavailable, body: `{"status":"error","message":"unavailable"}`},
+		{name: "empty dataset", status: http.StatusOK, body: "\n\t "},
+		{name: "error object", status: http.StatusOK, body: `{"status":"error","message":"unavailable"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+			restore := hijackInstrumentsURL(server.URL)
+			defer restore()
+
+			manager := newTestManager()
+			defer manager.Shutdown()
+			manager.config.RetryAttempts = 1
+			before := manager.Count()
+
+			if err := manager.ForceUpdateInstruments(); err == nil {
+				t.Fatal("ForceUpdateInstruments succeeded for an invalid response")
+			}
+			if got := manager.Count(); got != before {
+				t.Fatalf("catalog changed after a failed update: got %d instruments, want %d", got, before)
+			}
+		})
+	}
+}
+
+func TestNextScheduledUpdateIsIndependentOfProcessStartTime(t *testing.T) {
+	ist, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		now  time.Time
+		want time.Time
+	}{
+		{
+			name: "before scheduled time",
+			now:  time.Date(2025, time.January, 2, 7, 59, 0, 0, ist),
+			want: time.Date(2025, time.January, 2, 8, 0, 0, 0, ist),
+		},
+		{
+			name: "after scheduled time",
+			now:  time.Date(2025, time.January, 2, 8, 1, 0, 0, ist),
+			want: time.Date(2025, time.January, 3, 8, 0, 0, 0, ist),
+		},
+		{
+			name: "exact scheduled time runs immediately",
+			now:  time.Date(2025, time.January, 2, 8, 0, 0, 0, ist),
+			want: time.Date(2025, time.January, 2, 8, 0, 0, 0, ist),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := nextScheduledUpdate(tt.now, 8, 0); !got.Equal(tt.want) {
+				t.Fatalf("nextScheduledUpdate() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
 // getTestInstruments returns test instrument data for use across tests
 func getTestInstruments() []*Instrument {
 	return []*Instrument{

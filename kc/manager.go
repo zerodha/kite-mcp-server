@@ -24,6 +24,9 @@ type Config struct {
 	Metrics     *metrics.Manager
 	Instruments *instruments.Manager
 	KiteBaseURI string // Override Kite Connect API base URL (for testing)
+	// SessionDuration is the backing session lifetime. It must be at least as
+	// long as the OAuth access-token lifetime.
+	SessionDuration time.Duration
 }
 
 // New creates a new kc Manager with the given configuration
@@ -42,12 +45,13 @@ func New(cfg Config) (*Manager, error) {
 	}
 
 	m := &Manager{
-		apiKey:      cfg.APIKey,
-		apiSecret:   cfg.APISecret,
-		kiteBaseURI: cfg.KiteBaseURI,
-		Logger:      cfg.Logger,
-		metrics:     cfg.Metrics,
-		Instruments: cfg.Instruments,
+		apiKey:          cfg.APIKey,
+		apiSecret:       cfg.APISecret,
+		kiteBaseURI:     cfg.KiteBaseURI,
+		sessionDuration: cfg.SessionDuration,
+		Logger:          cfg.Logger,
+		metrics:         cfg.Metrics,
+		Instruments:     cfg.Instruments,
 	}
 
 	if err := m.initializeTemplates(); err != nil {
@@ -76,15 +80,16 @@ const (
 
 // Manager orchestrates Kite Connect interactions and session management.
 type Manager struct {
-	apiKey         string
-	apiSecret      string
-	kiteBaseURI    string // Override for Kite Connect API base URL (testing)
-	Logger         *slog.Logger
-	metrics        *metrics.Manager
-	templates      map[string]*template.Template
-	sessionManager *SessionManager
-	sessionSigner  *SessionSigner
-	Instruments    *instruments.Manager
+	apiKey          string
+	apiSecret       string
+	kiteBaseURI     string // Override for Kite Connect API base URL (testing)
+	sessionDuration time.Duration
+	Logger          *slog.Logger
+	metrics         *metrics.Manager
+	templates       map[string]*template.Template
+	sessionManager  *SessionManager
+	sessionSigner   *SessionSigner
+	Instruments     *instruments.Manager
 }
 
 // Metrics returns the metrics manager instance
@@ -111,7 +116,7 @@ func (m *Manager) initializeSessionSigner() error {
 }
 
 func (m *Manager) initializeSessionManager() {
-	sessionManager := NewSessionManager(m.Logger)
+	sessionManager := NewSessionManagerWithDuration(m.Logger, m.sessionDuration)
 	sessionManager.AddCleanupHook(func(s *Session) {
 		m.Logger.Info("Cleaning up session", "session_id", s.ID)
 	})
@@ -125,9 +130,12 @@ func (m *Manager) GetAuthenticatedClient(sessionID string) (*kiteconnect.Client,
 		return nil, errors.New("invalid session ID")
 	}
 
-	session, _, err := m.sessionManager.GetOrCreate(sessionID)
+	session, err := m.sessionManager.Get(sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get or create session: %w", err)
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+	if time.Now().After(session.ExpiresAt) {
+		return nil, errors.New("kite session has expired. Please re-authenticate via the OAuth flow")
 	}
 
 	if session.Credentials == nil {

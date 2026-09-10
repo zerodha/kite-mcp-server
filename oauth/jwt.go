@@ -17,13 +17,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/modelcontextprotocol/go-sdk/auth"
 )
 
 // Config holds OAuth server configuration
@@ -43,6 +46,14 @@ type Config struct {
 	// - prefix:... patterns for known hosted providers with dynamic callback paths,
 	//   e.g. prefix:https://chatgpt.com/connector/oauth/
 	AllowedRedirectPatterns []string
+	// TrustedProxyCIDRs identifies reverse proxies allowed to supply
+	// X-Forwarded-For. With the default empty list, the direct peer is used.
+	TrustedProxyCIDRs []string
+	// ClientTTL bounds retention of dynamically and automatically registered
+	// public clients. Zero defaults to 24 hours.
+	ClientTTL time.Duration
+	// MaxClients bounds in-memory client metadata. Zero defaults to 10,000.
+	MaxClients int
 }
 
 // Server is the simplified OAuth server
@@ -50,10 +61,11 @@ type Server struct {
 	config Config
 
 	// In-memory stores (replace with Redis/DB for production)
-	mu            sync.RWMutex
-	clients       map[string]*Client   // client_id -> client
-	authCodes     map[string]*AuthCode // code -> auth code data
-	pkceVerifiers map[string]string    // code -> code_verifier hash
+	mu             sync.RWMutex
+	clients        map[string]*Client   // client_id -> client
+	authCodes      map[string]*AuthCode // code -> auth code data
+	pkceVerifiers  map[string]string    // code -> code_verifier hash
+	trustedProxies []netip.Prefix
 }
 
 // Client represents an OAuth client (auto-registered)
@@ -61,6 +73,7 @@ type Client struct {
 	ID           string
 	RedirectURIs []string
 	CreatedAt    time.Time
+	ExpiresAt    time.Time
 }
 
 // AuthCode represents a pending authorization code
@@ -88,7 +101,7 @@ type TokenClaims struct {
 // New creates a new simplified OAuth server
 func New(cfg Config) *Server {
 	if cfg.TokenTTL == 0 {
-		cfg.TokenTTL = 6 * time.Hour
+		cfg.TokenTTL = 24 * time.Hour
 	}
 	if cfg.AuthCodeTTL == 0 {
 		cfg.AuthCodeTTL = 10 * time.Minute
@@ -96,11 +109,25 @@ func New(cfg Config) *Server {
 	if len(cfg.AllowedRedirectPatterns) == 0 {
 		cfg.AllowedRedirectPatterns = []string{"localhost"}
 	}
+	if cfg.ClientTTL <= 0 {
+		cfg.ClientTTL = 24 * time.Hour
+	}
+	if cfg.MaxClients <= 0 {
+		cfg.MaxClients = 10000
+	}
+	trustedProxies := make([]netip.Prefix, 0, len(cfg.TrustedProxyCIDRs))
+	for _, raw := range cfg.TrustedProxyCIDRs {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(raw))
+		if err == nil {
+			trustedProxies = append(trustedProxies, prefix)
+		}
+	}
 	return &Server{
-		config:        cfg,
-		clients:       make(map[string]*Client),
-		authCodes:     make(map[string]*AuthCode),
-		pkceVerifiers: make(map[string]string),
+		config:         cfg,
+		clients:        make(map[string]*Client),
+		authCodes:      make(map[string]*AuthCode),
+		pkceVerifiers:  make(map[string]string),
+		trustedProxies: trustedProxies,
 	}
 }
 
@@ -198,6 +225,7 @@ func (s *Server) ValidateRedirectURI(redirectURI string) error {
 func (s *Server) GetOrCreateClient(clientID, redirectURI string) *Client {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.cleanupExpiredClientsLocked(time.Now())
 
 	if client, ok := s.clients[clientID]; ok {
 		// Add redirect URI if not already present
@@ -211,13 +239,56 @@ func (s *Server) GetOrCreateClient(clientID, redirectURI string) *Client {
 	}
 
 	// Auto-register new client
+	s.evictClientIfNeededLocked()
 	client := &Client{
 		ID:           clientID,
 		RedirectURIs: []string{redirectURI},
 		CreatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(s.config.ClientTTL),
 	}
 	s.clients[clientID] = client
 	return client
+}
+
+func (s *Server) cleanupExpiredClientsLocked(now time.Time) {
+	for id, client := range s.clients {
+		if !client.ExpiresAt.IsZero() && !now.Before(client.ExpiresAt) {
+			delete(s.clients, id)
+		}
+	}
+}
+
+func (s *Server) evictClientIfNeededLocked() {
+	if len(s.clients) < s.config.MaxClients {
+		return
+	}
+	var oldestID string
+	var oldest time.Time
+	for id, client := range s.clients {
+		if oldestID == "" || client.CreatedAt.Before(oldest) {
+			oldestID, oldest = id, client.CreatedAt
+		}
+	}
+	if oldestID != "" {
+		delete(s.clients, oldestID)
+	}
+}
+
+// RegisterClient stores bounded dynamic client metadata.
+func (s *Server) RegisterClient(redirectURIs []string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	s.cleanupExpiredClientsLocked(now)
+	s.evictClientIfNeededLocked()
+	clientID := generateSecureToken(16)
+	s.clients[clientID] = &Client{
+		ID:           clientID,
+		RedirectURIs: append([]string(nil), redirectURIs...),
+		CreatedAt:    now,
+		ExpiresAt:    now.Add(s.config.ClientTTL),
+	}
+	return clientID
 }
 
 // --- Authorization Endpoint ---
@@ -412,28 +483,69 @@ func (s *Server) ValidateToken(tokenString string) (*TokenClaims, error) {
 
 // Middleware returns HTTP middleware that validates Bearer tokens
 func (s *Server) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") {
-			s.writeUnauthorized(w, "missing bearer token")
-			return
-		}
-
-		tokenString := strings.TrimPrefix(auth, "Bearer ")
-		claims, err := s.ValidateToken(tokenString)
+	verifier := func(_ context.Context, token string, r *http.Request) (*auth.TokenInfo, error) {
+		claims, err := s.ValidateToken(token)
 		if err != nil {
-			s.writeUnauthorized(w, "invalid or expired token")
-			return
+			return nil, auth.ErrInvalidToken
 		}
-
-		// Set custom header for tool handlers to read session ID
-		// (don't use Mcp-Session-Id - that's managed by the SDK)
+		// This is distinct from Mcp-Session-Id, which is owned by the SDK.
 		r.Header.Set("X-Kite-Session-Id", claims.SessionID)
-
-		// Add claims to context
-		ctx := context.WithValue(r.Context(), claimsKey{}, claims)
+		return &auth.TokenInfo{
+			UserID:     claims.KiteUserID,
+			Expiration: claims.ExpiresAt.Time,
+			Extra:      map[string]any{"kite_claims": claims},
+		}, nil
+	}
+	return auth.RequireBearerToken(verifier, &auth.RequireBearerTokenOptions{
+		ResourceMetadataURL: s.config.Issuer + "/.well-known/oauth-protected-resource",
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		if tokenInfo := auth.TokenInfoFromContext(ctx); tokenInfo != nil {
+			if claims, ok := tokenInfo.Extra["kite_claims"].(*TokenClaims); ok {
+				ctx = context.WithValue(ctx, claimsKey{}, claims)
+			}
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+	}))
+}
+
+// ClientIP returns a proxied client address only when the direct peer belongs
+// to a configured trusted proxy network. It walks X-Forwarded-For from the
+// proxy side and returns the first untrusted hop.
+func (s *Server) ClientIP(r *http.Request) string {
+	peer, ok := parseRemoteAddr(r.RemoteAddr)
+	if !ok {
+		return r.RemoteAddr
+	}
+	if !s.isTrustedProxy(peer) {
+		return peer.String()
+	}
+	hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		hop, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
+		if err == nil && !s.isTrustedProxy(hop) {
+			return hop.String()
+		}
+	}
+	return peer.String()
+}
+
+func parseRemoteAddr(value string) (netip.Addr, bool) {
+	host, _, err := net.SplitHostPort(value)
+	if err == nil {
+		value = host
+	}
+	addr, err := netip.ParseAddr(value)
+	return addr, err == nil
+}
+
+func (s *Server) isTrustedProxy(addr netip.Addr) bool {
+	for _, prefix := range s.trustedProxies {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 type claimsKey struct{}

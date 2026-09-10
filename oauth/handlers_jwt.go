@@ -2,8 +2,8 @@ package oauth
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"time"
 
@@ -87,7 +87,7 @@ var callbackRateLimiter = NewRateLimiter(30, time.Minute)
 
 // HandleCallback handles GET /callback from KiteConnect
 func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
-	clientIP := extractClientIP(r)
+	clientIP := h.server.ClientIP(r)
 	if !callbackRateLimiter.Allow(clientIP) {
 		http.Error(w, "too many requests", http.StatusTooManyRequests)
 		return
@@ -135,19 +135,15 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// OAuth flow - clean up temp session, create permanent user session
+	// OAuth flow - clean up the temporary state and create a fresh, opaque
+	// grant session. Reusing the Kite user ID here would let a later login
+	// recreate an identifier revoked by logout and revive an old JWT.
 	defer func() { _, _ = h.kcManager.SessionManager().Terminate(sessionID) }()
 
-	// Create or get persistent session for the user
-	userSession, _, err := h.kcManager.SessionManager().GetOrCreate(creds.UserID)
-	if err != nil {
-		h.logger.Error("failed to create user session", "error", err)
-		http.Error(w, "session error", http.StatusInternalServerError)
-		return
-	}
+	userSessionID := h.kcManager.SessionManager().Generate()
 
 	// Update credentials in the user session
-	if err := h.kcManager.SessionManager().UpdateCredentials(userSession.ID, creds); err != nil {
+	if err := h.kcManager.SessionManager().UpdateCredentials(userSessionID, creds); err != nil {
 		h.logger.Error("failed to update user session credentials", "error", err)
 		http.Error(w, "session error", http.StatusInternalServerError)
 		return
@@ -158,7 +154,7 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		pending.ClientID,
 		pending.RedirectURI,
 		creds.UserID,
-		userSession.ID,
+		userSessionID,
 		pending.CodeChallenge,
 	)
 	if err != nil {
@@ -237,15 +233,12 @@ type RegisterRequest struct {
 	ClientName   string   `json:"client_name,omitempty"`
 }
 
-// extractClientIP returns the client IP, stripping port from RemoteAddr.
-// Does NOT trust X-Forwarded-For (should be handled at reverse proxy level).
-func extractClientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
+const (
+	maxDCRBodyBytes    = 16 << 10
+	maxDCRRedirectURIs = 10
+	maxDCRURIBytes     = 2048
+	maxDCRClientName   = 256
+)
 
 // HandleRegister handles POST /register (RFC 7591 Dynamic Client Registration)
 func (h *Handlers) HandleRegister(w http.ResponseWriter, r *http.Request) {
@@ -263,7 +256,7 @@ func (h *Handlers) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientIP := extractClientIP(r)
+	clientIP := h.server.ClientIP(r)
 	if !registerRateLimiter.Allow(clientIP) {
 		WriteJSON(w, http.StatusTooManyRequests, map[string]string{
 			"error":             "rate_limit_exceeded",
@@ -272,8 +265,17 @@ func (h *Handlers) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxDCRBodyBytes)
 	var req RegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&req); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_client_metadata",
+			"error_description": "Invalid request body.",
+		})
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{
 			"error":             "invalid_client_metadata",
 			"error_description": "Invalid request body.",
@@ -281,7 +283,7 @@ func (h *Handlers) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.RedirectURIs) == 0 {
+	if len(req.RedirectURIs) == 0 || len(req.RedirectURIs) > maxDCRRedirectURIs || len(req.ClientName) > maxDCRClientName {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{
 			"error":             "invalid_client_metadata",
 			"error_description": "redirect_uris is required",
@@ -291,6 +293,13 @@ func (h *Handlers) HandleRegister(w http.ResponseWriter, r *http.Request) {
 
 	// Validate all redirect URIs against allowlist
 	for _, uri := range req.RedirectURIs {
+		if len(uri) == 0 || len(uri) > maxDCRURIBytes {
+			WriteJSON(w, http.StatusBadRequest, map[string]string{
+				"error":             "invalid_client_metadata",
+				"error_description": "Invalid redirect URI metadata.",
+			})
+			return
+		}
 		if err := h.server.ValidateRedirectURI(uri); err != nil {
 			h.logger.Warn("rejected DCR redirect_uri", "redirect_uri", uri, "error", err)
 			WriteJSON(w, http.StatusBadRequest, map[string]string{
@@ -301,15 +310,7 @@ func (h *Handlers) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	clientID := generateSecureToken(16)
-
-	h.server.mu.Lock()
-	h.server.clients[clientID] = &Client{
-		ID:           clientID,
-		RedirectURIs: req.RedirectURIs,
-		CreatedAt:    time.Now(),
-	}
-	h.server.mu.Unlock()
+	clientID := h.server.RegisterClient(req.RedirectURIs)
 
 	h.logger.Info("client registered via DCR", "client_id", clientID, "name", req.ClientName)
 

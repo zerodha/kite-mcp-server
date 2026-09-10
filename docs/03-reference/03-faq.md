@@ -17,7 +17,7 @@ Any MCP-compatible client. Setup guides are available for [[Claude Desktop]], [[
 Yes. A Zerodha account with Kite is all that is required.
 
 **How long do sessions last?**
-Approximately 12 hours, matching Kite Connect's session duration. Re-authenticate when the session expires.
+Up to 24 hours, matching the configured Kite session lifetime. Re-authenticate when the session expires.
 
 ## Security
 

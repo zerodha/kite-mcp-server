@@ -210,7 +210,13 @@ func ApplyPagination[T any](data []T, params PaginationParams) []T {
 	if params.Limit <= 0 {
 		return data[from:]
 	}
-	end := min(from+params.Limit, len(data))
+	// Avoid overflow when limit comes from an untrusted MCP request. Comparing
+	// against the remaining length also keeps the slice bounds valid.
+	remaining := len(data) - from
+	end := len(data)
+	if params.Limit < remaining {
+		end = from + params.Limit
+	}
 	return data[from:end]
 }
 

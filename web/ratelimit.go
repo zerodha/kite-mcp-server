@@ -4,6 +4,8 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/netip"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,13 +24,50 @@ type RateLimiter struct {
 	mu             sync.Mutex
 	cleanupCancel  context.CancelFunc
 	cleanupRunning bool
+	trustedProxies []netip.Prefix
 }
 
 // NewRateLimiter creates a new rate limiter manager.
-func NewRateLimiter() *RateLimiter {
-	return &RateLimiter{
+// Trusted proxy CIDRs are optional. X-Forwarded-For is used only when the
+// direct peer belongs to one of them, so clients cannot choose their own key.
+func NewRateLimiter(trustedProxyCIDRs ...string) *RateLimiter {
+	m := &RateLimiter{
 		limiters: make(map[string]*limiterEntry),
 	}
+	for _, cidr := range trustedProxyCIDRs {
+		if prefix, err := netip.ParsePrefix(strings.TrimSpace(cidr)); err == nil {
+			m.trustedProxies = append(m.trustedProxies, prefix)
+		}
+	}
+	return m
+}
+
+func (m *RateLimiter) clientIP(r *http.Request) string {
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
+	peer, err := netip.ParseAddr(ip)
+	if err != nil || !m.isTrustedProxy(peer) {
+		return ip
+	}
+	hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		candidate := strings.TrimSpace(hops[i])
+		if parsed, err := netip.ParseAddr(candidate); err == nil && !m.isTrustedProxy(parsed) {
+			return parsed.String()
+		}
+	}
+	return ip
+}
+
+func (m *RateLimiter) isTrustedProxy(peer netip.Addr) bool {
+	for _, prefix := range m.trustedProxies {
+		if prefix.Contains(peer) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *RateLimiter) getLimiter(ip string) *rate.Limiter {
@@ -60,10 +99,7 @@ func (m *RateLimiter) getLimiter(ip string) *rate.Limiter {
 // Middleware returns a middleware that enforces rate limiting.
 func (m *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			ip = r.RemoteAddr
-		}
+		ip := m.clientIP(r)
 		if !m.getLimiter(ip).Allow() {
 			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 			return

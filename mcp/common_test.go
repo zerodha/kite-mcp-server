@@ -124,6 +124,7 @@ func TestPagination(t *testing.T) {
 			{"from only no limit", PaginationParams{From: 5, Limit: 0}, []int{5, 6, 7, 8, 9}},
 			{"beyond bounds", PaginationParams{From: 15, Limit: 5}, []int{}},
 			{"negative from", PaginationParams{From: -5, Limit: 3}, []int{0, 1, 2}},
+			{"overflowing limit", PaginationParams{From: 2, Limit: int(^uint(0) >> 1)}, []int{2, 3, 4, 5, 6, 7, 8, 9}},
 		}
 
 		for _, tc := range testCases {
