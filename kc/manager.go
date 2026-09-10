@@ -132,7 +132,10 @@ func (m *Manager) GetAuthenticatedClient(sessionID string) (*kiteconnect.Client,
 
 	session, err := m.sessionManager.Get(sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get session: %w", err)
+		// A logged-out or expired grant must never be recreated here. Preserve the
+		// existing user-facing reauthentication guidance without revealing whether
+		// a particular opaque session ID ever existed.
+		return nil, errors.New("not logged into Kite. Please authenticate via the OAuth flow")
 	}
 	if time.Now().After(session.ExpiresAt) {
 		return nil, errors.New("kite session has expired. Please re-authenticate via the OAuth flow")
