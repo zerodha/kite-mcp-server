@@ -159,6 +159,25 @@ func (*InstrumentsSearchTool) Handler(manager *kc.Manager) server.ToolHandlerFun
 	}
 }
 
+// parseHistoricalDate accepts "2006-01-02 15:04:05" and "2006-01-02".
+// time.Parse keeps the clock in UTC, and the Kite client formats that same
+// clock back out, so the digits reach Kite unchanged. A date-only end bound
+// is 23:59:59 so that calendar day is included.
+func parseHistoricalDate(value string, endOfDay bool) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if parsed, err := time.Parse("2006-01-02 15:04:05", value); err == nil {
+		return parsed, nil
+	}
+	day, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if endOfDay {
+		return day.Add(23*time.Hour + 59*time.Minute + 59*time.Second), nil
+	}
+	return day, nil
+}
+
 type HistoricalDataTool struct{}
 
 func (*HistoricalDataTool) Tool() mcp.Tool {
@@ -169,11 +188,11 @@ func (*HistoricalDataTool) Tool() mcp.Tool {
 			mcp.Required(),
 		),
 		mcp.WithString("from_date",
-			mcp.Description("From date in YYYY-MM-DD HH:MM:SS format"),
+			mcp.Description("From date in YYYY-MM-DD or YYYY-MM-DD HH:MM:SS format. A date without a time uses 00:00:00."),
 			mcp.Required(),
 		),
 		mcp.WithString("to_date",
-			mcp.Description("To date in YYYY-MM-DD HH:MM:SS format"),
+			mcp.Description("To date in YYYY-MM-DD or YYYY-MM-DD HH:MM:SS format. A date without a time uses 23:59:59 so that day is included."),
 			mcp.Required(),
 		),
 		mcp.WithString("interval",
@@ -207,14 +226,14 @@ func (*HistoricalDataTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		instrumentToken := SafeAssertInt(args["instrument_token"], 0)
 
 		// Parse from_date and to_date
-		fromDate, err := time.Parse("2006-01-02 15:04:05", SafeAssertString(args["from_date"], ""))
+		fromDate, err := parseHistoricalDate(SafeAssertString(args["from_date"], ""), false)
 		if err != nil {
-			return mcp.NewToolResultError("Failed to parse from_date, use format YYYY-MM-DD HH:MM:SS"), nil
+			return mcp.NewToolResultError("Failed to parse from_date, use YYYY-MM-DD or YYYY-MM-DD HH:MM:SS"), nil
 		}
 
-		toDate, err := time.Parse("2006-01-02 15:04:05", SafeAssertString(args["to_date"], ""))
+		toDate, err := parseHistoricalDate(SafeAssertString(args["to_date"], ""), true)
 		if err != nil {
-			return mcp.NewToolResultError("Failed to parse to_date, use format YYYY-MM-DD HH:MM:SS"), nil
+			return mcp.NewToolResultError("Failed to parse to_date, use YYYY-MM-DD or YYYY-MM-DD HH:MM:SS"), nil
 		}
 
 		// Get other parameters
