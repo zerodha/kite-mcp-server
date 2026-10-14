@@ -227,6 +227,27 @@ func TestClearSession(t *testing.T) {
 	}
 }
 
+func TestMCPDeleteDoesNotDropKiteLogin(t *testing.T) {
+	manager, err := newTestManager("test_key", "test_secret")
+	if err != nil {
+		t.Fatalf("Expected no error creating manager, got: %v", err)
+	}
+
+	sessionID := manager.GenerateSession()
+
+	isNotAllowed, err := manager.SessionManager().Terminate(sessionID)
+	if err != nil {
+		t.Fatalf("Expected no error from MCP DELETE, got: %v", err)
+	}
+	if !isNotAllowed {
+		t.Fatal("Expected MCP DELETE to be refused once Kite session data exists")
+	}
+
+	if _, err := manager.GetSession(sessionID); err != nil {
+		t.Fatalf("Expected Kite session to survive MCP DELETE, got: %v", err)
+	}
+}
+
 func TestSessionLoginURL(t *testing.T) {
 	manager, err := newTestManager("test_key", "test_secret")
 	if err != nil {

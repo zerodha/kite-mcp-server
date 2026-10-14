@@ -304,12 +304,13 @@ func (m *Manager) ClearSession(sessionID string) {
 		return
 	}
 
-	// Terminate the session, which will trigger cleanup hooks
-	if _, err := m.sessionManager.Terminate(sessionID); err != nil {
+	// ForceTerminate runs cleanup hooks even when the session holds Kite login
+	// state. The MCP DELETE handler uses Terminate, which refuses that case.
+	if err := m.sessionManager.ForceTerminate(sessionID); err != nil {
 		m.Logger.Error("Error terminating session", "session_id", sessionID, "error", err)
-	} else {
-		m.Logger.Info("Cleaning up Kite session for MCP session ID", "session_id", sessionID)
+		return
 	}
+	m.Logger.Info("Cleaning up Kite session for MCP session ID", "session_id", sessionID)
 }
 
 // ClearSessionData clears the session data without terminating the session
