@@ -156,29 +156,65 @@ func (sm *SessionRegistry) Validate(sessionID string) (isTerminated bool, err er
 	return session.Terminated, nil
 }
 
-// Terminate marks a MCP session ID as terminated and cleans up associated Kite session
+// Terminate marks a bare MCP session as terminated.
+//
+// mcp-go calls this on HTTP DELETE with an Mcp-Session-Id header. Clients
+// often send that DELETE as soon as the login tool returns, before the user
+// opens the authorize link. A session that already holds Kite login state
+// must survive that transport DELETE, or the authorize page reports that the
+// session is gone. isNotAllowed tells the HTTP layer to reject the DELETE
+// with 405. Explicit logout uses ForceTerminate.
 func (sm *SessionRegistry) Terminate(sessionID string) (isNotAllowed bool, err error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	// Check if sessionID has the correct prefix and valid UUID format
-	if err := checkSessionID(sessionID); err != nil {
+	session, err := sm.sessionForTermination(sessionID)
+	if err != nil {
 		return false, err
+	}
+
+	if session.Data != nil {
+		sm.logger.Info("Refusing MCP DELETE for a session that holds Kite login state", "session_id", sessionID)
+		return true, nil
+	}
+
+	sm.terminateLocked(session)
+	return false, nil
+}
+
+// ForceTerminate marks a session terminated and runs cleanup hooks even when
+// the session holds Kite login state. Manager.ClearSession uses this.
+func (sm *SessionRegistry) ForceTerminate(sessionID string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, err := sm.sessionForTermination(sessionID)
+	if err != nil {
+		return err
+	}
+
+	sm.terminateLocked(session)
+	return nil
+}
+
+func (sm *SessionRegistry) sessionForTermination(sessionID string) (*MCPSession, error) {
+	if err := checkSessionID(sessionID); err != nil {
+		return nil, err
 	}
 
 	session, exists := sm.sessions[sessionID]
 	if !exists {
-		return false, errors.New(errSessionNotFound)
+		return nil, errors.New(errSessionNotFound)
 	}
 
-	session.Terminated = true
+	return session, nil
+}
 
-	// Call cleanup hooks for associated Kite sessions
+func (sm *SessionRegistry) terminateLocked(session *MCPSession) {
+	session.Terminated = true
 	for _, hook := range sm.cleanupHooks {
 		hook(session)
 	}
-
-	return false, nil
 }
 
 // GetSession retrieves a MCP session by ID (helper method)

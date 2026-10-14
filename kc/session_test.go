@@ -206,8 +206,41 @@ func TestSessionDataOperations(t *testing.T) {
 		t.Error("Expected retrieved data to match original data")
 	}
 
-	// Test updating terminated session
-	_, _ = manager.Terminate(sessionID)
+	// A session that already holds data must survive the MCP DELETE path.
+	hookCalled := false
+	manager.AddCleanupHook(func(session *MCPSession) {
+		if session.ID == sessionID {
+			hookCalled = true
+		}
+	})
+
+	isNotAllowed, err := manager.Terminate(sessionID)
+	if err != nil {
+		t.Errorf("Expected no error refusing termination, got: %v", err)
+	}
+	if !isNotAllowed {
+		t.Error("Expected termination to be refused while the session holds data")
+	}
+	if hookCalled {
+		t.Error("Expected cleanup hook not to run when termination is refused")
+	}
+
+	isTerminated, err := manager.Validate(sessionID)
+	if err != nil {
+		t.Errorf("Expected session to remain valid, got: %v", err)
+	}
+	if isTerminated {
+		t.Error("Expected session with data to stay active after MCP DELETE")
+	}
+
+	// Explicit wipe still terminates and blocks further updates.
+	if err := manager.ForceTerminate(sessionID); err != nil {
+		t.Errorf("Expected ForceTerminate to succeed, got: %v", err)
+	}
+	if !hookCalled {
+		t.Error("Expected cleanup hook to run on ForceTerminate")
+	}
+
 	err = manager.UpdateSessionData(sessionID, testData)
 	if err == nil {
 		t.Error("Expected error when updating terminated session")
