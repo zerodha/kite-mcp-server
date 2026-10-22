@@ -273,7 +273,7 @@ func (m *Manager) CompleteLogin(requestToken string) (*KiteCredentials, error) {
 }
 
 // GenerateLoginURL creates a login URL tied to a specific session ID.
-func (m *Manager) GenerateLoginURL(sessionID string) (string, error) {
+func (m *Manager) GenerateLoginURL(sessionID string, state ...string) (string, error) {
 	signedParams, err := m.sessionSigner.SignRedirectParams(sessionID)
 	if err != nil {
 		m.Logger.Error("Failed to sign redirect params for session", "session_id", sessionID, "error", err)
@@ -282,6 +282,16 @@ func (m *Manager) GenerateLoginURL(sessionID string) (string, error) {
 
 	kc := kiteconnect.New(m.apiKey)
 	kc.SetAppName("kite-mcp")
+	// The OAuth state is generated only after client consent. Kite returns
+	// redirect_params unchanged to our callback alongside its request token.
+	if len(state) > 0 {
+		params, err := url.ParseQuery(signedParams)
+		if err != nil {
+			return "", err
+		}
+		params.Set("state", state[0])
+		signedParams = params.Encode()
+	}
 	redirectParams := url.QueryEscape(signedParams)
 	loginURL := kc.GetLoginURL() + "&redirect_params=" + redirectParams
 
@@ -317,20 +327,15 @@ func (m *Manager) RenderSuccessTemplate(w http.ResponseWriter) error {
 	return templ.ExecuteTemplate(w, "base", struct{ Title string }{"Login Successful"})
 }
 
-// RenderAuthorizeInterstitial renders the explicit user-consent interstitial before redirecting to Kite.
-func (m *Manager) RenderAuthorizeInterstitial(w http.ResponseWriter, kiteLoginURL string) error {
+// RenderClientConsent identifies the client and callback before starting Kite login.
+func (m *Manager) RenderClientConsent(w http.ResponseWriter, clientName, redirectURI, flow, csrf string) error {
 	templ, ok := m.templates[authorizeTemplate]
 	if !ok {
 		return errors.New("template not found")
 	}
-	data := struct {
-		Title        string
-		KiteLoginURL string
-	}{
-		Title:        "Continue to Kite Login",
-		KiteLoginURL: kiteLoginURL,
-	}
-	return templ.ExecuteTemplate(w, "base", data)
+	return templ.ExecuteTemplate(w, "base", struct{ Title, ClientName, RedirectURI, Flow, CSRF string }{
+		"Authorize MCP client", clientName, redirectURI, flow, csrf,
+	})
 }
 
 func setupTemplates() (map[string]*template.Template, error) {

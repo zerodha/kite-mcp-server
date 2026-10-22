@@ -132,15 +132,13 @@ func (*MarketTool) Definition() *mcp.Tool {
 		"Retrieve market data and search instruments. Use mode=quote for full market snapshots (OHLC, volume, bid/ask depth, OI) for up to 500 instruments, mode=ltp for last traded price only (lighter), mode=ohlc for today's OHLC, mode=historical for historical candle data, mode=search to find instruments by name, symbol, ISIN, or token across all exchanges. Search returns data/pagination/meta, sorted by ID then token, with default limit 100 and maximum 500. Quote/LTP/OHLC return data/meta with missing_instruments; entirely unresolved requests return an error. Search results come from the BOD instrument master by default; set include_live_quote=true to enrich returned results with live quote fields and quote_timestamp.",
 		marketSchema,
 	)
+	// Negotiated protocols through 2025-11-25 require object output schemas
+	// and object structuredContent, including for historical candle lists.
 	tool.OutputSchema = json.RawMessage(`{
-		"anyOf": [
-			{"type":"object","required":["data","meta"],"properties":{
-				"data":{"type":["object","array"]},"meta":{"type":"object"},
-				"pagination":{"type":"object"},"error":{"type":"string"}}},
-			{"type":"array","items":{"type":"object","required":["date","open","high","low","close","volume"],"properties":{
-				"date":{"type":"string"},"open":{"type":"number"},"high":{"type":"number"},
-				"low":{"type":"number"},"close":{"type":"number"},"volume":{"type":"number"},"oi":{"type":"number"}}}}
-		]
+		"type":"object", "required":["data","meta"], "properties":{
+			"data":{"type":["object","array"]}, "meta":{"type":"object"},
+			"pagination":{"type":"object"}, "error":{"type":"string"}
+		}
 	}`)
 	return tool
 }
@@ -216,7 +214,13 @@ func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 				if err != nil {
 					return NewToolResultError("Failed to get historical data"), nil
 				}
-				return marshalMarketResponse(handler, data, "market_historical")
+				if data == nil {
+					data = make([]kiteconnect.HistoricalData, 0)
+				}
+				return marshalMarketResponse(handler, map[string]interface{}{
+					"data": data,
+					"meta": map[string]interface{}{"timezone": "Asia/Kolkata"},
+				}, "market_historical")
 			})
 
 		case "search":

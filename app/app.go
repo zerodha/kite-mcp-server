@@ -6,8 +6,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -281,6 +283,63 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// validateMCPOrigin checks every method, including SSE GET and OPTIONS.
+// net/http.CrossOriginProtection exempts safe methods, so it cannot enforce
+// the MCP transport's requirement by itself. Use the configured public issuer
+// origin so TLS termination does not make valid HTTPS browser origins fail.
+func validateMCPOrigin(publicURL string, next http.Handler) http.Handler {
+	public, err := url.Parse(publicURL)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origins := r.Header.Values("Origin")
+		if len(origins) == 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+		var origin *url.URL
+		var parseErr error
+		if len(origins) == 1 {
+			origin, parseErr = url.Parse(origins[0])
+		}
+		if err != nil || public == nil || public.Host == "" ||
+			len(origins) != 1 || parseErr != nil || origin == nil || strings.Contains(origins[0], "#") ||
+			(origin.Scheme != "http" && origin.Scheme != "https") ||
+			origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" ||
+			!sameMCPOrigin(origin, public) {
+			http.Error(w, "Forbidden: invalid Origin", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Origin identity includes the effective port: HTTPS :443 and HTTP :80 are
+// equivalent to omitting the port, while other ports remain distinct.
+func sameMCPOrigin(a, b *url.URL) bool {
+	port := func(u *url.URL) int {
+		if u.Port() != "" {
+			value, err := strconv.Atoi(u.Port())
+			if err != nil || value < 0 || value > 65535 {
+				return -1
+			}
+			return value
+		}
+		if strings.HasSuffix(u.Host, ":") {
+			return -1 // An explicit empty port is not a serialized Origin.
+		}
+		switch strings.ToLower(u.Scheme) {
+		case "https":
+			return 443
+		case "http":
+			return 80
+		default:
+			return -1
+		}
+	}
+	aPort, bPort := port(a), port(b)
+	return a.Hostname() != "" && strings.EqualFold(a.Scheme, b.Scheme) &&
+		strings.EqualFold(a.Hostname(), b.Hostname()) && aPort >= 0 && aPort == bPort
+}
+
 func (app *App) startServer(srv *http.Server, mcpServer *mcpsdk.Server, url string) error {
 	app.logger.Info("Starting MCP server", "url", "http://"+srv.Addr+"/mcp")
 	sessionTimeout, err := time.ParseDuration(app.Config.MCPSessionTimeout)
@@ -295,7 +354,7 @@ func (app *App) startServer(srv *http.Server, mcpServer *mcpsdk.Server, url stri
 		},
 	)
 	mux := app.setupMux()
-	mux.Handle("/mcp", app.oauthServer.Middleware(http.HandlerFunc(streamable.ServeHTTP)))
+	mux.Handle("/mcp", validateMCPOrigin(app.Config.OAuthIssuer, app.oauthServer.Middleware(http.HandlerFunc(streamable.ServeHTTP))))
 	srv.Handler = securityHeaders(mux)
 	return app.serveHTTPServer(srv)
 }

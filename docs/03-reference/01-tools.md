@@ -50,6 +50,11 @@ Retrieve portfolio and account information.
 | `from` | integer | holdings, positions | Pagination start index (0-based, default: 0; see bounds above) |
 | `limit` | integer | holdings, positions | Page size: 1-500, default 100; always includes pagination metadata |
 
+Position rows retain the upstream fields and add `view`: `day` for today's
+trading activity and `net` for current exposure including overnight holdings.
+Rows are paginated together, with day rows first. The same instrument may occur
+in both views; use `net` to assess current exposure and never sum the two views.
+
 ---
 
 ## orders
@@ -200,7 +205,10 @@ exchange/symbols. Missing symbols are not represented as zero-priced quotes.
 
 Market successes expose identical values in JSON text content and
 `structuredContent`, with an advertised output schema covering data/meta envelopes
-and historical candle arrays. Historical responses retain their array shape.
+and historical candles. Historical responses use
+`{"data": [<candles>], "meta": {"timezone": "Asia/Kolkata"}}`; clients previously
+reading a bare candle array must now read `data`. Object envelopes conform to the
+[MCP 2025-11-25 output contract](https://modelcontextprotocol.io/specification/2025-11-25/schema#tool).
 LTP and OHLC metadata includes `as_of_available: false` and `timestamp_note`:
 these upstream endpoints supply no timestamps. Use `mode=quote` for upstream
 `timestamp` and `last_trade_time`; receipt time is not a price as-of timestamp.

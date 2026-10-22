@@ -29,7 +29,7 @@ generate:
     go generate ./app/
 
 # Build with specific version
-build-version VERSION: (_build-with-version VERSION)
+build-version VERSION: generate (_build-with-version VERSION)
 
 # Clean build artifacts
 clean:

@@ -267,3 +267,31 @@ func TestEnrichmentMetadataMatchesFieldsAndMissingQuotesPreserveBOD(t *testing.T
 	require.Equal(t, false, meta["live_quote_enriched"])
 	require.Empty(t, meta["live_quote_fields"])
 }
+
+func TestPositionViewsRemainDistinctAcrossPages(t *testing.T) {
+	manager := readContractManager(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"day":[{"tradingsymbol":"TEST","quantity":-3}],"net":[{"tradingsymbol":"TEST","quantity":0,"overnight_quantity":3}]}}`)
+	})
+	for offset, view := range []string{"day", "net"} {
+		result := callReadContract(t, &PortfolioTool{}, manager, map[string]interface{}{
+			"mode": "positions", "from": offset, "limit": 1,
+		})
+		require.False(t, result.IsError)
+		response := readContractJSON(t, result)
+		rows := response["data"].([]interface{})
+		require.Len(t, rows, 1)
+		row := rows[0].(map[string]interface{})
+		require.Equal(t, "TEST", row["tradingsymbol"])
+		require.Equal(t, view, row["view"])
+		if view == "net" {
+			require.Equal(t, float64(0), row["quantity"])
+			require.Equal(t, float64(3), row["overnight_quantity"])
+		} else {
+			require.Equal(t, float64(-3), row["quantity"])
+		}
+		pagination := response["pagination"].(map[string]interface{})
+		require.Equal(t, float64(2), pagination["total"])
+		require.Equal(t, offset == 0, pagination["has_more"])
+	}
+}

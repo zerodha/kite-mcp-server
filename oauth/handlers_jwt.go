@@ -1,10 +1,14 @@
 package oauth
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/zerodha/kite-mcp-server/kc"
@@ -37,14 +41,34 @@ type pendingAuth struct {
 	State         string
 	CodeChallenge string
 	Scope         string
+	mu            sync.Mutex
+	csrf          string
+	browserState  string
+	approved      bool
+	consumed      bool
 }
 
 // HandleAuthorize handles GET /authorize
 func (h *Handlers) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
+	consentHeaders(w)
+	if r.Method == http.MethodPost {
+		h.handleConsent(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	// Parse the OAuth request
 	req, err := ParseAuthorizeRequest(r)
 	if err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.server.ValidateResource(req.Resource); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_target"})
 		return
 	}
 
@@ -68,25 +92,118 @@ func (h *Handlers) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		State:         req.State,
 		CodeChallenge: req.CodeChallenge,
 		Scope:         req.Scope,
+		csrf:          generateSecureToken(32),
 	}
 
 	// Generate a temporary session to track this OAuth flow
 	tempSessionID := h.kcManager.SessionManager().GenerateWithData(pending)
 
-	// Generate the downstream Kite login URL and render an explicit interstitial.
-	kiteLoginURL, err := h.kcManager.GenerateLoginURL(tempSessionID)
+	// This cookie protects the consent form only. The callback state cookie
+	// is created only after explicit approval, immediately before Kite login.
+	h.setFlowCookie(w, tempSessionID, "consent", pending.csrf, 600)
+	clientName, err := h.server.ClientName(req.ClientID)
 	if err != nil {
-		h.logger.Error("failed to generate Kite login URL", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		http.Error(w, "invalid client", http.StatusBadRequest)
 		return
+	}
+	if strings.TrimSpace(clientName) == "" {
+		clientName = "Unnamed MCP client"
+	}
+	if err := h.kcManager.RenderClientConsent(w, clientName, req.RedirectURI, tempSessionID, pending.csrf); err != nil {
+		h.logger.Error("failed to render consent", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
 
-	h.logger.Info("rendering authorize interstitial", "client_id", req.ClientID)
-	if err := h.kcManager.RenderAuthorizeInterstitial(w, kiteLoginURL); err != nil {
-		h.logger.Error("failed to render authorize interstitial", "error", err)
+}
+
+// Consent is deliberately requested for every flow; no broad remembered approval
+// can authorize a newly registered client. Only server-held pending data is used.
+func (h *Handlers) handleConsent(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	flow := r.PostForm.Get("flow")
+	session, err := h.kcManager.SessionManager().Get(flow)
+	if err != nil || session.Terminated || !time.Now().Before(session.ExpiresAt) {
+		http.Error(w, "consent expired", http.StatusBadRequest)
+		return
+	}
+	pending, ok := session.OAuthData.(*pendingAuth)
+	if !ok {
+		http.Error(w, "invalid consent", http.StatusBadRequest)
+		return
+	}
+	cookie, err := r.Cookie(h.flowCookieName(flow, "consent"))
+	pending.mu.Lock()
+	defer pending.mu.Unlock()
+	if err != nil || pending.approved || pending.consumed || !sameSecret(cookie.Value, pending.csrf) || !sameSecret(r.PostForm.Get("csrf"), pending.csrf) {
+		http.Error(w, "invalid consent", http.StatusBadRequest)
+		return
+	}
+	h.setFlowCookie(w, flow, "consent", "", -1)
+	if err := h.server.ValidateClientRedirect(pending.ClientID, pending.RedirectURI); err != nil {
+		http.Error(w, "invalid client", http.StatusBadRequest)
+		return
+	}
+	if r.PostForm.Get("decision") != "approve" {
+		pending.consumed = true
+		_, _ = h.kcManager.SessionManager().Terminate(flow)
+		callback, _ := url.Parse(pending.RedirectURI)
+		q := callback.Query()
+		q.Set("error", "access_denied")
+		if pending.State != "" {
+			q.Set("state", pending.State)
+		}
+		callback.RawQuery = q.Encode()
+		http.Redirect(w, r, callback.String(), http.StatusSeeOther)
+		return
+	}
+	pending.browserState = generateSecureToken(32)
+	loginURL, err := h.kcManager.GenerateLoginURL(flow, pending.browserState)
+	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	pending.approved = true
+	h.setFlowCookie(w, flow, "state", pending.browserState, 600)
+	http.Redirect(w, r, loginURL, http.StatusSeeOther)
+}
+
+func sameSecret(a, b string) bool {
+	return a != "" && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+func consentHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Frame-Options", "DENY")
+	// form-action also governs form redirect chains in Chromium. The validated
+	// OAuth redirects leave this origin; CSRF is enforced by the browser-bound
+	// token, while framing and base-URL restrictions remain in place.
+	w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'none'")
+}
+
+func (h *Handlers) secureCookies() bool {
+	issuer, err := url.Parse(h.server.config.Issuer)
+	if err != nil {
+		return true
+	}
+	host := issuer.Hostname()
+	return !(issuer.Scheme == "http" && (host == "localhost" || host == "127.0.0.1" || host == "::1"))
+}
+
+func (h *Handlers) flowCookieName(flow, purpose string) string {
+	prefix := "__Host-"
+	if !h.secureCookies() {
+		prefix = ""
+	} // HTTP loopback development only.
+	return prefix + "kite-" + purpose + "-" + strings.TrimPrefix(flow, "kitemcp-")
+}
+
+func (h *Handlers) setFlowCookie(w http.ResponseWriter, flow, purpose, value string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{Name: h.flowCookieName(flow, purpose), Value: value, Path: "/", Secure: h.secureCookies(), HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: maxAge})
 }
 
 // callbackRateLimiter limits /callback requests (30 per IP per minute)
@@ -94,6 +211,11 @@ var callbackRateLimiter = NewRateLimiter(30, time.Minute)
 
 // HandleCallback handles GET /callback from KiteConnect
 func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
+	consentHeaders(w)
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	clientIP := h.server.ClientIP(r)
 	if !callbackRateLimiter.Allow(clientIP) {
 		http.Error(w, "too many requests", http.StatusTooManyRequests)
@@ -120,6 +242,28 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify explicit consent and the browser binding before exchanging any Kite
+	// credential. Claim the callback once, including when upstream login fails.
+	pending, isOAuth := session.OAuthData.(*pendingAuth)
+	if session.Terminated || !time.Now().Before(session.ExpiresAt) {
+		http.Error(w, "authorization expired", http.StatusBadRequest)
+		return
+	}
+	if isOAuth {
+		cookie, cookieErr := r.Cookie(h.flowCookieName(sessionID, "state"))
+		pending.mu.Lock()
+		valid := cookieErr == nil && pending.approved && !pending.consumed && sameSecret(cookie.Value, pending.browserState) && sameSecret(q.Get("state"), pending.browserState)
+		if valid {
+			pending.consumed = true
+		}
+		pending.mu.Unlock()
+		if !valid {
+			http.Error(w, "authorization browser mismatch or consent missing", http.StatusBadRequest)
+			return
+		}
+		h.setFlowCookie(w, sessionID, "state", "", -1)
+		defer func() { _, _ = h.kcManager.SessionManager().Terminate(sessionID) }()
+	}
 	// Complete KiteConnect login
 	creds, err := h.kcManager.CompleteLogin(requestToken)
 	if err != nil {
@@ -129,7 +273,6 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if this is an OAuth flow or regular login tool flow
-	pending, isOAuth := session.OAuthData.(*pendingAuth)
 	if !isOAuth {
 		// Regular login tool flow - store credentials and render success page
 		if err := h.kcManager.SessionManager().UpdateCredentials(sessionID, creds); err != nil {
@@ -145,12 +288,11 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// OAuth flow - clean up the temporary state and create a fresh, opaque
 	// grant session. Reusing the Kite user ID here would let a later login
 	// recreate an identifier revoked by logout and revive an old JWT.
-	defer func() { _, _ = h.kcManager.SessionManager().Terminate(sessionID) }()
-
 	userSessionID := h.kcManager.SessionManager().Generate()
 
 	// Update credentials in the user session
 	if err := h.kcManager.SessionManager().UpdateCredentials(userSessionID, creds); err != nil {
+		_, _ = h.kcManager.SessionManager().Terminate(userSessionID)
 		h.logger.Error("failed to update user session credentials", "error", err)
 		http.Error(w, "session error", http.StatusInternalServerError)
 		return
@@ -165,6 +307,7 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		pending.CodeChallenge,
 	)
 	if err != nil {
+		_, _ = h.kcManager.SessionManager().Terminate(userSessionID)
 		h.logger.Error("failed to create auth code", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -190,6 +333,11 @@ func (h *Handlers) HandleToken(w http.ResponseWriter, r *http.Request) {
 			"error":             "invalid_request",
 			"error_description": "The token request is invalid.",
 		})
+		return
+	}
+
+	if err := h.server.ValidateResource(req.Resource); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_target"})
 		return
 	}
 
@@ -327,7 +475,7 @@ func (h *Handlers) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	clientID, err := h.server.RegisterClient(req.RedirectURIs)
+	clientID, err := h.server.RegisterClient(req.RedirectURIs, req.ClientName)
 	if err != nil {
 		h.logger.Error("failed to register client", "error", err)
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "server_error"})

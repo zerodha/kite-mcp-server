@@ -132,10 +132,7 @@ func TestUpdateRejectsInvalidResponsesWithoutReplacingCatalog(t *testing.T) {
 }
 
 func TestNextScheduledUpdateIsIndependentOfProcessStartTime(t *testing.T) {
-	ist, err := time.LoadLocation("Asia/Kolkata")
-	if err != nil {
-		t.Fatal(err)
-	}
+	ist := time.FixedZone("IST", 19800)
 	tests := []struct {
 		name string
 		now  time.Time

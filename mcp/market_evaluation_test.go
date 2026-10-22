@@ -35,6 +35,8 @@ func TestMarketStructuredResponses(t *testing.T) {
 	require.NoError(t, err)
 	var schema jsonschema.Schema
 	require.NoError(t, json.Unmarshal(schemaJSON, &schema))
+	// The negotiated 2025-11-25 Tool schema requires an explicit object root.
+	require.Equal(t, "object", schema.Type)
 	resolved, err := schema.Resolve(nil)
 	require.NoError(t, err)
 	manager := readContractManager(t, func(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +64,15 @@ func TestMarketStructuredResponses(t *testing.T) {
 			require.NoError(t, err)
 			var value interface{}
 			require.NoError(t, json.Unmarshal(encoded, &value))
+			// CallToolResult.structuredContent must be an object in 2025-11-25.
+			object, ok := value.(map[string]interface{})
+			require.True(t, ok, "structuredContent must be a JSON object")
+			if args["mode"] == "historical" {
+				candles := object["data"].([]interface{})
+				require.Len(t, candles, 1)
+				require.Equal(t, float64(11), candles[0].(map[string]interface{})["close"])
+				require.Equal(t, "Asia/Kolkata", object["meta"].(map[string]interface{})["timezone"])
+			}
 			require.NoError(t, resolved.Validate(value))
 			text, err := json.Marshal(result.Content[0])
 			require.NoError(t, err)
@@ -77,4 +88,16 @@ func TestMarketStructuredResponses(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHistoricalEmptyDataIsArray(t *testing.T) {
+	manager := readContractManager(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"candles":[]}}`)
+	})
+	result := callReadContract(t, &MarketTool{}, manager, map[string]interface{}{
+		"mode": "historical", "instrument_token": 123, "interval": "day", "from_date": "2026-10-22", "to_date": "2026-10-22",
+	})
+	require.False(t, result.IsError)
+	require.Equal(t, []interface{}{}, readContractJSON(t, result)["data"])
 }

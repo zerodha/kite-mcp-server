@@ -14,7 +14,7 @@ Want to use AI with your Kite trading account? Just add `https://mcp.kite.trade/
 - **Market Data Access**: Real-time quotes, historical data, OHLC data
 - **Pagination Support**: Automatic pagination for large datasets (holdings, orders, trades)
 - **Comprehensive Coverage**: Implements most Kite Connect API endpoints
-- **Multiple Deployment Modes**: stdio, HTTP, SSE, and hybrid mode (production)
+- **Streamable HTTP Transport**: Connect through the `/mcp` endpoint
 - **Built-in Documentation**: Auto-served documentation at runtime
 
 ## Quick Start
@@ -66,10 +66,14 @@ Create a `.env` file with your Kite Connect credentials:
 ```env
 KITE_API_KEY=your_api_key
 KITE_API_SECRET=your_api_secret
-APP_MODE=http
+JWT_SECRET=replace_with_a_random_secret_of_at_least_32_bytes
 APP_PORT=8080
 APP_HOST=localhost
 ```
+
+Generate a random signing secret with `openssl rand -hex 32` and use it for
+`JWT_SECRET`. For a public deployment, set `OAUTH_ISSUER` to its external HTTPS
+base URL and configure the Kite app callback as `<OAUTH_ISSUER>/callback`.
 
 You can also use the provided `justfile` to initialize the config.
 
@@ -80,15 +84,21 @@ just init-env
 ### Running the Server
 
 ```bash
-# Build and run
+# Export the configuration (.env is not loaded automatically)
+set -a
+source .env
+set +a
+
+# Generate the embedded documentation, build, and run
+go generate ./app/
 go build -o kite-mcp-server
 ./kite-mcp-server
 
-# Or run directly
-go run main.go
+# Or generate, build, and load .env using Just
+just run-env
 ```
 
-The server will start and serve a status page at `http://localhost:8080/`
+The server will start and serve documentation at `http://localhost:8080/`
 
 ## Client Integration
 
@@ -96,8 +106,6 @@ The server will start and serve a status page at `http://localhost:8080/`
 
 - [Claude Desktop (Hosted Mode)](#claude-desktop-hosted-mode)
 - [Claude Desktop (HTTP Mode)](#claude-desktop-http-mode)
-- [Claude Desktop (SSE Mode)](#claude-desktop-sse-mode)
-- [Claude Desktop (stdio Mode)](#claude-desktop-stdio-mode)
 - [Other MCP Clients](#other-mcp-clients)
 
 ### Claude Desktop (Hosted Mode)
@@ -117,74 +125,22 @@ For the hosted version, add to your Claude Desktop configuration (`~/.config/Cla
 
 ### Claude Desktop (HTTP Mode)
 
-Add to your Claude Desktop configuration (`~/.config/Claude/claude_desktop_config.json`):
+Start the self-hosted server using the steps above, then add this to your Claude
+Desktop configuration (`~/.config/Claude/claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "kite": {
       "command": "npx",
-      "args": ["mcp-remote", "http://localhost:8080/mcp", "--allow-http"],
-      "env": {
-        "APP_MODE": "http",
-        "KITE_API_KEY": "your_api_key",
-        "KITE_API_SECRET": "your_api_secret"
-      }
+      "args": ["mcp-remote", "http://localhost:8080/mcp", "--allow-http"]
     }
   }
 }
 ```
 
-### Claude Desktop (SSE Mode)
-
-Add to your Claude Desktop configuration (`~/.config/Claude/claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "kite": {
-      "command": "npx",
-      "args": ["mcp-remote", "http://localhost:8080/sse", "--allow-http"],
-      "env": {
-        "APP_MODE": "sse",
-        "KITE_API_KEY": "your_api_key",
-        "KITE_API_SECRET": "your_api_secret"
-      }
-    }
-  }
-}
-```
-
-### Claude Desktop (stdio Mode)
-
-For self-hosted installations, you must first build the binary:
-
-```bash
-go build -o kite-mcp-server
-```
-
-Then add to your Claude Desktop configuration (`~/.config/Claude/claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "kite": {
-      "command": "/full/path/to/your/kite-mcp-server",
-      "env": {
-        "APP_MODE": "stdio",
-        "KITE_API_KEY": "your_api_key",
-        "KITE_API_SECRET": "your_api_secret"
-      }
-    }
-  }
-}
-```
-
-**Important**: Use the full absolute path to your built binary. For example:
-
-- `/home/username/kite-mcp-server/kite-mcp-server` (Linux)
-- `/Users/username/kite-mcp-server/kite-mcp-server` (macOS)
-- `C:\Users\username\kite-mcp-server\kite-mcp-server.exe` (Windows)
+Keep the server running separately. Its Kite credentials belong in the server's
+environment; the bridge connects through OAuth.
 
 ### Other MCP Clients
 
@@ -285,14 +241,14 @@ This project uses Go's `testing/synctest` package for time-dependent tests (sess
 | `KITE_API_SECRET`    | Required    | Your Kite Connect API secret                               |
 | `JWT_SECRET`         | Required    | Secret for signing JWT tokens (min 32 bytes)               |
 | `OAUTH_ISSUER`       | _(auto)_    | OAuth issuer URL (defaults to http://host:port)            |
-| `APP_MODE`           | `http`      | Server mode: `stdio`, `http`, `sse`, or `hybrid`           |
-| `APP_PORT`           | `8080`      | Server port (HTTP/SSE/hybrid modes)                        |
-| `APP_HOST`                  | `localhost` | Server host (HTTP/SSE/hybrid modes)                        |
+| `APP_PORT`           | `8080`      | HTTP server port                        |
+| `APP_HOST`                  | `localhost` | HTTP bind host                        |
 | `OAUTH_TOKEN_TTL`           | `168h`       | OAuth access token lifetime (maximum 168h)           |
 | `MCP_SESSION_TIMEOUT`       | `24h`       | Streamable HTTP transport idle timeout (Go duration format)  |
 | `EXCLUDED_TOOLS`            | _(empty)_   | Comma-separated list of tools to exclude from registration |
 
-**Note:** In production, we use hybrid mode which supports both `/sse` and `/mcp` endpoints, making both HTTP and SSE protocols available for different client needs.
+The server exposes Streamable HTTP at `/mcp`. Clients requiring a local stdio
+connection can use the `mcp-remote` bridge shown above.
 
 ### Session lifetime and Kite renewal
 

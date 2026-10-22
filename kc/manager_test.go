@@ -143,19 +143,19 @@ func TestRenderAuthorizeInterstitial(t *testing.T) {
 	}
 
 	recorder := httptest.NewRecorder()
-	err = manager.RenderAuthorizeInterstitial(recorder, "https://kite.example/login")
+	err = manager.RenderClientConsent(recorder, "Test client", "https://client.example/callback", "flow", "csrf")
 	if err != nil {
 		t.Fatalf("Expected no error rendering interstitial, got: %v", err)
 	}
 
 	body := recorder.Body.String()
-	if !strings.Contains(body, "Continue to Kite") {
+	if !strings.Contains(body, "Authorize MCP client") {
 		t.Error("Expected interstitial body to contain heading")
 	}
 	if !strings.Contains(body, "AI systems are unpredictable and non-deterministic") {
 		t.Error("Expected interstitial body to contain disclaimer")
 	}
-	if !strings.Contains(body, "https://kite.example/login") {
+	if !strings.Contains(body, "https://client.example/callback") {
 		t.Error("Expected interstitial body to contain login URL")
 	}
 }

@@ -1,21 +1,23 @@
 {{define "content"}}
 <div>
-    <h1>Continue to Kite</h1>
+    <h1>Authorize MCP client</h1>
     <div class="status">Review and continue</div>
-    <p>
-        You are about to sign in to your Zerodha account on Kite and authorize this MCP connection.
-        Continue only if you want to use your account through an AI client.
-    </p>
-    <p>
-        You will be taken to Kite's secure login page in the next step and then returned to your MCP client to complete setup.
-    </p>
+    <p>Client: <strong style="overflow-wrap:anywhere">{{.ClientName}}</strong> (client-provided name).</p>
+    <p>Return address: <strong style="overflow-wrap:anywhere">{{.RedirectURI}}</strong></p>
+    <p>This client requests access to the Kite Connect API through your account:
+       profile, balances, holdings, positions, market data, and enabled trading tools.
+       The default scope grants all enabled tools; individual trade confirmations still apply.</p>
+    <p>Approve only if you recognize this client and its return address. You will then sign in on Kite.</p>
     <p class="disclaimer">
         <strong>Disclaimer</strong>
         AI systems are unpredictable and non-deterministic. By continuing, you agree to interact with your Zerodha account via AI at your own risk.
     </p>
-    <p class="actions">
-        <a href="{{.KiteLoginURL}}" class="button">Continue to Kite login</a>
-    </p>
+    <form method="post" action="/authorize" class="actions">
+        <input type="hidden" name="flow" value="{{.Flow}}">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <button type="submit" name="decision" value="approve" class="button">Approve and continue to Kite login</button>
+        <button type="submit" name="decision" value="deny">Decline</button>
+    </form>
 </div>
 {{end}}
 

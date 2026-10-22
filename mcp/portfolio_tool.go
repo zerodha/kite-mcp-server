@@ -11,6 +11,13 @@ import (
 
 type PortfolioTool struct{}
 
+// Keep the upstream views distinguishable when paginating their combined rows.
+// Day reports today's activity; Net is the authoritative current exposure.
+type positionWithView struct {
+	kiteconnect.Position
+	View string `json:"view"`
+}
+
 var portfolioSchema = json.RawMessage(`{
 	"type": "object",
 	"properties": {
@@ -45,7 +52,7 @@ var portfolioSchema = json.RawMessage(`{
 
 func (*PortfolioTool) Definition() *mcp.Tool {
 	return NewTool("portfolio",
-		"Retrieve portfolio and account information. Use mode=profile for user details (name, email, account type), mode=margins for available funds and margins, mode=holdings for demat holdings with P&L, mode=positions for open intraday and overnight positions. Full/compact holdings and positions return data/pagination with default limit 100 and maximum 500. Summary holdings are unpaginated.",
+		"Retrieve portfolio and account information. Use mode=profile for user details (name, email, account type), mode=margins for available funds and margins, mode=holdings for demat holdings with P&L, mode=positions for open intraday and overnight positions. Position rows include view=day for today's activity or view=net for current exposure; do not sum the two views. Full/compact holdings and positions return data/pagination with default limit 100 and maximum 500. Summary holdings are unpaginated.",
 		portfolioSchema,
 	)
 }
@@ -125,10 +132,10 @@ func (*PortfolioTool) Handler(manager *kc.Manager) ToolHandler {
 				}
 				result := make([]interface{}, 0, len(positions.Day)+len(positions.Net))
 				for _, pos := range positions.Day {
-					result = append(result, pos)
+					result = append(result, positionWithView{Position: pos, View: "day"})
 				}
 				for _, pos := range positions.Net {
-					result = append(result, pos)
+					result = append(result, positionWithView{Position: pos, View: "net"})
 				}
 				return result, nil
 			})(ctx, request)

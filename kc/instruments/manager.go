@@ -27,6 +27,8 @@ const (
 var (
 	// instrumentsURL can be overridden for testing
 	instrumentsURL = defaultInstrumentsURL
+	// IST has no daylight saving transitions; avoid a runtime zoneinfo dependency.
+	istLocation = time.FixedZone("Asia/Kolkata", 5*60*60+30*60)
 )
 
 var (
@@ -177,7 +179,7 @@ func (m *Manager) startSchedulerIfEnabled() {
 
 func isPreviousDayIST(t time.Time) bool {
 	// Define IST location (UTC+5:30)
-	ist, _ := time.LoadLocation("Asia/Kolkata")
+	ist := istLocation
 
 	// Convert current time to IST
 	nowIST := time.Now().In(ist)
@@ -609,7 +611,7 @@ func (m *Manager) startScheduler() {
 
 // getNextScheduledUpdate calculates the next scheduled update time
 func (m *Manager) getNextScheduledUpdate() time.Time {
-	ist, _ := time.LoadLocation("Asia/Kolkata")
+	ist := istLocation
 	return nextScheduledUpdate(time.Now().In(ist), m.config.UpdateHour, m.config.UpdateMinute)
 }
 
@@ -617,7 +619,7 @@ func (m *Manager) getNextScheduledUpdate() time.Time {
 // Keeping this calculation separate from the scheduler makes the scheduling behaviour
 // independent of process start time and easy to exercise with a fixed clock.
 func nextScheduledUpdate(now time.Time, hour, minute int) time.Time {
-	ist, _ := time.LoadLocation("Asia/Kolkata")
+	ist := istLocation
 	now = now.In(ist)
 	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, ist)
 	if next.Before(now) {

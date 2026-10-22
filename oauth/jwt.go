@@ -53,10 +53,11 @@ type Server struct {
 	config Config
 
 	// In-memory stores (replace with Redis/DB for production)
-	mu             sync.RWMutex
-	authCodes      map[string]*AuthCode // code -> auth code data
-	pkceVerifiers  map[string]string    // code -> code_verifier hash
-	trustedProxies []netip.Prefix
+	mu                  sync.RWMutex
+	authCodes           map[string]*AuthCode // code -> auth code data
+	pkceVerifiers       map[string]string    // code -> code_verifier hash
+	trustedProxies      []netip.Prefix
+	lastAuthCodeCleanup time.Time
 }
 
 // AuthCode represents a pending authorization code
@@ -222,9 +223,10 @@ func (s *Server) ValidateRedirectURI(redirectURI string) error {
 // Client IDs carry signed callback hashes instead of transient server metadata.
 // They have no expiry: changing JWTSecret or Issuer invalidates registrations.
 // A separate format and signing domain prevent confusion with access tokens.
-const maxClientIDBytes = 1024
+const maxClientIDBytes = 4096
 
 type clientRegistration struct {
+	ClientName     string   `json:"client_name,omitempty"`
 	Nonce          string   `json:"nonce"`
 	RedirectHashes []string `json:"redirect_hashes"`
 }
@@ -243,26 +245,44 @@ func (s *Server) clientSignature(payload string) []byte {
 	return mac.Sum(nil)
 }
 
-// ValidateClientRedirect verifies a server-issued client ID and exact callback binding.
-func (s *Server) ValidateClientRedirect(clientID, redirectURI string) error {
+// parseClientRegistration validates the signature before exposing client metadata.
+func (s *Server) parseClientRegistration(clientID string) (*clientRegistration, error) {
 	if len(s.config.JWTSecret) < 32 || len(clientID) > maxClientIDBytes {
-		return errors.New("invalid client registration")
+		return nil, errors.New("invalid client registration")
 	}
 	parts := strings.Split(clientID, ".")
 	if len(parts) != 3 || parts[0] != "dcr1" {
-		return errors.New("invalid client registration")
+		return nil, errors.New("invalid client registration")
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil || !hmac.Equal(signature, s.clientSignature(parts[1])) {
-		return errors.New("invalid client registration")
+		return nil, errors.New("invalid client registration")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return errors.New("invalid client registration")
+		return nil, errors.New("invalid client registration")
 	}
 	var registration clientRegistration
-	if err := json.Unmarshal(payload, &registration); err != nil || registration.Nonce == "" || len(registration.RedirectHashes) == 0 || len(registration.RedirectHashes) > maxDCRRedirectURIs {
-		return errors.New("invalid client registration")
+	if err := json.Unmarshal(payload, &registration); err != nil || registration.Nonce == "" || len(registration.RedirectHashes) == 0 || len(registration.RedirectHashes) > maxDCRRedirectURIs || len(registration.ClientName) > maxDCRClientName {
+		return nil, errors.New("invalid client registration")
+	}
+	return &registration, nil
+}
+
+// ClientName returns the signed, self-declared name of a registered client.
+func (s *Server) ClientName(clientID string) (string, error) {
+	registration, err := s.parseClientRegistration(clientID)
+	if err != nil {
+		return "", err
+	}
+	return registration.ClientName, nil
+}
+
+// ValidateClientRedirect verifies a server-issued client ID and exact callback binding.
+func (s *Server) ValidateClientRedirect(clientID, redirectURI string) error {
+	registration, err := s.parseClientRegistration(clientID)
+	if err != nil {
+		return err
 	}
 	hash := redirectHash(redirectURI)
 	for _, registered := range registration.RedirectHashes {
@@ -274,7 +294,7 @@ func (s *Server) ValidateClientRedirect(clientID, redirectURI string) error {
 }
 
 // RegisterClient issues a durable, signed registration without retaining metadata.
-func (s *Server) RegisterClient(redirectURIs []string) (string, error) {
+func (s *Server) RegisterClient(redirectURIs []string, clientName ...string) (string, error) {
 	if len(s.config.JWTSecret) < 32 {
 		return "", errors.New("client signing secret must be at least 32 bytes")
 	}
@@ -282,6 +302,15 @@ func (s *Server) RegisterClient(redirectURIs []string) (string, error) {
 		return "", errors.New("invalid redirect URI count")
 	}
 	registration := clientRegistration{Nonce: generateSecureToken(16)}
+	if len(clientName) > 1 {
+		return "", errors.New("invalid client name count")
+	}
+	if len(clientName) == 1 {
+		if len(clientName[0]) > maxDCRClientName {
+			return "", errors.New("invalid client name length")
+		}
+		registration.ClientName = clientName[0]
+	}
 	for _, uri := range redirectURIs {
 		if len(uri) == 0 || len(uri) > maxDCRURIBytes {
 			return "", errors.New("invalid redirect URI length")
@@ -303,6 +332,7 @@ func (s *Server) RegisterClient(redirectURIs []string) (string, error) {
 
 // AuthorizeRequest contains the /authorize request parameters
 type AuthorizeRequest struct {
+	Resource            string
 	ClientID            string
 	RedirectURI         string
 	State               string
@@ -314,6 +344,9 @@ type AuthorizeRequest struct {
 // ParseAuthorizeRequest parses an authorization request
 func ParseAuthorizeRequest(r *http.Request) (*AuthorizeRequest, error) {
 	q := r.URL.Query()
+	if len(q["resource"]) > 1 {
+		return nil, errors.New("multiple resource indicators are not supported")
+	}
 
 	clientID := q.Get("client_id")
 	if clientID == "" {
@@ -337,6 +370,7 @@ func ParseAuthorizeRequest(r *http.Request) (*AuthorizeRequest, error) {
 	}
 
 	return &AuthorizeRequest{
+		Resource:            q.Get("resource"),
 		ClientID:            clientID,
 		RedirectURI:         redirectURI,
 		State:               q.Get("state"),
@@ -346,12 +380,37 @@ func ParseAuthorizeRequest(r *http.Request) (*AuthorizeRequest, error) {
 	}, nil
 }
 
-// CreateAuthCode creates an authorization code after successful Kite login
+const (
+	maxPendingAuthCodes     = 10000
+	authCodeCleanupInterval = time.Minute
+)
+
+// cleanupAuthCodesLocked lazily expires abandoned codes without a background
+// goroutine. Throttling keeps invalid token requests from repeatedly scanning
+// the entire store. Callers must hold s.mu.
+func (s *Server) cleanupAuthCodesLocked(now time.Time) {
+	if !s.lastAuthCodeCleanup.IsZero() && now.Sub(s.lastAuthCodeCleanup) < authCodeCleanupInterval {
+		return
+	}
+	for code, pending := range s.authCodes {
+		if !now.Before(pending.ExpiresAt) {
+			delete(s.authCodes, code)
+		}
+	}
+	s.lastAuthCodeCleanup = now
+}
+
+// CreateAuthCode creates an authorization code after successful Kite login.
 func (s *Server) CreateAuthCode(clientID, redirectURI, kiteUserID, sessionID, pkceChallenge string) (string, error) {
 	code := generateSecureToken(32)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	now := time.Now()
+	s.cleanupAuthCodesLocked(now)
+	if len(s.authCodes) >= maxPendingAuthCodes {
+		return "", errors.New("too many pending authorization codes; please try again later")
+	}
 
 	s.authCodes[code] = &AuthCode{
 		Code:        code,
@@ -359,7 +418,7 @@ func (s *Server) CreateAuthCode(clientID, redirectURI, kiteUserID, sessionID, pk
 		RedirectURI: redirectURI,
 		KiteUserID:  kiteUserID,
 		KiteSession: sessionID,
-		ExpiresAt:   time.Now().Add(s.config.AuthCodeTTL),
+		ExpiresAt:   now.Add(s.config.AuthCodeTTL),
 		PKCEHash:    pkceChallenge,
 	}
 
@@ -370,6 +429,7 @@ func (s *Server) CreateAuthCode(clientID, redirectURI, kiteUserID, sessionID, pk
 
 // TokenRequest contains the /token request parameters
 type TokenRequest struct {
+	Resource     string
 	GrantType    string
 	Code         string
 	RedirectURI  string
@@ -381,6 +441,9 @@ type TokenRequest struct {
 func ParseTokenRequest(r *http.Request) (*TokenRequest, error) {
 	if err := r.ParseForm(); err != nil {
 		return nil, err
+	}
+	if len(r.Form["resource"]) > 1 {
+		return nil, errors.New("multiple resource indicators are not supported")
 	}
 
 	grantType := r.FormValue("grant_type")
@@ -399,6 +462,7 @@ func ParseTokenRequest(r *http.Request) (*TokenRequest, error) {
 	}
 
 	return &TokenRequest{
+		Resource:     r.FormValue("resource"),
 		GrantType:    grantType,
 		Code:         code,
 		RedirectURI:  r.FormValue("redirect_uri"),
@@ -409,7 +473,11 @@ func ParseTokenRequest(r *http.Request) (*TokenRequest, error) {
 
 // ExchangeCode exchanges an authorization code for tokens
 func (s *Server) ExchangeCode(req *TokenRequest) (accessToken string, err error) {
+	if err := s.ValidateResource(req.Resource); err != nil {
+		return "", err
+	}
 	s.mu.Lock()
+	s.cleanupAuthCodesLocked(time.Now())
 	authCode, ok := s.authCodes[req.Code]
 	if ok {
 		delete(s.authCodes, req.Code) // One-time use
@@ -462,6 +530,7 @@ func (s *Server) generateAccessToken(kiteUserID, sessionID string) (string, erro
 	claims := TokenClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.config.Issuer,
+			Audience:  jwt.ClaimStrings{s.resourceURI()},
 			Subject:   kiteUserID,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
@@ -486,7 +555,7 @@ func (s *Server) ValidateToken(tokenString string) (*TokenClaims, error) {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return s.config.JWTSecret, nil
-	})
+	}, jwt.WithIssuer(s.config.Issuer), jwt.WithAudience(s.resourceURI()), jwt.WithExpirationRequired())
 
 	if err != nil {
 		return nil, fmt.Errorf("invalid token: %w", err)
@@ -600,10 +669,38 @@ func (s *Server) AuthorizationServerMetadata() map[string]interface{} {
 	}
 }
 
-// ProtectedResourceMetadata returns RFC 9728 metadata
+func (s *Server) resourceURI() string {
+	return s.config.Issuer + "/mcp"
+}
+
+// ValidateResource accepts only this server's canonical resource URI. An absent
+// indicator defaults to the sole supported resource for older OAuth clients.
+func (s *Server) ValidateResource(resource string) error {
+	if resource == "" {
+		return nil
+	}
+	parsed, err := url.Parse(resource)
+	if err != nil || parsed.Fragment != "" || strings.Contains(resource, "#") {
+		return errors.New("invalid target resource")
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Host = strings.ToLower(parsed.Host)
+	expected, err := url.Parse(s.resourceURI())
+	if err != nil {
+		return errors.New("invalid target resource")
+	}
+	expected.Scheme = strings.ToLower(expected.Scheme)
+	expected.Host = strings.ToLower(expected.Host)
+	if parsed.String() != expected.String() {
+		return errors.New("invalid target resource")
+	}
+	return nil
+}
+
+// ProtectedResourceMetadata returns RFC 9728 metadata.
 func (s *Server) ProtectedResourceMetadata() map[string]interface{} {
 	return map[string]interface{}{
-		"resource":                 s.config.Issuer + "/mcp",
+		"resource":                 s.resourceURI(),
 		"authorization_servers":    []string{s.config.Issuer},
 		"scopes_supported":         []string{"default"},
 		"bearer_methods_supported": []string{"header"},

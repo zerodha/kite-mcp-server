@@ -52,6 +52,7 @@ type Manager struct {
 	searchResultsVec   *prometheus.CounterVec
 	dailyUsersVec      *prometheus.GaugeVec
 	genericCounters    sync.Map // map[string]prometheus.Counter for dynamic counters
+	dailyCounterDates  sync.Map // map[string]string: dynamic counter key to UTC date
 
 	cleanupStop chan struct{}
 	cleanupOnce sync.Once
@@ -187,6 +188,7 @@ func (m *Manager) IncrementDaily(key string) {
 func (m *Manager) IncrementDailyBy(key string, n int64) {
 	today := time.Now().UTC().Format("2006-01-02")
 	dailyKey := fmt.Sprintf("%s_%s", key, today)
+	m.dailyCounterDates.Store(dailyKey, today)
 
 	// Get or create Prometheus counter for this daily key
 	counterInterface, _ := m.genericCounters.LoadOrStore(dailyKey, prometheus.NewCounter(
@@ -298,7 +300,8 @@ func (m *Manager) GetTodayUserCount() int64 {
 
 // CleanupOldData removes user data older than the configured retention period
 func (m *Manager) CleanupOldData() error {
-	cutoff := time.Now().UTC().AddDate(0, 0, -m.cleanupRetentionDays)
+	cutoffDate := time.Now().UTC().AddDate(0, 0, -m.cleanupRetentionDays).Format("2006-01-02")
+	cutoff, _ := time.Parse("2006-01-02", cutoffDate)
 
 	var keysToDelete []string
 	m.dailyUsers.Range(func(key, _ interface{}) bool {
@@ -317,6 +320,44 @@ func (m *Manager) CleanupOldData() error {
 		m.dailyUsers.Delete(key)
 	}
 
+	// Vector children remain registered after user tracking data is removed.
+	// Discover dates from the registry so cleanup also covers days with no logins.
+	families, err := m.registry.Gather()
+	if err != nil {
+		return fmt.Errorf("gather metrics for cleanup: %w", err)
+	}
+	expiredDates := make(map[string]bool)
+	for _, family := range families {
+		for _, metric := range family.Metric {
+			for _, label := range metric.Label {
+				if label.GetName() == "date" {
+					date := label.GetValue()
+					if parsed, err := time.Parse("2006-01-02", date); err == nil && parsed.Before(cutoff) {
+						expiredDates[date] = true
+					}
+				}
+			}
+		}
+	}
+	for date := range expiredDates {
+		labels := prometheus.Labels{"date": date}
+		m.toolCallsVec.DeletePartialMatch(labels)
+		m.toolErrorsVec.DeletePartialMatch(labels)
+		m.searchModeVec.DeletePartialMatch(labels)
+		m.searchVerbosityVec.DeletePartialMatch(labels)
+		m.searchResultsVec.DeletePartialMatch(labels)
+		m.dailyUsersVec.DeletePartialMatch(labels)
+	}
+	m.dailyCounterDates.Range(func(key, value any) bool {
+		date := value.(string)
+		if parsed, err := time.Parse("2006-01-02", date); err == nil && parsed.Before(cutoff) {
+			if counter, ok := m.genericCounters.LoadAndDelete(key); ok {
+				m.registry.Unregister(counter.(prometheus.Counter))
+			}
+			m.dailyCounterDates.Delete(key)
+		}
+		return true
+	})
 	return nil
 }
 

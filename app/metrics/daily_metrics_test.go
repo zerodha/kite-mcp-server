@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestDailyMetrics(t *testing.T) {
@@ -146,5 +148,48 @@ func TestTrackDailyUserExportsLatestCountUnderConcurrency(t *testing.T) {
 	expected := fmt.Sprintf(`daily_unique_users_total{date="%s",service="test-service"} %d`, today, users)
 	if !strings.Contains(w.Body.String(), expected) {
 		t.Errorf("expected metric %q in:\n%s", expected, w.Body.String())
+	}
+}
+
+func TestCleanupRemovesExpiredMetricSeries(t *testing.T) {
+	m := New(Config{ServiceName: "test-service", CleanupRetentionDays: 5})
+	oldDate := time.Now().UTC().AddDate(0, 0, -10).Format("2006-01-02")
+	boundaryDate := time.Now().UTC().AddDate(0, 0, -5).Format("2006-01-02")
+	m.toolCallsVec.WithLabelValues("market", "mcp", oldDate, m.serviceName).Inc()
+	m.toolErrorsVec.WithLabelValues("market", "api", "mcp", oldDate, m.serviceName).Inc()
+	m.searchModeVec.WithLabelValues("search", oldDate, m.serviceName).Inc()
+	m.searchVerbosityVec.WithLabelValues("full", oldDate, m.serviceName).Inc()
+	m.searchResultsVec.WithLabelValues("search", "full", "100", oldDate, m.serviceName).Inc()
+	m.dailyUsersVec.WithLabelValues(oldDate, m.serviceName).Set(1)
+	m.dailyUsersVec.WithLabelValues(boundaryDate, m.serviceName).Set(2)
+	oldCounter := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "daily_test", Help: "Daily count for daily_test", ConstLabels: prometheus.Labels{"date": oldDate, "service": m.serviceName},
+	})
+	m.registry.MustRegister(oldCounter)
+	m.genericCounters.Store("daily_test_"+oldDate, oldCounter)
+	m.dailyCounterDates.Store("daily_test_"+oldDate, oldDate)
+	m.IncrementDaily("daily_test")
+	m.Increment("lifetime_test")
+	m.TrackDailyUser("current-user")
+
+	if err := m.CleanupOldData(); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	m.HTTPHandler()(w, httptest.NewRequest("GET", "/metrics", nil))
+	output := w.Body.String()
+	if strings.Contains(output, oldDate) {
+		t.Fatalf("expired series retained: %s", output)
+	}
+	for _, retained := range []string{boundaryDate, "daily_test{", "lifetime_test{", time.Now().UTC().Format("2006-01-02")} {
+		if !strings.Contains(output, retained) {
+			t.Errorf("missing retained metric %q in %s", retained, output)
+		}
+	}
+	if _, ok := m.genericCounters.Load("daily_test_" + oldDate); ok {
+		t.Error("expired dynamic counter retained in memory")
+	}
+	if _, ok := m.dailyCounterDates.Load("daily_test_" + oldDate); ok {
+		t.Error("expired dynamic counter date retained in memory")
 	}
 }
