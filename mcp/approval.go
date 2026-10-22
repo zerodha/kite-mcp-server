@@ -21,11 +21,22 @@ const tradeApprovalTimeout = 2 * time.Minute
 // assistant arguments. The client may confirm them, but cannot edit them.
 func withTradeApproval(ctx context.Context, request *mcp.CallToolRequest, operation string, details any, execute func() (*mcp.CallToolResult, error)) (*mcp.CallToolResult, error) {
 	if request == nil || request.Session == nil {
-		return approvalFailure("unsupported_client", "Use a trusted MCP client supporting form elicitation; no transaction was executed."), nil
+		return approvalFailure("unsupported_client", "MCP session unavailable; no transaction was executed."), nil
 	}
-	caps := request.ClientCapabilities()
-	if caps == nil || caps.Elicitation == nil || (caps.Elicitation.Form == nil && caps.Elicitation.URL != nil) {
-		return approvalFailure("unsupported_client", "Client did not negotiate form elicitation. Reconnect using a trusted elicitation-capable client; no transaction was executed."), nil
+	// A continuation must still validate its original approval, even if the
+	// client omits capabilities on the retry. Never turn a declined or malformed
+	// approval response into an unconfirmed execution.
+	if request.Params != nil && (request.Params.RequestState != "" || len(request.Params.InputResponses) != 0) {
+		return approvalFromContext(ctx, request, operation, details, execute)
+	}
+	if !supportsFormElicitation(requestCapabilities(request)) {
+		if ctx.Err() != nil {
+			return approvalFailure("cancelled", "Tool call was cancelled; no transaction was executed."), nil
+		}
+		return execute()
+	}
+	if request.ProtocolVersion() >= "2026-07-28" {
+		return approvalFromContext(ctx, request, operation, details, execute)
 	}
 	return elicitTradeApproval(ctx, tradeApprovalTimeout, request.Session.Elicit, operation, details, execute)
 }
@@ -82,16 +93,16 @@ func approvalFailure(code, message string) *mcp.CallToolResult {
 	return NewToolResultError("Trade approval failed [" + code + "]: " + message)
 }
 
-// NewServer negotiates versions supporting nested elicitation/create. Newer
-// protocols replace it with a different multi-round-trip execution model.
+// NewServer supports both multi-round-trip and legacy nested elicitation.
 func NewServer(info *mcp.Implementation) *mcp.Server {
-	versions := []string{"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
+	versions := []string{"2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
 	//nolint:staticcheck // SA1019: Logging is retained for the negotiated pre-2026 protocol versions.
 	capabilities := &mcp.ServerCapabilities{Logging: &mcp.LoggingCapabilities{}}
 	capabilities.AddExtension(appExtension, map[string]any{})
 	capabilities.AddExtension(skillsExtension, map[string]any{})
 	capabilities.Resources = &mcp.ResourceCapabilities{}
 	server := mcp.NewServer(info, &mcp.ServerOptions{SupportedProtocolVersions: versions, Capabilities: capabilities})
+	registerTradeApproval(server)
 	registerAppResource(server)
 	registerSkills(server)
 	// go-sdk v1.8.0 retains the requested initialize version, then uses it
@@ -101,8 +112,9 @@ func NewServer(info *mcp.Implementation) *mcp.Server {
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
 			if method == "initialize" {
-				if params, ok := request.GetParams().(*mcp.InitializeParams); ok && params != nil && !slices.Contains(versions, params.ProtocolVersion) {
-					params.ProtocolVersion = versions[0]
+				if params, ok := request.GetParams().(*mcp.InitializeParams); ok && params != nil && (!slices.Contains(versions, params.ProtocolVersion) || params.ProtocolVersion >= "2026-07-28") {
+					// initialize is the legacy handshake; 2026 clients use server/discover.
+					params.ProtocolVersion = "2025-11-25"
 				}
 			}
 			return next(ctx, method, request)

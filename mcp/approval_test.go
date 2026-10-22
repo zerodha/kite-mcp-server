@@ -96,7 +96,9 @@ func TestOrdersElicitationWire(t *testing.T) {
 						_, _ = w.Write([]byte(`{"status":"success","data":[{"order_id":"order-1","exchange":"NSE","tradingsymbol":"INFY","transaction_type":"BUY","quantity":3,"product":"CNC","order_type":"LIMIT","price":1500,"validity":"DAY"}]}`))
 						return
 					}
-					require.True(t, approved.Load(), "Kite mutation must follow explicit approval")
+					if decision != "unsupported" && decision != "url only" {
+						require.True(t, approved.Load(), "Capable clients must explicitly approve")
+					}
 					mutations.Add(1)
 					require.NoError(t, r.ParseForm())
 					if mode != "cancel" {
@@ -155,10 +157,15 @@ func TestOrdersElicitationWire(t *testing.T) {
 				args := map[string]any{"mode": mode, "exchange": "NSE", "tradingsymbol": "INFY", "transaction_type": "BUY", "quantity": 3, "product": "CNC", "order_type": "LIMIT", "price": 1500, "validity": "DAY", "order_id": "order-1", "approved": true}
 				result, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "orders", Arguments: args})
 				require.NoError(t, err)
-				allowed := decision == "accept" || decision == "api failure"
+				fallback := decision == "unsupported" || decision == "url only"
+				allowed := decision == "accept" || decision == "api failure" || fallback
 				if allowed {
 					require.EqualValues(t, 1, mutations.Load())
-					require.EqualValues(t, 1, elicitations.Load())
+					if fallback {
+						require.Zero(t, elicitations.Load())
+					} else {
+						require.EqualValues(t, 1, elicitations.Load())
+					}
 				} else {
 					require.Zero(t, mutations.Load())
 					require.True(t, result.IsError)
@@ -180,7 +187,7 @@ func TestOrdersElicitationWire(t *testing.T) {
 				}
 				if decision == "unsupported" || decision == "url only" {
 					require.Zero(t, elicitations.Load())
-					require.Contains(t, result.Content[0].(*sdk.TextContent).Text, "unsupported_client")
+					require.False(t, result.IsError)
 				}
 			})
 		}
@@ -233,7 +240,7 @@ func TestTradeApprovalCancellationDuringVerification(t *testing.T) {
 	require.Contains(t, result.Content[0].(*sdk.TextContent).Text, "cancelled")
 }
 
-func TestTradeApprovalDowngradedInitialize(t *testing.T) {
+func TestTradeApprovalNegotiatedInitialize(t *testing.T) {
 	for _, version := range []string{"2026-07-28", "2025-11-25", "2025-06-18"} {
 		t.Run(version, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

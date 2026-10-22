@@ -32,7 +32,7 @@ func registerAppResource(server *mcp.Server) {
 				return result, err
 			}
 			request, ok := req.(*mcp.ListToolsRequest)
-			if !ok || supportsApps(request.ClientCapabilities()) {
+			if !ok || supportsApps(requestCapabilities(request)) {
 				return result, err
 			}
 			if listing, ok := result.(*mcp.ListToolsResult); ok {

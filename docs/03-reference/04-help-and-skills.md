@@ -85,18 +85,11 @@ An `experimental` declaration does not activate this behavior.
   activation or user approval.
 - Directory enumeration is optional and is not advertised or implemented.
 
-The existing server deliberately negotiates protocol versions through
-`2025-11-25` to preserve its nested elicitation approval flow. This implementation
-binds the Skills methods to that existing transport using the official Go SDK
-v1.8.0 custom-method API. It does **not** enable the `2026-07-28` base protocol or
-its `server/discover`/multi-round-trip execution model. A client must support
-Skills over the negotiated older transport; clients that only implement the
-newer discovery model should use ordinary help/resources on a compatible client.
-
-This distinction matters because the current extension specification targets
-`2026-07-28` and declares capabilities via `server/discover`, while existing
-hosts also use the initialization-based binding. We retain the server's protocol
-policy instead of advertising a base revision its transaction flow cannot serve.
+The server supports `2026-07-28` discovery and multi-round-trip execution,
+as well as legacy initialization through `2025-11-25`. Skills capability checks
+use each request's metadata for the new protocol and initialized session
+capabilities for older clients. A client without the Skills extension uses the
+ordinary help tool and resource interfaces.
 
 ## Authoring
 

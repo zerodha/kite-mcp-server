@@ -74,13 +74,10 @@ func registerSkills(server *sdk.Server) {
 	}
 	server.AddReceivingMiddleware(func(next sdk.MethodHandler) sdk.MethodHandler {
 		return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
-			// Read the negotiated session, never a process-global client flag. This
-			// server supports pre-2026 protocols, where capabilities live in initialize.
+			// Capabilities are per-request in 2026, and session-level for legacy clients.
 			supported := false
-			if ss, ok := req.GetSession().(*sdk.ServerSession); ok && ss != nil {
-				if p := ss.InitializeParams(); p != nil && p.Capabilities != nil {
-					_, supported = p.Capabilities.Extensions[skillsExtension].(map[string]any)
-				}
+			if caps := requestCapabilities(req); caps != nil {
+				_, supported = caps.Extensions[skillsExtension].(map[string]any)
 			}
 			if supported && method == "tools/call" {
 				if p, ok := req.GetParams().(*sdk.CallToolParamsRaw); ok && p.Name == "help" {

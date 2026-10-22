@@ -6,7 +6,7 @@
     <p>Return address: <strong style="overflow-wrap:anywhere">{{.RedirectURI}}</strong></p>
     <p>This client requests access to the Kite Connect API through your account:
        profile, balances, holdings, positions, market data, and enabled trading tools.
-       The default scope grants all enabled tools; individual trade confirmations still apply.</p>
+       The default scope grants all enabled tools; additional trade confirmations are requested when the client supports them.</p>
     <p>Approve only if you recognize this client and its return address. You will then sign in on Kite.</p>
     <p class="disclaimer">
         <strong>Disclaimer</strong>
@@ -16,7 +16,7 @@
         <input type="hidden" name="flow" value="{{.Flow}}">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         <button type="submit" name="decision" value="approve" class="button">Approve and continue to Kite login</button>
-        <button type="submit" name="decision" value="deny">Decline</button>
+        <button type="submit" name="decision" value="deny" class="button button-secondary">Decline</button>
     </form>
 </div>
 {{end}}

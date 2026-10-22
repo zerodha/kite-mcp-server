@@ -67,7 +67,7 @@
                 font-size: 12px;
             }
             .disclaimer strong { display: block; margin-bottom: 5px; font-weight: 600; }
-            .actions { margin-bottom: 0; }
+            .actions { display: flex; flex-direction: column; gap: 12px; margin-bottom: 0; }
             .button {
                 display: block;
                 width: 100%;
@@ -76,13 +76,19 @@
                 border-radius: 3px;
                 background: var(--primary);
                 color: #fff;
+                font-family: inherit;
                 font-size: 14.8px;
                 font-weight: 400;
-                line-height: 1;
+                line-height: 1.5;
                 text-decoration: none;
+                cursor: pointer;
+                white-space: normal;
+                overflow-wrap: anywhere;
             }
             .button:hover { background: #ff6e40; border-color: #ff6e40; }
-            a:focus-visible { outline: 3px solid #c9ddff; outline-offset: 3px; }
+            .button-secondary { background: #fff; border-color: #ddd; color: var(--text); }
+            .button-secondary:hover { background: var(--bg); border-color: #bbb; }
+            a:focus-visible, button:focus-visible { outline: 3px solid #c9ddff; outline-offset: 3px; }
             .footer {
                 width: 360px;
                 max-width: 100%;

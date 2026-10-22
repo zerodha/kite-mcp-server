@@ -122,7 +122,7 @@ var ordersSchema = json.RawMessage(`{
 
 func (*OrdersTool) Definition() *mcp.Tool {
 	return NewTool("orders",
-		"Manage orders. Placement, modification, and cancellation require explicit user approval through client form elicitation; unsupported clients cannot execute these mutations. Use mode=list to see all orders today, mode=history for an order's status trail, mode=trades for fills on a specific order, mode=all_trades for all trades today, mode=place to place a new order, mode=modify to change an open order, mode=cancel to cancel an open order. List and all_trades modes return data/pagination with default limit 100 and maximum 500.",
+		"Manage orders. Placement, modification, and cancellation request explicit user approval through form elicitation when the client advertises support; otherwise they execute directly through the normal tool call without a server approval form. Use mode=list to see all orders today, mode=history for an order's status trail, mode=trades for fills on a specific order, mode=all_trades for all trades today, mode=place to place a new order, mode=modify to change an open order, mode=cancel to cancel an open order. List and all_trades modes return data/pagination with default limit 100 and maximum 500.",
 		ordersSchema,
 	)
 }

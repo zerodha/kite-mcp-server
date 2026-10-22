@@ -73,12 +73,16 @@ in both views; use `net` to assess current exposure and never sum the two views.
 
 Manage orders placed during the current trading day.
 
-Placement, modification, and cancellation require server-initiated MCP
-`elicitation/create` approval inside the tool handler. The server negotiates MCP
-2025-11-25 or earlier because later protocols replace nested elicitation with a
-different multi-round-trip flow. The client must advertise form elicitation
-(legacy `elicitation: {}` also supports forms; URL-only elicitation does not).
+Placement, modification, and cancellation use form elicitation when the client
+advertises support (including legacy `elicitation: {}`). Clients that do not
+advertise form support, including URL-only clients, execute through the normal
+tool call without an additional server approval form. All order modes remain
+available in `tools/list`. Authentication and order validation still apply.
 
+For capable clients, MCP 2026-07-28 uses per-request capabilities and
+`InputRequiredResult` with `inputRequests`, followed by a retry carrying
+`inputResponses` and opaque `requestState`. Older protocols use nested
+`elicitation/create`.
 The approval shows the normalized order parameters, including instrument,
 exchange, BUY/SELL, quantity, product, order type, price, and validity. Modification
 and cancellation also show the latest order history entry fetched from Kite;
@@ -86,15 +90,23 @@ omitted modification fields remain unchanged. Placement defaults validity to DAY
 The response must have `action: "accept"` and boolean `content.confirm: true`.
 An `approved=true` tool argument never grants approval.
 
-Unsupported clients, declines, cancellations, missing or invalid confirmation,
-disconnects, and the two-minute approval deadline block execution. Unsupported
-clients receive an error asking them to reconnect with an elicitation-capable
-client; there is no conversational approval bypass. Approval failures use the
-`Trade approval failed [code]` prefix, distinct from Kite API failures.
+When elicitation is used, declines, cancellations, missing or invalid
+confirmation, disconnects, and the two-minute deadline block execution. An
+elicitation failure never falls back to direct execution. Continuations still
+validate the original approval even if capabilities are omitted on the retry.
+Approval failures use the `Trade approval failed [code]` prefix, distinct from
+Kite API failures.
+
+Multi-round-trip approval state expires after two minutes and is bound to the
+account session, operation, and normalized transaction details. It is consumed
+atomically before execution, so a retry cannot reuse an approval. Server restart
+invalidates pending approvals. Each account session can hold up to eight pending
+approvals, within a server-wide limit of 1,024. Expired or consumed approvals
+release capacity.
 
 Each approval authorizes one API attempt with the parameters shown. The server
 does not automatically retry mutations; after an ambiguous API failure, inspect
-the order book before initiating another trade. A repeated tool call requires
+the order book before initiating another trade. On clients supporting form elicitation, a repeated tool call requires
 fresh approval. This is client-mediated consent through a trusted MCP client,
 not independent user authentication. GTT and Alerts/ATO are outside this approval
 gate.

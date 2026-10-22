@@ -25,7 +25,9 @@ Existing `EXCLUDED_TOOLS` settings apply as before. Excluding `portfolio` or `ma
 
 The view calls only `portfolio` and `market`, through the host's `tools/call` proxy. OAuth and account-session checks remain in the existing server path. It never receives a Kite API secret or token. Both CSP network and resource domain lists are empty, and all upstream strings are rendered as text. There are no external fonts, scripts, analytics, or direct Kite API calls.
 
-MCP Apps is additive to the server's negotiated protocol versions, including `2025-11-25`. The implementation does not enable the newer multi-round-trip execution protocol or alter form-based trade approval.
+MCP Apps is additive to the server's negotiated protocol versions, including
+`2026-07-28` and `2025-11-25`. Trade approval uses multi-round-trip input requests
+on `2026-07-28` and nested form elicitation on older versions.
 
 ## Developing and verifying the view
 
