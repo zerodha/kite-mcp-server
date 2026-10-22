@@ -124,7 +124,9 @@ func TestConsentCallbackBrowserBindingAndReplay(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"status":"success","data":{"user_id":"test-user","access_token":"access","refresh_token":"refresh"}}`)
+		if _, err := io.WriteString(w, `{"status":"success","data":{"user_id":"test-user","access_token":"access","refresh_token":"refresh"}}`); err != nil {
+			t.Errorf("write test response: %v", err)
+		}
 	}))
 	defer upstream.Close()
 	h := consentTestHandlers(t, upstream.URL)

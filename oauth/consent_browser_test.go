@@ -31,7 +31,9 @@ func TestConsentBrowserRedirects(t *testing.T) {
 					return
 				}
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				io.WriteString(w, "<!doctype html><html><body>"+marker+"</body></html>")
+				if _, err := io.WriteString(w, "<!doctype html><html><body>"+marker+"</body></html>"); err != nil {
+					t.Errorf("write test response: %v", err)
+				}
 			}))
 			defer destination.Close()
 			h := consentTestHandlers(t, "")
@@ -59,11 +61,15 @@ func TestConsentBrowserRedirects(t *testing.T) {
 					w.Header().Set("Location", destination.URL+"/kite")
 				}
 				w.WriteHeader(response.Code)
-				w.Write(response.Body.Bytes())
+				if _, err := w.Write(response.Body.Bytes()); err != nil {
+					t.Errorf("write test response: %v", err)
+				}
 				if r.Method == http.MethodGet && response.Code == http.StatusOK {
 					// Act like a user pressing the real form button. The production template
 					// and headers remain unchanged; no CSP protections are bypassed.
-					io.WriteString(w, `<script>addEventListener('load',()=>document.querySelector('button[value="`+decision+`"]')?.click())</script>`)
+					if _, err := io.WriteString(w, `<script>addEventListener('load',()=>document.querySelector('button[value="`+decision+`"]')?.click())</script>`); err != nil {
+						t.Errorf("write test response: %v", err)
+					}
 				}
 			}))
 			h.server.config.Issuer = "http://" + auth.Listener.Addr().String()

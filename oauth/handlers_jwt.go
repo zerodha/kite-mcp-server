@@ -191,7 +191,7 @@ func (h *Handlers) secureCookies() bool {
 		return true
 	}
 	host := issuer.Hostname()
-	return !(issuer.Scheme == "http" && (host == "localhost" || host == "127.0.0.1" || host == "::1"))
+	return issuer.Scheme != "http" || (host != "localhost" && host != "127.0.0.1" && host != "::1")
 }
 
 func (h *Handlers) flowCookieName(flow, purpose string) string {
