@@ -206,7 +206,7 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 				resp, err := client.PlaceOrder(variety, orderParams)
 				if err != nil {
 					handler.manager.Logger.Error("Failed to place order", "error", err)
-					return NewToolResultError("Failed to place order"), nil
+					return NewToolResultError("Failed to place order: " + err.Error()), nil
 				}
 				return handler.MarshalResponse(resp, "orders_place")
 			})

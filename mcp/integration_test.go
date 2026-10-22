@@ -377,6 +377,27 @@ func TestOrders_Place(t *testing.T) {
 	assertTextContentContains(t, result, "order_id")
 }
 
+func TestOrders_PlaceRejectionReason(t *testing.T) {
+	h := newTestHarness(t)
+	h.kiteServer.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "POST", r.Method)
+		assert.Equal(t, "/orders/regular", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"status":"error","error_type":"InputException","message":"Insufficient funds. Required margin is 1500.00."}`))
+	})
+	result, err := h.session.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "orders",
+		Arguments: map[string]any{
+			"mode": "place", "exchange": "NSE", "tradingsymbol": "INFY",
+			"transaction_type": "BUY", "quantity": float64(1), "product": "CNC", "order_type": "MARKET",
+		},
+	})
+	require.NoError(t, err)
+	assertIsError(t, result)
+	assertTextContentContains(t, result, "Failed to place order: Insufficient funds. Required margin is 1500.00.")
+}
+
 func TestOrders_InvalidMode(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
