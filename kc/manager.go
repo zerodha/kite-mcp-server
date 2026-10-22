@@ -328,7 +328,7 @@ func setupTemplates() (map[string]*template.Template, error) {
 	out := make(map[string]*template.Template)
 	templateList := []string{indexTemplate, authorizeTemplate}
 	for _, templateName := range templateList {
-		templ, err := template.ParseFS(templates.FS, "base.html", templateName)
+		templ, err := template.ParseFS(templates.FS, "base.html", "brand_assets.html", templateName)
 		if err != nil {
 			return out, fmt.Errorf("error parsing %s: %w", templateName, err)
 		}
