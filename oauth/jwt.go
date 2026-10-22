@@ -578,14 +578,6 @@ func ClaimsFromContext(ctx context.Context) *TokenClaims {
 	return nil
 }
 
-func (s *Server) writeUnauthorized(w http.ResponseWriter, message string) {
-	w.Header().Set("WWW-Authenticate", fmt.Sprintf(
-		`Bearer resource_metadata="%s/.well-known/oauth-protected-resource"`,
-		s.config.Issuer,
-	))
-	http.Error(w, message, http.StatusUnauthorized)
-}
-
 // --- Discovery Endpoints ---
 
 // AuthorizationServerMetadata returns RFC 8414 metadata

@@ -607,41 +607,6 @@ func (m *Manager) startScheduler() {
 	}
 }
 
-// shouldUpdate checks if it's time for a scheduled update
-func (m *Manager) shouldUpdate() bool {
-	now := time.Now()
-	ist, _ := time.LoadLocation("Asia/Kolkata")
-	nowIST := now.In(ist)
-
-	// Safely read config values
-	m.mutex.RLock()
-	updateHour := m.config.UpdateHour
-	updateMinute := m.config.UpdateMinute
-	m.mutex.RUnlock()
-
-	// Check if it's the right time (hour and minute)
-	if nowIST.Hour() != updateHour || nowIST.Minute() != updateMinute {
-		return false
-	}
-
-	// Check if we already updated today
-	m.mutex.RLock()
-	lastUpdated := m.stats.LastUpdateTime
-	m.mutex.RUnlock()
-
-	if !lastUpdated.IsZero() {
-		lastUpdatedIST := lastUpdated.In(ist)
-
-		// If last update was today, don't update again
-		if nowIST.Year() == lastUpdatedIST.Year() &&
-			nowIST.YearDay() == lastUpdatedIST.YearDay() {
-			return false
-		}
-	}
-
-	return true
-}
-
 // getNextScheduledUpdate calculates the next scheduled update time
 func (m *Manager) getNextScheduledUpdate() time.Time {
 	ist, _ := time.LoadLocation("Asia/Kolkata")
