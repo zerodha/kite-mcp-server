@@ -20,6 +20,11 @@ type MarketTool struct{}
 var marketSchema = json.RawMessage(`{
 	"type": "object",
 	"properties": {
+		"_app_request_id": {
+			"type": "string",
+			"maxLength": 80,
+			"description": "Optional opaque correlation ID supplied by the embedded explorer. Other callers should omit it."
+		},
 		"mode": {
 			"type": "string",
 			"description": "Operation mode: quote=full market data snapshot (OHLC, depth, OI), ltp=last traded price only, ohlc=today's open/high/low/close, historical=historical OHLC candles, search=search instrument master list",

@@ -67,7 +67,7 @@ func TestAppsMixedClientDiscoveryAndReads(t *testing.T) {
 					require.NotContains(t, tool.Meta, "ui")
 				}
 			}
-			result, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "portfolio", Arguments: map[string]any{"mode": "holdings", "limit": 1}})
+			result, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "portfolio", Arguments: map[string]any{"mode": "holdings", "limit": 1, "_app_request_id": "panel-test-1"}})
 			require.NoError(t, err)
 			require.False(t, result.IsError)
 			var text map[string]any
@@ -76,6 +76,7 @@ func TestAppsMixedClientDiscoveryAndReads(t *testing.T) {
 			info := result.Meta["trade.kite/app"].(map[string]any)
 			require.Equal(t, "portfolio", info["tool"])
 			require.Equal(t, "holdings", info["arguments"].(map[string]any)["mode"])
+			require.Equal(t, "panel-test-1", info["arguments"].(map[string]any)["_app_request_id"])
 		}
 	}
 	resources, err := sessions[0].ListResources(ctx, nil)

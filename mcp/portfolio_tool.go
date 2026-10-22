@@ -21,6 +21,11 @@ type positionWithView struct {
 var portfolioSchema = json.RawMessage(`{
 	"type": "object",
 	"properties": {
+		"_app_request_id": {
+			"type": "string",
+			"maxLength": 80,
+			"description": "Optional opaque correlation ID supplied by the embedded explorer. Other callers should omit it."
+		},
 		"mode": {
 			"type": "string",
 			"description": "Operation mode: profile=user profile and account details, margins=available funds and margins across segments, holdings=demat holdings with P&L, positions=open intraday and overnight positions",
