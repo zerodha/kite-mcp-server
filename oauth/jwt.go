@@ -3,13 +3,15 @@
 //
 // Key simplifications:
 // - JWT tokens instead of opaque tokens (no introspection needed)
-// - Auto-registration only (no RFC 7591 dynamic registration)
+// - Public client registration via RFC 7591
 // - No client credentials grant (user-facing only)
 // - Leverages existing kc.SessionManager for Kite session binding
 package oauth
 
 import (
+	"container/list"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -41,21 +43,9 @@ type Config struct {
 	SessionExpiry func(string) (time.Time, error)
 	// AuthCodeTTL is how long authorization codes are valid
 	AuthCodeTTL time.Duration
-	// AllowedRedirectPatterns defines allowed redirect URI patterns for DCR.
-	// Default is "localhost", which matches http://localhost:* and http://127.0.0.1:*
-	// for native/loopback clients. Additional entries may be either:
-	// - exact redirect URIs, e.g. https://claude.ai/api/mcp/auth_callback
-	// - prefix:... patterns for known hosted providers with dynamic callback paths,
-	//   e.g. prefix:https://chatgpt.com/connector/oauth/
-	AllowedRedirectPatterns []string
 	// TrustedProxyCIDRs identifies reverse proxies allowed to supply
 	// X-Forwarded-For. With the default empty list, the direct peer is used.
 	TrustedProxyCIDRs []string
-	// ClientTTL bounds retention of dynamically and automatically registered
-	// public clients. Zero defaults to 24 hours.
-	ClientTTL time.Duration
-	// MaxClients bounds in-memory client metadata. Zero defaults to 10,000.
-	MaxClients int
 }
 
 // Server is the simplified OAuth server
@@ -64,18 +54,9 @@ type Server struct {
 
 	// In-memory stores (replace with Redis/DB for production)
 	mu             sync.RWMutex
-	clients        map[string]*Client   // client_id -> client
 	authCodes      map[string]*AuthCode // code -> auth code data
 	pkceVerifiers  map[string]string    // code -> code_verifier hash
 	trustedProxies []netip.Prefix
-}
-
-// Client represents an OAuth client (auto-registered)
-type Client struct {
-	ID           string
-	RedirectURIs []string
-	CreatedAt    time.Time
-	ExpiresAt    time.Time
 }
 
 // AuthCode represents a pending authorization code
@@ -108,15 +89,6 @@ func New(cfg Config) *Server {
 	if cfg.AuthCodeTTL == 0 {
 		cfg.AuthCodeTTL = 10 * time.Minute
 	}
-	if len(cfg.AllowedRedirectPatterns) == 0 {
-		cfg.AllowedRedirectPatterns = []string{"localhost"}
-	}
-	if cfg.ClientTTL <= 0 {
-		cfg.ClientTTL = 24 * time.Hour
-	}
-	if cfg.MaxClients <= 0 {
-		cfg.MaxClients = 10000
-	}
 	trustedProxies := make([]netip.Prefix, 0, len(cfg.TrustedProxyCIDRs))
 	for _, raw := range cfg.TrustedProxyCIDRs {
 		prefix, err := netip.ParsePrefix(strings.TrimSpace(raw))
@@ -126,7 +98,6 @@ func New(cfg Config) *Server {
 	}
 	return &Server{
 		config:         cfg,
-		clients:        make(map[string]*Client),
 		authCodes:      make(map[string]*AuthCode),
 		pkceVerifiers:  make(map[string]string),
 		trustedProxies: trustedProxies,
@@ -137,16 +108,40 @@ func New(cfg Config) *Server {
 
 // RateLimiter provides simple IP-based rate limiting
 type RateLimiter struct {
-	mu       sync.Mutex
-	requests map[string][]time.Time
-	limit    int
-	window   time.Duration
+	mu          sync.Mutex
+	requests    map[string]*rateLimitEntry
+	limit       int
+	window      time.Duration
+	lastCleanup time.Time
+	peers       *list.List
+}
+
+const maxRateLimitPeers = 10000
+
+type rateLimitEntry struct {
+	requests   []time.Time
+	lastAccess time.Time
+	position   *list.Element
+}
+
+// rateLimitKey groups IPv6 privacy addresses by /64 and canonicalizes IPv4.
+func rateLimitKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	addr = addr.Unmap()
+	if addr.Is6() {
+		return netip.PrefixFrom(addr, 64).Masked().String()
+	}
+	return addr.String()
 }
 
 // NewRateLimiter creates a rate limiter
 func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	return &RateLimiter{
-		requests: make(map[string][]time.Time),
+		requests: make(map[string]*rateLimitEntry),
+		peers:    list.New(),
 		limit:    limit,
 		window:   window,
 	}
@@ -157,12 +152,37 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
+	ip = rateLimitKey(ip)
 	now := time.Now()
 	cutoff := now.Add(-rl.window)
 
+	// Remove expired IP entries and bound memory even when peers rotate addresses.
+	if rl.lastCleanup.IsZero() || now.Sub(rl.lastCleanup) >= rl.window {
+		for key, entry := range rl.requests {
+			if !entry.lastAccess.After(cutoff) {
+				delete(rl.requests, key)
+				rl.peers.Remove(entry.position)
+			}
+		}
+		rl.lastCleanup = now
+	}
+	entry, exists := rl.requests[ip]
+	if !exists {
+		if len(rl.requests) >= maxRateLimitPeers {
+			// Evict the least recently used peer instead of rejecting unrelated users.
+			oldest := rl.peers.Back()
+			delete(rl.requests, oldest.Value.(string))
+			rl.peers.Remove(oldest)
+		}
+		entry = &rateLimitEntry{position: rl.peers.PushFront(ip)}
+		rl.requests[ip] = entry
+	}
+	rl.peers.MoveToFront(entry.position)
+	entry.lastAccess = now
+
 	// Filter old requests
 	var recent []time.Time
-	for _, t := range rl.requests[ip] {
+	for _, t := range entry.requests {
 		if t.After(cutoff) {
 			recent = append(recent, t)
 		}
@@ -172,125 +192,111 @@ func (rl *RateLimiter) Allow(ip string) bool {
 		return false
 	}
 
-	rl.requests[ip] = append(recent, now)
+	entry.requests = append(recent, now)
 	return true
 }
 
 // --- Redirect URI Validation ---
 
-// ValidateRedirectURI checks if a redirect URI matches allowed patterns.
-// Default behavior allows loopback redirects for native clients. Hosted clients
-// like Claude Web and ChatGPT Web must be explicitly allowlisted by exact URI
-// or an approved prefix: pattern.
+// ValidateRedirectURI accepts HTTPS callbacks and HTTP loopback callbacks.
+// Credentials and fragments are never valid redirect URI metadata.
 func (s *Server) ValidateRedirectURI(redirectURI string) error {
 	parsed, err := url.Parse(redirectURI)
 	if err != nil {
 		return fmt.Errorf("invalid redirect_uri: %w", err)
 	}
-	if parsed.Scheme == "" || parsed.Hostname() == "" {
-		return fmt.Errorf("invalid redirect_uri: missing scheme or hostname")
+	if parsed.Hostname() == "" || parsed.User != nil || strings.Contains(redirectURI, "#") {
+		return fmt.Errorf("invalid redirect_uri: hostname required; credentials and fragments forbidden")
 	}
-
-	for _, pattern := range s.config.AllowedRedirectPatterns {
-		pattern = strings.TrimSpace(pattern)
-		if pattern == "" {
-			continue
-		}
-
-		switch pattern {
-		case "localhost":
-			host := parsed.Hostname()
-			if (host == "localhost" || host == "127.0.0.1") &&
-				(parsed.Scheme == "http" || parsed.Scheme == "https") {
-				return nil
-			}
-		default:
-			if strings.HasPrefix(pattern, "prefix:") {
-				prefix := strings.TrimPrefix(pattern, "prefix:")
-				if prefix != "" && strings.HasPrefix(redirectURI, prefix) {
-					return nil
-				}
-				continue
-			}
-			if redirectURI == pattern {
-				return nil
-			}
-		}
+	if parsed.Scheme == "https" {
+		return nil
 	}
-
-	return fmt.Errorf("redirect_uri not allowed: must match configured allowlist")
+	host := parsed.Hostname()
+	ip, _ := netip.ParseAddr(host)
+	if parsed.Scheme == "http" && (host == "localhost" || ip.IsLoopback()) {
+		return nil
+	}
+	return fmt.Errorf("invalid redirect_uri: HTTPS required except for loopback callbacks")
 }
 
-// --- Auto Registration ---
+// Client IDs carry signed callback hashes instead of transient server metadata.
+// They have no expiry: changing JWTSecret or Issuer invalidates registrations.
+// A separate format and signing domain prevent confusion with access tokens.
+const maxClientIDBytes = 1024
 
-// GetOrCreateClient auto-registers a client if not found
-func (s *Server) GetOrCreateClient(clientID, redirectURI string) *Client {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.cleanupExpiredClientsLocked(time.Now())
-
-	if client, ok := s.clients[clientID]; ok {
-		// Add redirect URI if not already present
-		for _, uri := range client.RedirectURIs {
-			if uri == redirectURI {
-				return client
-			}
-		}
-		client.RedirectURIs = append(client.RedirectURIs, redirectURI)
-		return client
-	}
-
-	// Auto-register new client
-	s.evictClientIfNeededLocked()
-	client := &Client{
-		ID:           clientID,
-		RedirectURIs: []string{redirectURI},
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(s.config.ClientTTL),
-	}
-	s.clients[clientID] = client
-	return client
+type clientRegistration struct {
+	Nonce          string   `json:"nonce"`
+	RedirectHashes []string `json:"redirect_hashes"`
 }
 
-func (s *Server) cleanupExpiredClientsLocked(now time.Time) {
-	for id, client := range s.clients {
-		if !client.ExpiresAt.IsZero() && !now.Before(client.ExpiresAt) {
-			delete(s.clients, id)
-		}
-	}
+func redirectHash(uri string) string {
+	hash := sha256.Sum256([]byte(uri))
+	return base64.RawURLEncoding.EncodeToString(hash[:])
 }
 
-func (s *Server) evictClientIfNeededLocked() {
-	if len(s.clients) < s.config.MaxClients {
-		return
-	}
-	var oldestID string
-	var oldest time.Time
-	for id, client := range s.clients {
-		if oldestID == "" || client.CreatedAt.Before(oldest) {
-			oldestID, oldest = id, client.CreatedAt
-		}
-	}
-	if oldestID != "" {
-		delete(s.clients, oldestID)
-	}
+func (s *Server) clientSignature(payload string) []byte {
+	mac := hmac.New(sha256.New, s.config.JWTSecret)
+	mac.Write([]byte("kite-mcp-client-registration-v1\x00"))
+	mac.Write([]byte(s.config.Issuer))
+	mac.Write([]byte{0})
+	mac.Write([]byte(payload))
+	return mac.Sum(nil)
 }
 
-// RegisterClient stores bounded dynamic client metadata.
-func (s *Server) RegisterClient(redirectURIs []string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now()
-	s.cleanupExpiredClientsLocked(now)
-	s.evictClientIfNeededLocked()
-	clientID := generateSecureToken(16)
-	s.clients[clientID] = &Client{
-		ID:           clientID,
-		RedirectURIs: append([]string(nil), redirectURIs...),
-		CreatedAt:    now,
-		ExpiresAt:    now.Add(s.config.ClientTTL),
+// ValidateClientRedirect verifies a server-issued client ID and exact callback binding.
+func (s *Server) ValidateClientRedirect(clientID, redirectURI string) error {
+	if len(s.config.JWTSecret) < 32 || len(clientID) > maxClientIDBytes {
+		return errors.New("invalid client registration")
 	}
-	return clientID
+	parts := strings.Split(clientID, ".")
+	if len(parts) != 3 || parts[0] != "dcr1" {
+		return errors.New("invalid client registration")
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil || !hmac.Equal(signature, s.clientSignature(parts[1])) {
+		return errors.New("invalid client registration")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return errors.New("invalid client registration")
+	}
+	var registration clientRegistration
+	if err := json.Unmarshal(payload, &registration); err != nil || registration.Nonce == "" || len(registration.RedirectHashes) == 0 || len(registration.RedirectHashes) > maxDCRRedirectURIs {
+		return errors.New("invalid client registration")
+	}
+	hash := redirectHash(redirectURI)
+	for _, registered := range registration.RedirectHashes {
+		if registered == hash {
+			return nil
+		}
+	}
+	return errors.New("redirect_uri does not match client registration")
+}
+
+// RegisterClient issues a durable, signed registration without retaining metadata.
+func (s *Server) RegisterClient(redirectURIs []string) (string, error) {
+	if len(s.config.JWTSecret) < 32 {
+		return "", errors.New("client signing secret must be at least 32 bytes")
+	}
+	if len(redirectURIs) == 0 || len(redirectURIs) > maxDCRRedirectURIs {
+		return "", errors.New("invalid redirect URI count")
+	}
+	registration := clientRegistration{Nonce: generateSecureToken(16)}
+	for _, uri := range redirectURIs {
+		if len(uri) == 0 || len(uri) > maxDCRURIBytes {
+			return "", errors.New("invalid redirect URI length")
+		}
+		if err := s.ValidateRedirectURI(uri); err != nil {
+			return "", err
+		}
+		registration.RedirectHashes = append(registration.RedirectHashes, redirectHash(uri))
+	}
+	payload, err := json.Marshal(registration)
+	if err != nil {
+		return "", err
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(payload)
+	return "dcr1." + encoded + "." + base64.RawURLEncoding.EncodeToString(s.clientSignature(encoded)), nil
 }
 
 // --- Authorization Endpoint ---

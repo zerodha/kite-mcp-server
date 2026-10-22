@@ -12,17 +12,21 @@ import (
 
 // Handlers wraps the OAuth server with HTTP handlers
 type Handlers struct {
-	server    *Server
-	kcManager *kc.Manager
-	logger    *slog.Logger
+	server         *Server
+	kcManager      *kc.Manager
+	registerMinute *RateLimiter
+	registerHour   *RateLimiter
+	logger         *slog.Logger
 }
 
 // NewHandlers creates OAuth HTTP handlers
 func NewHandlers(server *Server, kcManager *kc.Manager, logger *slog.Logger) *Handlers {
 	return &Handlers{
-		server:    server,
-		kcManager: kcManager,
-		logger:    logger,
+		server:         server,
+		registerMinute: NewRateLimiter(10, time.Minute),
+		registerHour:   NewRateLimiter(100, time.Hour),
+		kcManager:      kcManager,
+		logger:         logger,
 	}
 }
 
@@ -44,15 +48,18 @@ func (h *Handlers) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate redirect URI against allowlist before auto-registering
+	// Validate redirect URI syntax before checking the registered callback
 	if err := h.server.ValidateRedirectURI(req.RedirectURI); err != nil {
 		h.logger.Warn("rejected redirect_uri", "redirect_uri", req.RedirectURI, "error", err)
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
-	// Auto-register client
-	h.server.GetOrCreateClient(req.ClientID, req.RedirectURI)
+	// Require a signed DCR client ID and its exact registered callback.
+	if err := h.server.ValidateClientRedirect(req.ClientID, req.RedirectURI); err != nil {
+		http.Error(w, "invalid client or redirect_uri", http.StatusBadRequest)
+		return
+	}
 
 	// Store OAuth request in session for callback
 	pending := &pendingAuth{
@@ -231,9 +238,6 @@ func (h *Handlers) HandleProtectedResourceMetadata(w http.ResponseWriter, r *htt
 	WriteJSON(w, http.StatusOK, h.server.ProtectedResourceMetadata())
 }
 
-// registerRateLimiter limits /register requests (10 per IP per hour)
-var registerRateLimiter = NewRateLimiter(10, time.Hour)
-
 // RegisterRequest represents RFC 7591 client registration request
 type RegisterRequest struct {
 	RedirectURIs []string `json:"redirect_uris"`
@@ -264,7 +268,13 @@ func (h *Handlers) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientIP := h.server.ClientIP(r)
-	if !registerRateLimiter.Allow(clientIP) {
+	if !h.registerHour.Allow(clientIP) {
+		w.Header().Set("Retry-After", "3600")
+		WriteJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate_limit_exceeded", "error_description": "Too many registration requests. Try again later."})
+		return
+	}
+	if !h.registerMinute.Allow(clientIP) {
+		w.Header().Set("Retry-After", "60")
 		WriteJSON(w, http.StatusTooManyRequests, map[string]string{
 			"error":             "rate_limit_exceeded",
 			"error_description": "Too many registration requests. Try again later.",
@@ -298,7 +308,7 @@ func (h *Handlers) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate all redirect URIs against allowlist
+	// Validate all redirect URIs
 	for _, uri := range req.RedirectURIs {
 		if len(uri) == 0 || len(uri) > maxDCRURIBytes {
 			WriteJSON(w, http.StatusBadRequest, map[string]string{
@@ -311,13 +321,18 @@ func (h *Handlers) HandleRegister(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("rejected DCR redirect_uri", "redirect_uri", uri, "error", err)
 			WriteJSON(w, http.StatusBadRequest, map[string]string{
 				"error":             "invalid_redirect_uri",
-				"error_description": "The redirect URI is not allowed for this MCP server.",
+				"error_description": "Use an HTTPS redirect URI or an HTTP loopback callback.",
 			})
 			return
 		}
 	}
 
-	clientID := h.server.RegisterClient(req.RedirectURIs)
+	clientID, err := h.server.RegisterClient(req.RedirectURIs)
+	if err != nil {
+		h.logger.Error("failed to register client", "error", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "server_error"})
+		return
+	}
 
 	h.logger.Info("client registered via DCR", "client_id", clientID, "name", req.ClientName)
 

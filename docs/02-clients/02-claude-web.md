@@ -28,4 +28,4 @@ https://mcp.kite.trade/mcp
 
 ## Troubleshooting
 
-If the OAuth flow fails on a self-hosted deployment, confirm that the deployment allows Claude callback URIs during dynamic client registration.
+Client registration is open and rate limited; HTTPS callback URIs need no approval.

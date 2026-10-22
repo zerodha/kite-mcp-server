@@ -30,4 +30,4 @@ https://mcp.kite.trade/mcp
 
 ## Troubleshooting
 
-If the connector is rejected during login, try removing and recreating it. Self-hosted deployments must allow ChatGPT callback URIs during dynamic client registration.
+If the connector is rejected during login, try removing and recreating it. Client registration is open and rate limited; HTTPS callback URIs need no approval.

@@ -290,7 +290,6 @@ This project uses Go's `testing/synctest` package for time-dependent tests (sess
 | `APP_HOST`                  | `localhost` | Server host (HTTP/SSE/hybrid modes)                        |
 | `OAUTH_TOKEN_TTL`           | `168h`       | OAuth access token lifetime (maximum 168h)           |
 | `MCP_SESSION_TIMEOUT`       | `24h`       | Streamable HTTP transport idle timeout (Go duration format)  |
-| `ALLOWED_REDIRECT_PATTERNS` | `localhost` | Comma-separated redirect URI allowlist patterns            |
 | `EXCLUDED_TOOLS`            | _(empty)_   | Comma-separated list of tools to exclude from registration |
 
 **Note:** In production, we use hybrid mode which supports both `/sse` and `/mcp` endpoints, making both HTTP and SSE protocols available for different client needs.
@@ -335,17 +334,11 @@ EXCLUDED_TOOLS=orders,gtt,alerts
 
 The hosted version at `mcp.kite.trade` excludes potentially destructive trading operations for security. For accessing the other operations you can generate your own API keys and run the server locally.
 
-### Redirect URI Allowlist
+### Open Client Registration
 
-By default, the OAuth server only allows loopback redirect URIs for native clients via the special `localhost` allowlist token.
+Clients must register through `POST /register` before authorization; no approval is needed. Authorization verifies a signed client ID and requires an exact match against a registered callback. Redirect URIs must use HTTPS; HTTP is allowed for loopback callbacks (`localhost`, `127.0.0.1`, or `::1`). Credentials and fragments are rejected.
 
-For hosted MCP clients like Claude Web and ChatGPT Web, configure the callback allowlist explicitly:
-
-```env
-ALLOWED_REDIRECT_PATTERNS=localhost,https://claude.ai/api/mcp/auth_callback,https://claude.com/api/mcp/auth_callback,https://chatgpt.com/connector_platform_oauth_redirect,prefix:https://chatgpt.com/connector/oauth/
-```
-
-Exact callback URIs are preferred. Use prefix patterns only for trusted providers with documented dynamic callback paths, such as ChatGPT connector callbacks under `https://chatgpt.com/connector/oauth/`.
+DCR accepts at most 10 requests per minute and 100 per hour per IP (IPv6 addresses share a /64 limit), per server instance. Invalid registration attempts count toward these limits. Throttled requests receive HTTP 429 with `Retry-After`. Configure `TRUSTED_PROXY_CIDRS` when running behind a reverse proxy so the limits use the originating client IP. Client IDs contain signed callback hashes, so registrations survive restarts and have no expiration or metadata eviction. Instances must share the same `JWT_SECRET` and `OAUTH_ISSUER`; changing either invalidates existing client IDs and requires registration again.
 
 Hosted remote MCP clients generally handle OAuth and dynamic client registration automatically. The user usually only needs to enter the MCP server URL, review the authorize disclaimer interstitial, and complete the Kite login flow in the browser.
 
@@ -365,11 +358,13 @@ The server implements OAuth 2.1 with PKCE for secure authentication. MCP clients
 
 ### OAuth Flow
 
+Register first using `POST /register` with `{"redirect_uris":["http://localhost:8080/callback"]}`. Use the returned `client_id` below and during token exchange.
+
 1. **Authorization Request** (with PKCE):
    ```
    GET /authorize?
      response_type=code&
-     client_id=your-client&
+     client_id=<registered-client-id>&
      redirect_uri=http://localhost:8080/callback&
      code_challenge=<sha256(code_verifier)>&
      code_challenge_method=S256&
@@ -386,7 +381,7 @@ The server implements OAuth 2.1 with PKCE for secure authentication. MCP clients
      -d "grant_type=authorization_code" \
      -d "code=<authorization_code>" \
      -d "redirect_uri=http://localhost:8080/callback" \
-     -d "client_id=your-client" \
+     -d "client_id=<registered-client-id>" \
      -d "code_verifier=<original_verifier>"
    ```
 

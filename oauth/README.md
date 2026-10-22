@@ -42,9 +42,11 @@ The server exposes the following standard OAuth 2.1 endpoints. All unauthenticat
 To be compatible with clients like `mcp-remote`, the server supports unauthenticated dynamic client registration as specified in RFC 7591.
 
 -   **Endpoint**: `POST /register`
--   **Security**: This endpoint does not require an initial access token but is protected by **aggressive, IP-based rate limiting** to prevent abuse and denial-of-service attacks.
+-   **Security**: This endpoint does not require an initial access token but is protected by **IP-based rate limiting (10 requests per minute and 100 per hour per IP or IPv6 /64, per server instance)** to prevent abuse and denial-of-service attacks.
 
-A client registers itself by sending its metadata (e.g., `client_name`, `redirect_uris`) and receives a unique `client_id` and `client_secret` in response.
+Authorization verifies the signed client ID and an exact registered redirect URI. Forged client IDs and callback changes are rejected. Registrations have no expiration and require no server-side client store. They survive restarts and work across instances with the same `JWT_SECRET` and issuer; rotating either requires clients to register again.
+
+A client registers itself by sending its metadata (e.g., `client_name`, `redirect_uris`) and receives a unique `client_id` (public clients use PKCE without a client secret) in response.
 
 **Example Registration Request:**
 ```bash

@@ -36,18 +36,17 @@ type App struct {
 
 // Config holds the application configuration
 type Config struct {
-	KiteAPIKey              string
-	KiteAPISecret           string
-	AppPort                 string
-	AppHost                 string
-	ExcludedTools           string
-	AdminSecretPath         string
-	JWTSecret               string
-	OAuthIssuer             string
-	OAuthTokenTTL           string
-	MCPSessionTimeout       string
-	AllowedRedirectPatterns []string
-	TrustedProxyCIDRs       []string
+	KiteAPIKey        string
+	KiteAPISecret     string
+	AppPort           string
+	AppHost           string
+	ExcludedTools     string
+	AdminSecretPath   string
+	JWTSecret         string
+	OAuthIssuer       string
+	OAuthTokenTTL     string
+	MCPSessionTimeout string
+	TrustedProxyCIDRs []string
 }
 
 const (
@@ -60,18 +59,17 @@ const (
 func NewApp(logger *slog.Logger) *App {
 	return &App{
 		Config: &Config{
-			KiteAPIKey:              os.Getenv("KITE_API_KEY"),
-			KiteAPISecret:           os.Getenv("KITE_API_SECRET"),
-			AppPort:                 os.Getenv("APP_PORT"),
-			AppHost:                 os.Getenv("APP_HOST"),
-			ExcludedTools:           os.Getenv("EXCLUDED_TOOLS"),
-			AdminSecretPath:         os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
-			JWTSecret:               os.Getenv("JWT_SECRET"),
-			OAuthIssuer:             os.Getenv("OAUTH_ISSUER"),
-			OAuthTokenTTL:           os.Getenv("OAUTH_TOKEN_TTL"),
-			MCPSessionTimeout:       os.Getenv("MCP_SESSION_TIMEOUT"),
-			AllowedRedirectPatterns: parseCSVEnv(os.Getenv("ALLOWED_REDIRECT_PATTERNS")),
-			TrustedProxyCIDRs:       parseCSVEnv(os.Getenv("TRUSTED_PROXY_CIDRS")),
+			KiteAPIKey:        os.Getenv("KITE_API_KEY"),
+			KiteAPISecret:     os.Getenv("KITE_API_SECRET"),
+			AppPort:           os.Getenv("APP_PORT"),
+			AppHost:           os.Getenv("APP_HOST"),
+			ExcludedTools:     os.Getenv("EXCLUDED_TOOLS"),
+			AdminSecretPath:   os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
+			JWTSecret:         os.Getenv("JWT_SECRET"),
+			OAuthIssuer:       os.Getenv("OAUTH_ISSUER"),
+			OAuthTokenTTL:     os.Getenv("OAUTH_TOKEN_TTL"),
+			MCPSessionTimeout: os.Getenv("MCP_SESSION_TIMEOUT"),
+			TrustedProxyCIDRs: parseCSVEnv(os.Getenv("TRUSTED_PROXY_CIDRS")),
 		},
 		Version:   "v0.0.0",
 		startTime: time.Now(),
@@ -200,12 +198,11 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 
 	// --- JWT OAuth Server ---
 	app.oauthServer = oauth.New(oauth.Config{
-		Issuer:                  app.Config.OAuthIssuer,
-		JWTSecret:               []byte(app.Config.JWTSecret),
-		TokenTTL:                tokenTTL,
-		SessionExpiry:           kcManager.SessionExpiry,
-		AllowedRedirectPatterns: app.Config.AllowedRedirectPatterns,
-		TrustedProxyCIDRs:       app.Config.TrustedProxyCIDRs,
+		Issuer:            app.Config.OAuthIssuer,
+		JWTSecret:         []byte(app.Config.JWTSecret),
+		TokenTTL:          tokenTTL,
+		SessionExpiry:     kcManager.SessionExpiry,
+		TrustedProxyCIDRs: app.Config.TrustedProxyCIDRs,
 	})
 	app.jwtOauthHandlers = oauth.NewHandlers(app.oauthServer, app.kcManager, app.logger)
 

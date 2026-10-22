@@ -18,7 +18,6 @@ set -e
 
 # Configuration
 SERVER_URL="${SERVER_URL:-http://localhost:8080}"
-CLIENT_ID="${CLIENT_ID:-test-client}"
 REDIRECT_URI="${REDIRECT_URI:-$SERVER_URL/callback}"
 
 # Generate PKCE code_verifier (43-128 chars, URL-safe)
@@ -31,7 +30,6 @@ CODE_CHALLENGE=$(echo -n "$CODE_VERIFIER" | openssl dgst -sha256 -binary | opens
 echo "=== Kite MCP Server OAuth Test ==="
 echo ""
 echo "Server: $SERVER_URL"
-echo "Client ID: $CLIENT_ID"
 echo "Redirect URI: $REDIRECT_URI"
 echo ""
 echo "PKCE Values:"
@@ -76,8 +74,10 @@ echo ""
 DCR_CLIENT_ID=$(echo "$REGISTER_RESPONSE" | jq -r '.client_id // empty' 2>/dev/null)
 if [ -n "$DCR_CLIENT_ID" ]; then
     echo "DCR client_id: $DCR_CLIENT_ID"
-    # Optionally use DCR client for the flow:
-    # CLIENT_ID="$DCR_CLIENT_ID"
+    CLIENT_ID="$DCR_CLIENT_ID"
+else
+    echo "Client registration failed"
+    exit 1
 fi
 echo ""
 
