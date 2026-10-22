@@ -7,6 +7,26 @@ on:
     branches: [ master, develop ]
 
 jobs:
+  mcp-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp/ui
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: mcp/ui/package-lock.json
+    - run: npm ci
+    - run: npm run build
+    - name: Check committed UI bundle
+      run: git diff --exit-code -- app.html
+    - run: npm test
+    - run: npx playwright install --with-deps chromium
+    - run: npm run test:browser
+
   test:
     runs-on: ubuntu-latest
     steps:

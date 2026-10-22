@@ -58,6 +58,16 @@ run-dev: build
 run-mock:
     go run -tags=testing ./cmd/mockserver
 
+# Rebuild the committed MCP Apps HTML bundle (Node.js 20+ required only here)
+build-app:
+    npm --prefix mcp/ui ci
+    npm --prefix mcp/ui run build
+
+# UI data contracts and real-browser host bridge checks
+test-app:
+    npm --prefix mcp/ui test
+    npm --prefix mcp/ui run test:browser
+
 # === Test Commands ===
 
 # Run all tests

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kite explorer</title>
+<style>
+:root{font-family:var(--font-sans,system-ui,sans-serif);color:var(--color-text-primary,#252a34);background:var(--color-background-primary,#fff);font-size:14px;color-scheme:light dark}
+*{box-sizing:border-box}body{margin:0;padding:20px}header{display:flex;align-items:center;justify-content:space-between;gap:16px}h1{font-size:20px;margin:0;font-weight:600}.brand{color:#e85c3b;font-size:12px;font-weight:700;letter-spacing:.08em;margin-bottom:5px}.muted,#status,#note,footer{color:var(--color-text-secondary,#657083);font-size:12px}#status{margin:12px 0;min-height:18px}#status.error{color:var(--color-text-danger,#c33)}button,input,select{font:inherit;color:inherit;background:var(--color-background-primary,#fff);border:1px solid var(--color-border-primary,#ccd1d9);border-radius:5px;padding:7px 10px}button{cursor:pointer}button:hover:enabled{border-color:#e85c3b}button:disabled{opacity:.45;cursor:default}:focus-visible{outline:2px solid #e85c3b;outline-offset:2px}.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:12px 0}label{display:flex;align-items:center;gap:7px;font-size:12px}#filter{width:min(100%,230px)}#content{min-height:80px}.scroll{overflow:auto;max-height:430px;border:1px solid var(--color-border-primary,#dce0e6);border-radius:6px}table{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--color-border-secondary,#e8ebef)}th{position:sticky;top:0;background:var(--color-background-secondary,#f6f7f9);font-weight:500}th button{padding:0;background:none;border:0;border-radius:0;font-size:inherit;font-weight:600}td.numeric{text-align:right;font-variant-numeric:tabular-nums}td pre{margin:0;white-space:pre-wrap;max-width:420px;font:inherit}#pagination{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}#pagination div{display:flex;gap:8px}#note{line-height:1.6;margin-top:12px}footer{margin-top:18px;border-top:1px solid var(--color-border-secondary,#e8ebef);padding-top:12px}.chart{width:100%;height:220px;display:block;color:#e85c3b}.chart-label{font-size:12px;fill:currentColor}.chart-caption{display:flex;justify-content:space-between;gap:12px;font-size:12px;margin:8px 0 16px}.empty{padding:28px;text-align:center;color:var(--color-text-secondary,#657083)}[hidden]{display:none!important}@media(prefers-color-scheme:dark){:root{--color-text-primary:#e2e5ea;--color-text-secondary:#a4aebf;--color-background-primary:#181b20;--color-background-secondary:#222730;--color-border-primary:#414957;--color-border-secondary:#343b47}}@media(max-width:480px){body{padding:12px}h1{font-size:17px}header{gap:8px}.controls{gap:8px}#pagination{flex-wrap:wrap}}
+</style>
+</head>
+<body>
+<header><div><div class="brand">KITE</div><h1 id="title">Portfolio &amp; market explorer</h1></div><button id="refresh" disabled>Refresh</button></header>
+<p id="status" role="status" aria-live="polite">Connecting to your MCP client…</p>
+<div class="controls" id="controls" hidden><label>Filter this page <input id="filter" type="search" placeholder="Symbol, exchange, value…"></label><label id="view-label" hidden>Position view <select id="view"><option value="net">Net exposure</option><option value="day">Today's activity</option></select></label></div>
+<main id="content" aria-busy="true"></main>
+<div id="pagination" hidden><span id="page-label"></span><div><button id="previous">Previous</button><button id="next">Next</button></div></div>
+<p id="note"></p><footer>Read-only snapshots from Kite Connect. Refresh to request the latest available data.</footer>
+<!-- APP_SCRIPT -->
+</body></html>

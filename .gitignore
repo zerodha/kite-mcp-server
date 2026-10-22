@@ -86,3 +86,7 @@ kite-mcp-server-*
 
 # Local files
 *.local*mockserver
+
+# MCP Apps UI dependencies
+mcp/ui/node_modules/
+mcp/ui/test-artifacts/
