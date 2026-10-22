@@ -162,7 +162,7 @@ If your client supports project-local MCP config, the following works well:
 
 ## Available Tools
 
-Kite MCP currently exposes 7 grouped tools:
+Kite MCP exposes 7 grouped account/market tools and a workflow help tool:
 
 - `portfolio` - Profile, margins, holdings, and positions
 - `orders` - Order listing, history, trades, place, modify, cancel
@@ -171,8 +171,10 @@ Kite MCP currently exposes 7 grouped tools:
 - `alerts` - Alert listing, create, modify, delete
 - `mutual_funds` - Mutual fund holdings
 - `session` - Session status and logout
+- `help` - Embedded workflow tree, e.g. `{"key":"/orders/reconcile"}`; replaced by native Skills discovery for clients advertising Skills support
 
-See `docs/03-reference/01-tools.md` for the full mode and parameter reference.
+See `docs/03-reference/01-tools.md` for the full mode and parameter reference, and
+[Help and Skills](docs/03-reference/04-help-and-skills.md) for recipes, negotiation, and authoring.
 
 ## API Coverage
 

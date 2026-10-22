@@ -86,10 +86,14 @@ func approvalFailure(code, message string) *mcp.CallToolResult {
 // protocols replace it with a different multi-round-trip execution model.
 func NewServer(info *mcp.Implementation) *mcp.Server {
 	versions := []string{"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
+	//nolint:staticcheck // SA1019: Logging is retained for the negotiated pre-2026 protocol versions.
 	capabilities := &mcp.ServerCapabilities{Logging: &mcp.LoggingCapabilities{}}
 	capabilities.AddExtension(appExtension, map[string]any{})
+	capabilities.AddExtension(skillsExtension, map[string]any{})
+	capabilities.Resources = &mcp.ResourceCapabilities{}
 	server := mcp.NewServer(info, &mcp.ServerOptions{SupportedProtocolVersions: versions, Capabilities: capabilities})
 	registerAppResource(server)
+	registerSkills(server)
 	// go-sdk v1.8.0 retains the requested initialize version, then uses it
 	// instead of the negotiated version to allow/reject Elicit. Normalize the
 	// request before the SDK publishes session state. This produces the same

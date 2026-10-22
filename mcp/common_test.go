@@ -206,7 +206,7 @@ func TestToolExclusion(t *testing.T) {
 
 	t.Run("GetAllTools integrity", func(t *testing.T) {
 		allTools := GetAllTools()
-		assert.Equal(t, 7, len(allTools))
+		assert.Equal(t, 8, len(allTools))
 
 		// Check for duplicates and essential tools
 		toolNames := make(map[string]bool)
@@ -219,7 +219,7 @@ func TestToolExclusion(t *testing.T) {
 		}
 
 		// Verify essential tools exist
-		essential := []string{"portfolio", "orders", "gtt", "market", "alerts", "mutual_funds", "session"}
+		essential := []string{"portfolio", "orders", "gtt", "market", "alerts", "mutual_funds", "session", "help"}
 		for _, toolName := range essential {
 			assert.True(t, toolNames[toolName], "Essential tool missing: %s", toolName)
 		}

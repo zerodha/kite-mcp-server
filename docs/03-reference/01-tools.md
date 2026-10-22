@@ -5,7 +5,19 @@ description: Complete reference for all MCP tools and their parameters
 
 # Tools
 
-Kite MCP exposes 7 tools. Each tool handles a group of related operations via a `mode` parameter. The AI assistant selects the appropriate tool and mode based on the user's request.
+Kite MCP exposes 7 grouped tools using a `mode` parameter and a `help` tool using a `key` path. Clients advertising the Skills extension use native Skills discovery in place of `help`. The AI assistant selects the appropriate tool and mode based on the user's request.
+
+## help
+
+Browse bundled Markdown workflows with `help({"key":"/"})`, then follow child
+keys such as `/orders/reconcile`, `/holdings/concentration`, or
+`/technical-analysis/moving-averages`. Omitting `key` reads the root. Trailing
+slashes are accepted; keys are exact and case-sensitive. Unknown keys produce
+an MCP tool error with navigation instructions. This read-only tool requires no
+Kite API call and does not authorize transactions.
+
+See [Help and Skills](04-help-and-skills.md) for the catalog structure and Skills
+protocol interface.
 
 ## Pagination contract
 

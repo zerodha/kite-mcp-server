@@ -43,6 +43,7 @@ func GetAllTools() []Tool {
 		&AlertsTool{},
 		&MutualFundsTool{},
 		&SessionTool{},
+		&HelpTool{},
 	}
 }
 

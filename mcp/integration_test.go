@@ -95,6 +95,11 @@ func mockKiteServer(t *testing.T) *httptest.Server {
 			}
 		}
 
+		// Match order fills before the more general order-history prefix.
+		if strings.HasPrefix(key, "GET /orders/") && strings.HasSuffix(key, "/trades") {
+			serveMockFile(t, w, "order_trades.json")
+			return
+		}
 		// Try prefix matches for parameterized routes.
 		prefixRoutes := map[string]string{
 			"GET /orders/":                 "order_info.json",
@@ -273,17 +278,17 @@ func TestToolListing(t *testing.T) {
 	result, err := h.session.ListTools(ctx, nil)
 	require.NoError(t, err)
 
-	// Verify all 7 tools are present.
+	// Verify all 8 tools are present.
 	toolNames := make(map[string]bool)
 	for _, tool := range result.Tools {
 		toolNames[tool.Name] = true
 	}
 
-	expected := []string{"portfolio", "orders", "gtt", "market", "alerts", "mutual_funds", "session"}
+	expected := []string{"portfolio", "orders", "gtt", "market", "alerts", "mutual_funds", "session", "help"}
 	for _, name := range expected {
 		assert.True(t, toolNames[name], "Missing tool: %s", name)
 	}
-	assert.Equal(t, 7, len(result.Tools), "Expected exactly 7 tools")
+	assert.Equal(t, 8, len(result.Tools), "Expected exactly 8 tools")
 }
 
 func TestPortfolio_Profile(t *testing.T) {
@@ -777,6 +782,42 @@ func TestSessionStatusWithRenewableCredentials(t *testing.T) {
 	for _, content := range result.Content {
 		if text, ok := content.(*mcpsdk.TextContent); ok {
 			assert.NotContains(t, text.Text, "private-refresh-token")
+		}
+	}
+}
+
+// Follow the documented tree and exercise the reconciliation recipe against
+// authenticated Streamable HTTP and the mock Kite API, without mutations.
+func TestHelpReconciliationRecipe(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+	for _, key := range []string{"/", "/orders", "/orders/reconcile"} {
+		result, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{Name: "help", Arguments: map[string]any{"key": key}})
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+	}
+	result, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{Name: "orders", Arguments: map[string]any{"mode": "list", "from": 0, "limit": 1}})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	var page struct {
+		Data []struct {
+			OrderID string `json:"order_id"`
+		} `json:"data"`
+		Pagination struct {
+			Returned int  `json:"returned"`
+			HasMore  bool `json:"has_more"`
+		} `json:"pagination"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(result.Content[0].(*mcpsdk.TextContent).Text), &page))
+	require.Len(t, page.Data, 1)
+	require.Equal(t, 1, page.Pagination.Returned)
+	require.NotEmpty(t, page.Data[0].OrderID)
+	for _, mode := range []string{"history", "trades"} {
+		result, err = h.session.CallTool(ctx, &mcpsdk.CallToolParams{Name: "orders", Arguments: map[string]any{"mode": mode, "order_id": page.Data[0].OrderID}})
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+		if mode == "trades" {
+			require.Contains(t, result.Content[0].(*mcpsdk.TextContent).Text, `"trade_id":"10000000"`)
 		}
 	}
 }
