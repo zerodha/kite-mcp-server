@@ -13,7 +13,7 @@ import (
 // TODO: add destructive, openworld and readonly hints where applicable.
 
 // ToolHandler is the function signature for MCP tool handlers using the official SDK
-type ToolHandler func(*mcp.CallToolRequest) (*mcp.CallToolResult, error)
+type ToolHandler func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error)
 
 // Tool interface defines methods for MCP tools
 type Tool interface {
@@ -110,8 +110,8 @@ func RegisterTools(srv *mcp.Server, manager *kc.Manager, excludedTools string, l
 
 // wrapHandler wraps our ToolHandler to match the official SDK's ToolHandler signature
 func wrapHandler(h ToolHandler) mcp.ToolHandler {
-	return func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return h(req)
+	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return h(ctx, req)
 	}
 }
 

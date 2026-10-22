@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -102,12 +103,18 @@ var ordersSchema = json.RawMessage(`{
 			"description": "Auto-split large orders exceeding freeze quantity limits into smaller child orders (max 50 slices)"
 		},
 		"from": {
-			"type": "number",
+			"type": "integer",
+			"minimum": 0,
+			"maximum": 2147483647,
+			"default": 0,
 			"description": "Starting index for pagination (0-based). Applies to list and all_trades modes. Default: 0"
 		},
 		"limit": {
-			"type": "number",
-			"description": "Maximum number of items to return. When specified, response includes pagination metadata"
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 500,
+			"default": 100,
+			"description": "Page size (integer 1-500, default 100). Responses always include pagination metadata"
 		}
 	},
 	"required": ["mode"]
@@ -115,14 +122,14 @@ var ordersSchema = json.RawMessage(`{
 
 func (*OrdersTool) Definition() *mcp.Tool {
 	return NewTool("orders",
-		"Manage orders. Use mode=list to see all orders today, mode=history for an order's status trail, mode=trades for fills on a specific order, mode=all_trades for all trades today, mode=place to place a new order, mode=modify to change an open order, mode=cancel to cancel an open order. List and all_trades modes support pagination via from/limit.",
+		"Manage orders. Placement, modification, and cancellation require explicit user approval through client form elicitation; unsupported clients cannot execute these mutations. Use mode=list to see all orders today, mode=history for an order's status trail, mode=trades for fills on a specific order, mode=all_trades for all trades today, mode=place to place a new order, mode=modify to change an open order, mode=cancel to cancel an open order. List and all_trades modes return data/pagination with default limit 100 and maximum 500.",
 		ordersSchema,
 	)
 }
 
 func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 	handler := NewToolHandler(manager)
-	return func(request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := GetArguments(request)
 		mode := SafeAssertString(args["mode"], "")
 
@@ -138,14 +145,14 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 					result[i] = o
 				}
 				return result, nil
-			})(request)
+			})(ctx, request)
 
 		case "history":
 			if err := ValidateRequired(args, "order_id"); err != nil {
 				return NewToolResultError(err.Error()), nil
 			}
 			orderID := SafeAssertString(args["order_id"], "")
-			return handler.WithKiteClient(request, "orders_history", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "orders_history", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				history, err := client.GetOrderHistory(orderID)
 				if err != nil {
 					return NewToolResultError("Failed to get order history"), nil
@@ -158,7 +165,7 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 				return NewToolResultError(err.Error()), nil
 			}
 			orderID := SafeAssertString(args["order_id"], "")
-			return handler.WithKiteClient(request, "orders_trades", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "orders_trades", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				trades, err := client.GetOrderTrades(orderID)
 				if err != nil {
 					return NewToolResultError("Failed to get order trades"), nil
@@ -177,7 +184,7 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 					result[i] = t
 				}
 				return result, nil
-			})(request)
+			})(ctx, request)
 
 		case "place":
 			if err := ValidateRequired(args, "exchange", "tradingsymbol", "transaction_type", "quantity", "product", "order_type"); err != nil {
@@ -187,7 +194,7 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 			orderParams := kiteconnect.OrderParams{
 				Exchange:          SafeAssertString(args["exchange"], "NSE"),
 				Tradingsymbol:     SafeAssertString(args["tradingsymbol"], ""),
-				Validity:          SafeAssertString(args["validity"], ""),
+				Validity:          SafeAssertString(args["validity"], "DAY"),
 				ValidityTTL:       SafeAssertInt(args["validity_ttl"], 0),
 				Product:           SafeAssertString(args["product"], ""),
 				OrderType:         SafeAssertString(args["order_type"], ""),
@@ -202,13 +209,15 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 				MarketProtection:  SafeAssertFloat64(args["market_protection"], 0.0),
 				Autoslice:         SafeAssertBool(args["autoslice"], false),
 			}
-			return handler.WithKiteClient(request, "orders_place", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
-				resp, err := client.PlaceOrder(variety, orderParams)
-				if err != nil {
-					handler.manager.Logger.Error("Failed to place order", "error", err)
-					return NewToolResultError("Failed to place order: " + err.Error()), nil
-				}
-				return handler.MarshalResponse(resp, "orders_place")
+			return handler.WithKiteClientContext(ctx, request, "orders_place", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+				return withTradeApproval(ctx, request, "orders_place", map[string]any{"variety": variety, "parameters": approvalOrderParams{&orderParams}}, func() (*mcp.CallToolResult, error) {
+					resp, err := client.PlaceOrder(variety, orderParams)
+					if err != nil {
+						handler.manager.Logger.Error("Failed to place order", "error", err)
+						return NewToolResultError("Kite API failed to place order: " + err.Error()), nil
+					}
+					return handler.MarshalResponse(resp, "orders_place")
+				})
 			})
 
 		case "modify":
@@ -238,13 +247,24 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 			if _, ok := args["disclosed_quantity"]; ok {
 				orderParams.DisclosedQuantity = SafeAssertInt(args["disclosed_quantity"], 0)
 			}
-			return handler.WithKiteClient(request, "orders_modify", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
-				resp, err := client.ModifyOrder(variety, orderID, orderParams)
+			return handler.WithKiteClientContext(ctx, request, "orders_modify", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+				history, err := client.GetOrderHistory(orderID)
 				if err != nil {
-					handler.manager.Logger.Error("Failed to modify order", "error", err)
-					return NewToolResultError("Failed to modify order"), nil
+					return NewToolResultError("Kite API failed to load order for approval: " + err.Error()), nil
 				}
-				return handler.MarshalResponse(resp, "orders_modify")
+				if len(history) == 0 {
+					return approvalFailure("missing_order", "Cannot approve an order without its current details."), nil
+				}
+				currentOrder := history[len(history)-1]
+
+				return withTradeApproval(ctx, request, "orders_modify", map[string]any{"variety": variety, "order_id": orderID, "current_order": currentOrder, "changes": approvalOrderParams{&orderParams}}, func() (*mcp.CallToolResult, error) {
+					resp, err := client.ModifyOrder(variety, orderID, orderParams)
+					if err != nil {
+						handler.manager.Logger.Error("Failed to modify order", "error", err)
+						return NewToolResultError("Kite API failed to modify order: " + err.Error()), nil
+					}
+					return handler.MarshalResponse(resp, "orders_modify")
+				})
 			})
 
 		case "cancel":
@@ -253,13 +273,24 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 			}
 			variety := SafeAssertString(args["variety"], "regular")
 			orderID := SafeAssertString(args["order_id"], "")
-			return handler.WithKiteClient(request, "orders_cancel", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
-				resp, err := client.CancelOrder(variety, orderID, nil)
+			return handler.WithKiteClientContext(ctx, request, "orders_cancel", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+				history, err := client.GetOrderHistory(orderID)
 				if err != nil {
-					handler.manager.Logger.Error("Failed to cancel order", "error", err)
-					return NewToolResultError("Failed to cancel order"), nil
+					return NewToolResultError("Kite API failed to load order for approval: " + err.Error()), nil
 				}
-				return handler.MarshalResponse(resp, "orders_cancel")
+				if len(history) == 0 {
+					return approvalFailure("missing_order", "Cannot approve an order without its current details."), nil
+				}
+				currentOrder := history[len(history)-1]
+
+				return withTradeApproval(ctx, request, "orders_cancel", map[string]any{"variety": variety, "order_id": orderID, "current_order": currentOrder}, func() (*mcp.CallToolResult, error) {
+					resp, err := client.CancelOrder(variety, orderID, nil)
+					if err != nil {
+						handler.manager.Logger.Error("Failed to cancel order", "error", err)
+						return NewToolResultError("Kite API failed to cancel order: " + err.Error()), nil
+					}
+					return handler.MarshalResponse(resp, "orders_cancel")
+				})
 			})
 
 		default:

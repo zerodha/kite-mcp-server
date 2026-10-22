@@ -132,13 +132,22 @@ func (m *Manager) initializeSessionManager() {
 
 // GetAuthenticatedClient is the single entry point for tools to get a valid Kite client.
 func (m *Manager) GetAuthenticatedClient(sessionID string) (*kiteconnect.Client, error) {
+	return m.GetAuthenticatedClientContext(context.Background(), sessionID)
+}
+
+// GetAuthenticatedClientContext binds every HTTP request made by this private
+// client to the tool call's lifetime, including time spent waiting for approval.
+func (m *Manager) GetAuthenticatedClientContext(ctx context.Context, sessionID string) (*kiteconnect.Client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	creds, err := m.authenticatedCredentials(sessionID)
 	if err != nil {
 		return nil, err
 	}
 	client := m.newKiteClient()
 	client.SetAccessToken(creds.AccessToken)
-	client.SetHTTPClient(newKiteHTTPClient(&sessionTransport{manager: m, sessionID: sessionID, base: http.DefaultTransport}))
+	client.SetHTTPClient(newKiteHTTPClient(&sessionTransport{manager: m, sessionID: sessionID, base: http.DefaultTransport, callContext: ctx}))
 	return client, nil
 }
 

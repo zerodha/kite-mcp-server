@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
@@ -40,11 +42,15 @@ func GetSessionID(request *mcp.CallToolRequest) string {
 // It handles authentication errors and provides clear instructions to the user.
 // The session ID is extracted from the X-Kite-Session-Id header set by OAuth middleware.
 func (h *BaseToolHandler) WithKiteClient(request *mcp.CallToolRequest, toolName string, fn func(client *kiteconnect.Client) (*mcp.CallToolResult, error)) (*mcp.CallToolResult, error) {
+	return h.WithKiteClientContext(context.Background(), request, toolName, fn)
+}
+
+func (h *BaseToolHandler) WithKiteClientContext(ctx context.Context, request *mcp.CallToolRequest, toolName string, fn func(client *kiteconnect.Client) (*mcp.CallToolResult, error)) (*mcp.CallToolResult, error) {
 	sessionID := GetSessionID(request)
 
 	h.manager.Logger.Debug("Tool request with session", "tool", toolName, "session_id", sessionID)
 
-	client, err := h.manager.GetAuthenticatedClient(sessionID)
+	client, err := h.manager.GetAuthenticatedClientContext(ctx, sessionID)
 	if err != nil {
 		h.manager.Logger.Warn("Failed to get authenticated Kite client", "tool", toolName, "session_id", sessionID, "error", err)
 		// Return the specific error message from GetAuthenticatedClient, which guides the user.
@@ -189,35 +195,56 @@ func SafeAssertStringArray(v interface{}) []string {
 	return result
 }
 
-// Pagination logic remains the same...
-type PaginationParams struct {
-	From  int
-	Limit int
-}
+const (
+	DefaultPaginationLimit = 100
+	MaxPaginationLimit     = 500
+	MaxPaginationOffset    = 2147483647
+)
 
-func ParsePaginationParams(args map[string]interface{}) PaginationParams {
-	return PaginationParams{
-		From:  SafeAssertInt(args["from"], 0),
-		Limit: SafeAssertInt(args["limit"], 0),
+type PaginationParams struct{ From, Limit int }
+
+// ParsePaginationParams rejects invalid values rather than coercing fractions,
+// strings or null. Omitting limit selects a bounded default page.
+func ParsePaginationParams(args map[string]interface{}) (PaginationParams, error) {
+	params := PaginationParams{Limit: DefaultPaginationLimit}
+	for _, field := range []struct {
+		name     string
+		min, max int
+		dest     *int
+	}{
+		{"from", 0, MaxPaginationOffset, &params.From},
+		{"limit", 1, MaxPaginationLimit, &params.Limit},
+	} {
+		raw, exists := args[field.name]
+		if !exists {
+			continue
+		}
+		var value float64
+		switch v := raw.(type) {
+		case int:
+			value = float64(v)
+		case float64:
+			value = v
+		default:
+			return PaginationParams{}, ValidationError{field.name, fmt.Sprintf("must be an integer between %d and %d", field.min, field.max)}
+		}
+		if math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value || value < float64(field.min) || value > float64(field.max) {
+			return PaginationParams{}, ValidationError{field.name, fmt.Sprintf("must be an integer between %d and %d", field.min, field.max)}
+		}
+		*field.dest = int(value)
 	}
+	return params, nil
 }
 
 func ApplyPagination[T any](data []T, params PaginationParams) []T {
-	if len(data) == 0 {
-		return data
-	}
 	from := min(max(params.From, 0), len(data))
-	if params.Limit <= 0 {
-		return data[from:]
+	limit := params.Limit
+	if limit <= 0 {
+		limit = DefaultPaginationLimit
 	}
-	// Avoid overflow when limit comes from an untrusted MCP request. Comparing
-	// against the remaining length also keeps the slice bounds valid.
-	remaining := len(data) - from
-	end := len(data)
-	if params.Limit < remaining {
-		end = from + params.Limit
-	}
-	return data[from:end]
+	limit = min(limit, MaxPaginationLimit)
+	// Bound by remaining length before addition, preventing index overflow.
+	return data[from : from+min(limit, len(data)-from)]
 }
 
 type PaginatedResponse struct {
@@ -231,36 +258,17 @@ type PaginatedResponse struct {
 	} `json:"pagination"`
 }
 
-func CreatePaginatedResponse(originalData interface{}, paginatedData interface{}, params PaginationParams, originalLength int) *PaginatedResponse {
-	response := &PaginatedResponse{
-		Data: paginatedData,
+func CreatePaginatedResponse[T any](data []T, params PaginationParams, total int) *PaginatedResponse {
+	// Empty pages serialize as [] even when the upstream SDK returned a nil slice.
+	if data == nil {
+		data = make([]T, 0)
 	}
+	response := &PaginatedResponse{Data: data}
 	response.Pagination.From = params.From
 	response.Pagination.Limit = params.Limit
-	response.Pagination.Total = originalLength
-	returnedCount := 0
-	if paginatedData != nil {
-		switch data := paginatedData.(type) {
-		case []interface{}:
-			returnedCount = len(data)
-		default:
-			from := max(0, min(params.From, originalLength))
-			if params.Limit > 0 {
-				returnedCount = min(params.Limit, max(0, originalLength-from))
-			} else {
-				returnedCount = max(0, originalLength-from)
-			}
-		}
-	} else {
-		from := max(0, min(params.From, originalLength))
-		if params.Limit > 0 {
-			returnedCount = min(params.Limit, max(0, originalLength-from))
-		} else {
-			returnedCount = max(0, originalLength-from)
-		}
-	}
-	response.Pagination.Returned = returnedCount
-	response.Pagination.HasMore = params.From+returnedCount < originalLength
+	response.Pagination.Total = total
+	response.Pagination.Returned = len(data)
+	response.Pagination.HasMore = len(data) < total-min(params.From, total)
 	return response
 }
 
@@ -279,7 +287,7 @@ func GetArguments(request *mcp.CallToolRequest) map[string]interface{} {
 // SimpleToolHandler creates a handler for simple API calls
 func SimpleToolHandler(manager *kc.Manager, toolName string, apiCall func(client *kiteconnect.Client) (interface{}, error)) ToolHandler {
 	handler := NewToolHandler(manager)
-	return func(request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return handler.HandleAPICall(request, toolName, apiCall)
 	}
 }
@@ -287,24 +295,19 @@ func SimpleToolHandler(manager *kc.Manager, toolName string, apiCall func(client
 // PaginatedToolHandler creates a handler for paginated API calls
 func PaginatedToolHandler[T any](manager *kc.Manager, toolName string, apiCall func(client *kiteconnect.Client) ([]T, error)) ToolHandler {
 	handler := NewToolHandler(manager)
-	return func(request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		params, err := ParsePaginationParams(GetArguments(request))
+		if err != nil {
+			return NewToolResultError(err.Error()), nil
+		}
 		return handler.WithKiteClient(request, toolName, func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 			data, err := apiCall(client)
 			if err != nil {
 				handler.manager.Logger.Error("API call failed", "tool", toolName, "error", err)
 				return NewToolResultError(fmt.Sprintf("Failed to execute %s", toolName)), nil
 			}
-			args := GetArguments(request)
-			params := ParsePaginationParams(args)
-			originalLength := len(data)
-			paginatedData := ApplyPagination(data, params)
-			var responseData interface{}
-			if params.Limit > 0 {
-				responseData = CreatePaginatedResponse(data, paginatedData, params, originalLength)
-			} else {
-				responseData = paginatedData
-			}
-			return handler.MarshalResponse(responseData, toolName)
+			page := ApplyPagination(data, params)
+			return handler.MarshalResponse(CreatePaginatedResponse(page, params, len(data)), toolName)
 		})
 	}
 }

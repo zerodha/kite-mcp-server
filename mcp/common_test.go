@@ -118,10 +118,10 @@ func TestPagination(t *testing.T) {
 			params   PaginationParams
 			expected []int
 		}{
-			{"no pagination", PaginationParams{From: 0, Limit: 0}, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}},
+			{"default page", PaginationParams{From: 0, Limit: 0}, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}},
 			{"from start with limit", PaginationParams{From: 0, Limit: 3}, []int{0, 1, 2}},
 			{"from middle with limit", PaginationParams{From: 3, Limit: 4}, []int{3, 4, 5, 6}},
-			{"from only no limit", PaginationParams{From: 5, Limit: 0}, []int{5, 6, 7, 8, 9}},
+			{"default page from offset", PaginationParams{From: 5, Limit: 0}, []int{5, 6, 7, 8, 9}},
 			{"beyond bounds", PaginationParams{From: 15, Limit: 5}, []int{}},
 			{"negative from", PaginationParams{From: -5, Limit: 3}, []int{0, 1, 2}},
 			{"overflowing limit", PaginationParams{From: 2, Limit: int(^uint(0) >> 1)}, []int{2, 3, 4, 5, 6, 7, 8, 9}},
@@ -137,7 +137,8 @@ func TestPagination(t *testing.T) {
 
 	t.Run("ParsePaginationParams", func(t *testing.T) {
 		args := map[string]interface{}{"from": 10, "limit": 50}
-		params := ParsePaginationParams(args)
+		params, err := ParsePaginationParams(args)
+		assert.NoError(t, err)
 		assert.Equal(t, 10, params.From)
 		assert.Equal(t, 50, params.Limit)
 	})
@@ -147,7 +148,7 @@ func TestPagination(t *testing.T) {
 		paginatedData := []string{"b", "c"}
 		params := PaginationParams{From: 1, Limit: 2}
 
-		response := CreatePaginatedResponse(originalData, paginatedData, params, len(originalData))
+		response := CreatePaginatedResponse(paginatedData, params, len(originalData))
 
 		assert.Equal(t, paginatedData, response.Data)
 		assert.Equal(t, 1, response.Pagination.From)
@@ -251,7 +252,7 @@ func TestRaceConditions(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				_ = ApplyPagination(data, params)
-				_ = ParsePaginationParams(map[string]interface{}{"from": 1, "limit": 2})
+				_, _ = ParsePaginationParams(map[string]interface{}{"from": 1, "limit": 2})
 			}()
 		}
 		wg.Wait()

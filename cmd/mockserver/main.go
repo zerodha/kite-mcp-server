@@ -113,9 +113,8 @@ func main() {
 	}
 
 	// 6. MCP server + tools.
-	mcpSrv := mcpsdk.NewServer(
+	mcpSrv := mcp.NewServer(
 		&mcpsdk.Implementation{Name: "kite-mcp-mock", Version: "test"},
-		nil,
 	)
 	mcp.RegisterTools(mcpSrv, kcManager, "", logger)
 

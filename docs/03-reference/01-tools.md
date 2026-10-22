@@ -7,6 +7,29 @@ description: Complete reference for all MCP tools and their parameters
 
 Kite MCP exposes 7 tools. Each tool handles a group of related operations via a `mode` parameter. The AI assistant selects the appropriate tool and mode based on the user's request.
 
+## Pagination contract
+
+Paginated modes are `portfolio holdings` (`full` and `compact`), `portfolio positions`,
+`orders list`, `orders all_trades`, `gtt list`, and `market search`.
+
+- `from` is an integer from 0 to 2147483647, default 0.
+- `limit` is an integer from 1 to 500, default 100. Zero, negative, fractional,
+  string, and null values are rejected rather than coerced or treated as unlimited.
+- These modes always return `data` and `pagination`, including when pagination
+  arguments are omitted. An offset beyond the end returns an empty array and
+  `has_more: false`. Continue with `from + returned` while `has_more` is true.
+- Search results sort by `id`, then `instrument_token`, before slicing. Pages are
+  stable for an unchanged instrument catalog; a catalog refresh can change matches.
+
+```json
+{"data": [], "pagination": {"from": 0, "limit": 100, "total": 0, "returned": 0, "has_more": false}}
+```
+
+**Response-shape change:** clients previously reading bare arrays from these modes
+must now read `data`. Holdings `summary`, profile, margins, and other unpaginated
+operations retain their existing response shapes. Market quote/LTP/OHLC now use
+an explicit `data`/`meta` envelope as documented below.
+
 ## portfolio
 
 Retrieve portfolio and account information.
@@ -15,7 +38,7 @@ Retrieve portfolio and account information.
 |------|-------------|
 | `profile` | User profile: name, email, user ID, broker, account type, enabled products and exchanges |
 | `margins` | Available funds and margins across equity and commodity segments |
-| `holdings` | Demat holdings with P&L. Supports `type` (full/summary/compact) and pagination |
+| `holdings` | Demat holdings with P&L. Supports `type` (full/summary/compact); full and compact support pagination |
 | `positions` | Open intraday and overnight positions. Supports pagination |
 
 **Parameters:**
@@ -24,14 +47,40 @@ Retrieve portfolio and account information.
 |-----------|------|-------|-------------|
 | `mode` | string | all | **Required.** Operation mode |
 | `type` | string | holdings | Holdings data type: `full` (default), `summary`, `compact` |
-| `from` | number | holdings, positions | Pagination start index (0-based, default: 0) |
-| `limit` | number | holdings, positions | Maximum items to return. Enables pagination metadata in response |
+| `from` | integer | holdings, positions | Pagination start index (0-based, default: 0; see bounds above) |
+| `limit` | integer | holdings, positions | Page size: 1-500, default 100; always includes pagination metadata |
 
 ---
 
 ## orders
 
 Manage orders placed during the current trading day.
+
+Placement, modification, and cancellation require server-initiated MCP
+`elicitation/create` approval inside the tool handler. The server negotiates MCP
+2025-11-25 or earlier because later protocols replace nested elicitation with a
+different multi-round-trip flow. The client must advertise form elicitation
+(legacy `elicitation: {}` also supports forms; URL-only elicitation does not).
+
+The approval shows the normalized order parameters, including instrument,
+exchange, BUY/SELL, quantity, product, order type, price, and validity. Modification
+and cancellation also show the latest order history entry fetched from Kite;
+omitted modification fields remain unchanged. Placement defaults validity to DAY.
+The response must have `action: "accept"` and boolean `content.confirm: true`.
+An `approved=true` tool argument never grants approval.
+
+Unsupported clients, declines, cancellations, missing or invalid confirmation,
+disconnects, and the two-minute approval deadline block execution. Unsupported
+clients receive an error asking them to reconnect with an elicitation-capable
+client; there is no conversational approval bypass. Approval failures use the
+`Trade approval failed [code]` prefix, distinct from Kite API failures.
+
+Each approval authorizes one API attempt with the parameters shown. The server
+does not automatically retry mutations; after an ambiguous API failure, inspect
+the order book before initiating another trade. A repeated tool call requires
+fresh approval. This is client-mediated consent through a trusted MCP client,
+not independent user authentication. GTT and Alerts/ATO are outside this approval
+gate.
 
 | Mode | Description |
 |------|-------------|
@@ -65,8 +114,8 @@ Manage orders placed during the current trading day.
 | `iceberg_quantity` | number | place | Quantity per leg for iceberg orders |
 | `tag` | string | place | Optional alphanumeric label (max 20 characters) |
 | `market_protection` | number | place | Market protection % for MARKET/SL-M. `0`=disabled, `1`-`100`=custom, `-1`=auto |
-| `from` | number | list, all_trades | Pagination start index (0-based) |
-| `limit` | number | list, all_trades | Maximum items to return |
+| `from` | integer | list, all_trades | Pagination start index (0-based) |
+| `limit` | integer | list, all_trades | Page size: 1-500, default 100 |
 
 ---
 
@@ -113,8 +162,8 @@ Manage GTT (Good Till Triggered) orders. GTT orders persist across trading sessi
 | `lower_quantity` | number | Quantity for the lower leg |
 | `lower_limit_price` | number | Limit price for the lower leg |
 
-| `from` | number | list | Pagination start index |
-| `limit` | number | list | Maximum items to return |
+| `from` | integer | list | Pagination start index |
+| `limit` | integer | list | Page size: 1-500, default 100 |
 
 ---
 
@@ -135,7 +184,26 @@ Retrieve market data and search instruments.
 | Parameter | Type | Modes | Description |
 |-----------|------|-------|-------------|
 | `mode` | string | all | **Required.** Operation mode |
-| `instruments` | string[] | quote, ltp, ohlc | List in `exchange:tradingsymbol` format, e.g. `["NSE:INFY"]` |
+| `instruments` | string[] | quote, ltp, ohlc | 1-500 non-empty strings in `exchange:tradingsymbol` format, e.g. `["NSE:INFY"]`; duplicate symbols are requested once |
+
+Quote, LTP, and OHLC return a consistent envelope:
+
+```json
+{"data": {"NSE:INFY": {"last_price": 1500}}, "meta": {"requested_count": 2, "returned_count": 1, "missing_instruments": ["NSE:UNKNOWN"], "partial": true}}
+```
+
+`data` contains only resolved symbols from the request. Counts refer to unique
+symbols. `meta.missing_instruments` explicitly lists unresolved symbols; a partial
+response retains the successful data. If no symbols resolve, the response has
+`isError: true`, empty `data`, and an `error` message advising correction of the
+exchange/symbols. Missing symbols are not represented as zero-priced quotes.
+
+Market successes expose identical values in JSON text content and
+`structuredContent`, with an advertised output schema covering data/meta envelopes
+and historical candle arrays. Historical responses retain their array shape.
+LTP and OHLC metadata includes `as_of_available: false` and `timestamp_note`:
+these upstream endpoints supply no timestamps. Use `mode=quote` for upstream
+`timestamp` and `last_trade_time`; receipt time is not a price as-of timestamp.
 
 **Historical parameters** (mode=historical):
 
@@ -143,8 +211,8 @@ Retrieve market data and search instruments.
 |-----------|------|-------------|
 | `instrument_token` | number | Numeric instrument token. Use search mode to find this |
 | `interval` | string | `minute`, `3minute`, `5minute`, `10minute`, `15minute`, `30minute`, `60minute`, `day` |
-| `from_date` | string | Start date: `YYYY-MM-DD HH:MM:SS` |
-| `to_date` | string | End date: `YYYY-MM-DD HH:MM:SS` |
+| `from_date` | string | Start date in IST: `YYYY-MM-DD HH:MM:SS` or `YYYY-MM-DD` (00:00:00); must be no later than `to_date` |
+| `to_date` | string | End date in IST: `YYYY-MM-DD HH:MM:SS` or `YYYY-MM-DD` (23:59:59) |
 | `continuous` | boolean | Stitch futures into continuous series (default: false) |
 | `oi` | boolean | Include open interest (default: false) |
 
@@ -162,13 +230,21 @@ Retrieve market data and search instruments.
 | `isin` | string | - | ISIN. For get_by_isin |
 | `inst_token` | number | - | Instrument token. For get_by_inst_token |
 | `exch_token` | number | - | Exchange token. For get_by_exch_token |
-| `from` | number | 0 | Pagination start index |
-| `limit` | number | - | Maximum items to return |
+| `from` | integer | 0 | Pagination start index |
+| `limit` | integer | 100 | Page size: 1-500; always includes pagination metadata |
 | `include_live_quote` | boolean | `false` | Enrich returned search results with live quote data such as latest `last_price`, `lower_circuit_limit`, and `upper_circuit_limit` |
 
 ---
 
-Search responses include a `meta` block. By default, `instrument_data_source` is `bod_instruments`, which means fields such as circuit limits come from the beginning-of-day instrument master. When `include_live_quote=true`, the response also sets `live_quote_enriched=true` and merges selected live quote fields into the returned page of results.
+Search responses include a `meta` block. By default, `instrument_data_source` is `bod_instruments`, which means fields such as circuit limits come from the beginning-of-day instrument master. When `include_live_quote=true`, quotes are fetched only for the returned page.
+`live_quote_enriched` is true only if at least one result was enriched. The
+`live_quote_fields` list uses the actual output names: `last_price`,
+`lower_circuit_limit`, `upper_circuit_limit`, `ohlc`, and `quote_timestamp`.
+`missing_live_quotes` lists instruments for which enrichment was unavailable;
+those records retain their BOD values and have no invented quote timestamp.
+If no quotes resolve, `live_quote_fields` is empty. Enrichment describes the data
+source, not a guarantee of freshness: inspect the upstream `quote_timestamp` and
+market session when interpreting a returned price.
 
 ## alerts
 

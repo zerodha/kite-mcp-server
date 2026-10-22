@@ -1,8 +1,11 @@
 package mcp
 
 import (
+	"cmp"
+	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,7 +28,9 @@ var marketSchema = json.RawMessage(`{
 		"instruments": {
 			"type": "array",
 			"description": "List of instruments in exchange:tradingsymbol format, e.g. ['NSE:INFY', 'NSE:SBIN']. Required for quote, ltp, ohlc modes. Up to 500 instruments per call.",
-			"items": { "type": "string" }
+			"minItems": 1,
+			"maxItems": 500,
+			"items": { "type": "string", "minLength": 1 }
 		},
 		"instrument_token": {
 			"type": "number",
@@ -38,11 +43,11 @@ var marketSchema = json.RawMessage(`{
 		},
 		"from_date": {
 			"type": "string",
-			"description": "Start date in YYYY-MM-DD HH:MM:SS format (required for historical mode)"
+			"description": "Start date in IST: YYYY-MM-DD HH:MM:SS or YYYY-MM-DD (start of day; required for historical mode)"
 		},
 		"to_date": {
 			"type": "string",
-			"description": "End date in YYYY-MM-DD HH:MM:SS format (required for historical mode)"
+			"description": "End date in IST: YYYY-MM-DD HH:MM:SS or YYYY-MM-DD (end of day; required for historical mode)"
 		},
 		"continuous": {
 			"type": "boolean",
@@ -100,12 +105,18 @@ var marketSchema = json.RawMessage(`{
 			"description": "Exchange token (for search_mode=get_by_exch_token)"
 		},
 		"from": {
-			"type": "number",
+			"type": "integer",
+			"minimum": 0,
+			"maximum": 2147483647,
+			"default": 0,
 			"description": "Starting index for pagination (0-based). Applies to search mode. Default: 0"
 		},
 		"limit": {
-			"type": "number",
-			"description": "Maximum number of items to return. When specified, response includes pagination metadata"
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 500,
+			"default": 100,
+			"description": "Page size (integer 1-500, default 100). Responses always include pagination metadata"
 		},
 		"include_live_quote": {
 			"type": "boolean",
@@ -117,62 +128,67 @@ var marketSchema = json.RawMessage(`{
 }`)
 
 func (*MarketTool) Definition() *mcp.Tool {
-	return NewTool("market",
-		"Retrieve market data and search instruments. Use mode=quote for full market snapshots (OHLC, volume, bid/ask depth, OI) for up to 500 instruments, mode=ltp for last traded price only (lighter), mode=ohlc for today's OHLC, mode=historical for historical candle data, mode=search to find instruments by name, symbol, ISIN, or token across all exchanges. Search results come from the BOD instrument master by default; set include_live_quote=true to enrich returned results with live quote fields.",
+	tool := NewTool("market",
+		"Retrieve market data and search instruments. Use mode=quote for full market snapshots (OHLC, volume, bid/ask depth, OI) for up to 500 instruments, mode=ltp for last traded price only (lighter), mode=ohlc for today's OHLC, mode=historical for historical candle data, mode=search to find instruments by name, symbol, ISIN, or token across all exchanges. Search returns data/pagination/meta, sorted by ID then token, with default limit 100 and maximum 500. Quote/LTP/OHLC return data/meta with missing_instruments; entirely unresolved requests return an error. Search results come from the BOD instrument master by default; set include_live_quote=true to enrich returned results with live quote fields and quote_timestamp.",
 		marketSchema,
 	)
+	tool.OutputSchema = json.RawMessage(`{
+		"anyOf": [
+			{"type":"object","required":["data","meta"],"properties":{
+				"data":{"type":["object","array"]},"meta":{"type":"object"},
+				"pagination":{"type":"object"},"error":{"type":"string"}}},
+			{"type":"array","items":{"type":"object","required":["date","open","high","low","close","volume"],"properties":{
+				"date":{"type":"string"},"open":{"type":"number"},"high":{"type":"number"},
+				"low":{"type":"number"},"close":{"type":"number"},"volume":{"type":"number"},"oi":{"type":"number"}}}}
+		]
+	}`)
+	return tool
 }
 
 func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 	handler := NewToolHandler(manager)
-	return func(request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := GetArguments(request)
 		mode := SafeAssertString(args["mode"], "")
 
 		switch mode {
 		case "quote":
-			if err := ValidateRequired(args, "instruments"); err != nil {
+			requested, err := parseMarketInstruments(args)
+			if err != nil {
 				return NewToolResultError(err.Error()), nil
 			}
-			instrumentsList := SafeAssertStringArray(args["instruments"])
 			return handler.WithKiteClient(request, "market_quote", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
-				quotes, err := client.GetQuote(instrumentsList...)
+				quotes, err := client.GetQuote(requested...)
 				if err != nil {
 					return NewToolResultError("Failed to get quotes"), nil
 				}
-				return handler.MarshalResponse(quotes, "market_quote")
+				return marshalMarketData(handler, requested, quotes, "market_quote")
 			})
 
 		case "ltp":
-			if err := ValidateRequired(args, "instruments"); err != nil {
+			requested, err := parseMarketInstruments(args)
+			if err != nil {
 				return NewToolResultError(err.Error()), nil
 			}
-			instrumentsList := SafeAssertStringArray(args["instruments"])
-			if len(instrumentsList) == 0 {
-				return NewToolResultError("At least one instrument must be specified"), nil
-			}
 			return handler.WithKiteClient(request, "market_ltp", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
-				ltp, err := client.GetLTP(instrumentsList...)
+				ltp, err := client.GetLTP(requested...)
 				if err != nil {
 					return NewToolResultError("Failed to get LTP"), nil
 				}
-				return handler.MarshalResponse(ltp, "market_ltp")
+				return marshalMarketData(handler, requested, ltp, "market_ltp")
 			})
 
 		case "ohlc":
-			if err := ValidateRequired(args, "instruments"); err != nil {
+			requested, err := parseMarketInstruments(args)
+			if err != nil {
 				return NewToolResultError(err.Error()), nil
 			}
-			instrumentsList := SafeAssertStringArray(args["instruments"])
-			if len(instrumentsList) == 0 {
-				return NewToolResultError("At least one instrument must be specified"), nil
-			}
 			return handler.WithKiteClient(request, "market_ohlc", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
-				ohlc, err := client.GetOHLC(instrumentsList...)
+				ohlc, err := client.GetOHLC(requested...)
 				if err != nil {
 					return NewToolResultError("Failed to get OHLC data"), nil
 				}
-				return handler.MarshalResponse(ohlc, "market_ohlc")
+				return marshalMarketData(handler, requested, ohlc, "market_ohlc")
 			})
 
 		case "historical":
@@ -180,13 +196,16 @@ func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 				return NewToolResultError(err.Error()), nil
 			}
 			instrumentToken := SafeAssertInt(args["instrument_token"], 0)
-			fromDate, err := time.Parse("2006-01-02 15:04:05", SafeAssertString(args["from_date"], ""))
+			fromDate, err := parseHistoricalDate(SafeAssertString(args["from_date"], ""), false)
 			if err != nil {
-				return NewToolResultError("Failed to parse from_date, use format YYYY-MM-DD HH:MM:SS"), nil
+				return NewToolResultError("Failed to parse from_date, use format YYYY-MM-DD HH:MM:SS or YYYY-MM-DD (IST)"), nil
 			}
-			toDate, err := time.Parse("2006-01-02 15:04:05", SafeAssertString(args["to_date"], ""))
+			toDate, err := parseHistoricalDate(SafeAssertString(args["to_date"], ""), true)
 			if err != nil {
-				return NewToolResultError("Failed to parse to_date, use format YYYY-MM-DD HH:MM:SS"), nil
+				return NewToolResultError("Failed to parse to_date, use format YYYY-MM-DD HH:MM:SS or YYYY-MM-DD (IST)"), nil
+			}
+			if fromDate.After(toDate) {
+				return NewToolResultError("from_date must be earlier than or equal to to_date (IST); correct the date range"), nil
 			}
 			interval := SafeAssertString(args["interval"], "")
 			continuous := SafeAssertBool(args["continuous"], false)
@@ -197,7 +216,7 @@ func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 				if err != nil {
 					return NewToolResultError("Failed to get historical data"), nil
 				}
-				return handler.MarshalResponse(data, "market_historical")
+				return marshalMarketResponse(handler, data, "market_historical")
 			})
 
 		case "search":
@@ -210,6 +229,10 @@ func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 }
 
 func handleMarketSearch(handler *BaseToolHandler, manager *kc.Manager, args map[string]interface{}, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	params, parseErr := ParsePaginationParams(args)
+	if parseErr != nil {
+		return NewToolResultError(parseErr.Error()), nil
+	}
 	searchMode := SafeAssertString(args["search_mode"], "search")
 	verbosity := SafeAssertString(args["verbosity"], "compact")
 
@@ -322,7 +345,14 @@ func handleMarketSearch(handler *BaseToolHandler, manager *kc.Manager, args map[
 		return NewToolResultError("Instrument not found"), nil
 	}
 
-	params := ParsePaginationParams(args)
+	// Sort every multi-result lookup before slicing, including ISIN and
+	// underlying searches. Instrument token breaks ties in the public ID.
+	slices.SortFunc(out, func(a, b instruments.Instrument) int {
+		if order := cmp.Compare(a.ID, b.ID); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.InstrumentToken, b.InstrumentToken)
+	})
 	originalLength := len(out)
 	paginatedData := ApplyPagination(out, params)
 	includeLiveQuote := SafeAssertBool(args["include_live_quote"], false)
@@ -346,46 +376,39 @@ func handleMarketSearch(handler *BaseToolHandler, manager *kc.Manager, args map[
 	}
 
 	finalData := make([]interface{}, len(paginatedData))
+	enrichedCount := 0
+	missingQuotes := make([]string, 0)
 	for i, instrument := range paginatedData {
+		var item map[string]interface{}
 		if verbosity == "compact" {
-			item := marketSearchCompactResult(instrument)
-			if includeLiveQuote {
-				quote := liveQuotes[instrument.ID]
-				enrichMarketSearchResult(item, quote.LastPrice, quote.LowerCircuitLimit, quote.UpperCircuitLimit, quote.OHLC, quote.Timestamp)
-			}
-			finalData[i] = item
+			item = marketSearchCompactResult(instrument)
 		} else {
-			item := marketSearchFullResult(instrument)
-			if includeLiveQuote {
-				quote := liveQuotes[instrument.ID]
-				enrichMarketSearchResult(item, quote.LastPrice, quote.LowerCircuitLimit, quote.UpperCircuitLimit, quote.OHLC, quote.Timestamp)
-			}
-			finalData[i] = item
+			item = marketSearchFullResult(instrument)
 		}
+		if includeLiveQuote {
+			if quote, ok := liveQuotes[instrument.ID]; ok {
+				enrichMarketSearchResult(item, quote.LastPrice, quote.LowerCircuitLimit, quote.UpperCircuitLimit, quote.OHLC, quote.Timestamp)
+				enrichedCount++
+			} else {
+				missingQuotes = append(missingQuotes, instrument.ID)
+			}
+		}
+		finalData[i] = item
 	}
-
 	meta := map[string]interface{}{
 		"instrument_data_source": "bod_instruments",
-		"live_quote_enriched":    includeLiveQuote,
+		"live_quote_enriched":    enrichedCount > 0,
 	}
 	if includeLiveQuote {
-		meta["live_quote_fields"] = []string{"last_price", "lower_circuit_limit", "upper_circuit_limit", "ohlc", "timestamp"}
-	}
-
-	var responseData interface{}
-	if params.Limit > 0 {
-		paginatedResponse := CreatePaginatedResponse(out, finalData, params, originalLength)
-		responseData = map[string]interface{}{
-			"data":       paginatedResponse.Data,
-			"pagination": paginatedResponse.Pagination,
-			"meta":       meta,
+		fields := make([]string, 0)
+		if enrichedCount > 0 {
+			fields = []string{"last_price", "lower_circuit_limit", "upper_circuit_limit", "ohlc", "quote_timestamp"}
 		}
-	} else {
-		responseData = map[string]interface{}{
-			"data": finalData,
-			"meta": meta,
-		}
+		meta["live_quote_fields"] = fields
+		meta["missing_live_quotes"] = missingQuotes
 	}
+	page := CreatePaginatedResponse(finalData, params, originalLength)
+	responseData := map[string]interface{}{"data": page.Data, "pagination": page.Pagination, "meta": meta}
 
 	if manager.Metrics() != nil {
 		manager.Metrics().IncrementDailyWithLabels("instruments_search_results", map[string]string{
@@ -395,7 +418,7 @@ func handleMarketSearch(handler *BaseToolHandler, manager *kc.Manager, args map[
 		})
 	}
 
-	return handler.MarshalResponse(responseData, "market_search")
+	return marshalMarketResponse(handler, responseData, "market_search")
 }
 
 func marketSearchCompactResult(instrument instruments.Instrument) map[string]interface{} {
@@ -453,4 +476,80 @@ func enrichMarketSearchResult(item map[string]interface{}, lastPrice, lowerCircu
 	item["upper_circuit_limit"] = upperCircuitLimit
 	item["ohlc"] = ohlc
 	item["quote_timestamp"] = timestamp
+}
+
+// parseMarketInstruments validates instead of silently dropping or stringifying
+// malformed array elements. Bound the upstream request before making any calls.
+func parseMarketInstruments(args map[string]interface{}) ([]string, error) {
+	raw, ok := args["instruments"].([]interface{})
+	if !ok || len(raw) == 0 || len(raw) > 500 {
+		return nil, ValidationError{"instruments", "must be an array of 1-500 non-empty strings"}
+	}
+	requested := make([]string, 0, len(raw))
+	seen := make(map[string]bool, len(raw))
+	for _, value := range raw {
+		symbol, ok := value.(string)
+		if !ok || strings.TrimSpace(symbol) == "" {
+			return nil, ValidationError{"instruments", "must contain only non-empty strings"}
+		}
+		symbol = strings.TrimSpace(symbol)
+		if !seen[symbol] {
+			requested = append(requested, symbol)
+			seen[symbol] = true
+		}
+	}
+	return requested, nil
+}
+
+func marshalMarketData[T any](handler *BaseToolHandler, requested []string, returned map[string]T, toolName string) (*mcp.CallToolResult, error) {
+	data := make(map[string]T, len(requested))
+	missing := make([]string, 0)
+	for _, symbol := range requested {
+		if value, ok := returned[symbol]; ok {
+			data[symbol] = value
+		} else {
+			missing = append(missing, symbol)
+		}
+	}
+	response := map[string]interface{}{
+		"data": data,
+		"meta": map[string]interface{}{
+			"requested_count": len(requested), "returned_count": len(data),
+			"missing_instruments": missing, "partial": len(missing) > 0 && len(data) > 0,
+		},
+	}
+	if toolName == "market_ltp" || toolName == "market_ohlc" {
+		response["meta"].(map[string]interface{})["as_of_available"] = false
+		response["meta"].(map[string]interface{})["timestamp_note"] = "Upstream does not provide an as-of timestamp; use mode=quote for timestamp and last_trade_time"
+	}
+	if len(data) == 0 {
+		response["error"] = "No market data found for the requested instruments; check exchange and trading symbols"
+	}
+	result, err := marshalMarketResponse(handler, response, toolName)
+	if err == nil && len(data) == 0 {
+		result.IsError = true
+	}
+	return result, err
+}
+
+// Date-only bounds include the whole requested day in the exchange timezone.
+func parseHistoricalDate(value string, endOfDay bool) (time.Time, error) {
+	location := time.FixedZone("IST", 19800)
+	if len(value) != len("2006-01-02") {
+		return time.ParseInLocation("2006-01-02 15:04:05", value, location)
+	}
+	date, err := time.ParseInLocation("2006-01-02", value, location)
+	if err == nil && endOfDay {
+		date = date.Add(24*time.Hour - time.Second)
+	}
+	return date, err
+}
+
+// Keep existing JSON text shapes while exposing the identical structured value.
+func marshalMarketResponse(handler *BaseToolHandler, data interface{}, toolName string) (*mcp.CallToolResult, error) {
+	result, err := handler.MarshalResponse(data, toolName)
+	if err == nil && !result.IsError {
+		result.StructuredContent = data
+	}
+	return result, err
 }

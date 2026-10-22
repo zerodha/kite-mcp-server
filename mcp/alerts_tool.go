@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -104,7 +105,7 @@ func (*AlertsTool) Definition() *mcp.Tool {
 
 func (*AlertsTool) Handler(manager *kc.Manager) ToolHandler {
 	handler := NewToolHandler(manager)
-	return func(request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := GetArguments(request)
 		mode := SafeAssertString(args["mode"], "")
 

@@ -210,9 +210,8 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 
 	// --- MCP Server & Tools ---
 	app.logger.Info("Creating MCP server and registering tools...")
-	mcpServer := mcpsdk.NewServer(
+	mcpServer := mcp.NewServer(
 		&mcpsdk.Implementation{Name: "Kite MCP Server", Version: app.Version},
-		nil,
 	)
 	mcp.RegisterTools(mcpServer, kcManager, app.Config.ExcludedTools, app.logger)
 

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -88,12 +89,18 @@ var gttSchema = json.RawMessage(`{
 			"description": "Limit price for the lower leg (for two-leg GTT)"
 		},
 		"from": {
-			"type": "number",
+			"type": "integer",
+			"minimum": 0,
+			"maximum": 2147483647,
+			"default": 0,
 			"description": "Starting index for pagination (0-based). Applies to list mode. Default: 0"
 		},
 		"limit": {
-			"type": "number",
-			"description": "Maximum number of items to return. When specified, response includes pagination metadata"
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 500,
+			"default": 100,
+			"description": "Page size (integer 1-500, default 100). Responses always include pagination metadata"
 		}
 	},
 	"required": ["mode"]
@@ -101,14 +108,14 @@ var gttSchema = json.RawMessage(`{
 
 func (*GTTTool) Definition() *mcp.Tool {
 	return NewTool("gtt",
-		"Manage GTT (Good Till Triggered) orders that persist across trading sessions and execute when a price condition is met. Use mode=list to see all GTTs, mode=place to create a new GTT (single-leg or two-leg OCO), mode=modify to update an existing GTT, mode=delete to remove a GTT.",
+		"List mode returns data/pagination with default limit 100 and maximum 500. Manage GTT (Good Till Triggered) orders that persist across trading sessions and execute when a price condition is met. Use mode=list to see all GTTs, mode=place to create a new GTT (single-leg or two-leg OCO), mode=modify to update an existing GTT, mode=delete to remove a GTT.",
 		gttSchema,
 	)
 }
 
 func (*GTTTool) Handler(manager *kc.Manager) ToolHandler {
 	handler := NewToolHandler(manager)
-	return func(request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := GetArguments(request)
 		mode := SafeAssertString(args["mode"], "")
 
@@ -124,7 +131,7 @@ func (*GTTTool) Handler(manager *kc.Manager) ToolHandler {
 					result[i] = gtt
 				}
 				return result, nil
-			})(request)
+			})(ctx, request)
 
 		case "place":
 			if err := ValidateRequired(args, "exchange", "tradingsymbol", "last_price", "transaction_type", "product", "trigger_type"); err != nil {

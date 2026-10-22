@@ -187,9 +187,8 @@ func newTestHarness(t *testing.T) *testHarness {
 	})
 
 	// 6. Create and register MCP tools.
-	mcpSrv := mcpsdk.NewServer(
+	mcpSrv := mcp.NewServer(
 		&mcpsdk.Implementation{Name: "kite-mcp-test", Version: "test"},
-		nil,
 	)
 	mcp.RegisterTools(mcpSrv, kcManager, "", logger)
 
@@ -211,7 +210,9 @@ func newTestHarness(t *testing.T) *testHarness {
 	// 9. Connect MCP client with the JWT.
 	mcpClient := mcpsdk.NewClient(
 		&mcpsdk.Implementation{Name: "test-client", Version: "test"},
-		nil,
+		&mcpsdk.ClientOptions{ElicitationHandler: func(context.Context, *mcpsdk.ElicitRequest) (*mcpsdk.ElicitResult, error) {
+			return &mcpsdk.ElicitResult{Action: "accept", Content: map[string]any{"confirm": true}}, nil
+		}},
 	)
 	transport := &mcpsdk.StreamableClientTransport{
 		Endpoint: mcpHTTPServer.URL + "/mcp",
@@ -395,7 +396,7 @@ func TestOrders_PlaceRejectionReason(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assertIsError(t, result)
-	assertTextContentContains(t, result, "Failed to place order: Insufficient funds. Required margin is 1500.00.")
+	assertTextContentContains(t, result, "Kite API failed to place order: Insufficient funds. Required margin is 1500.00.")
 }
 
 func TestOrders_InvalidMode(t *testing.T) {

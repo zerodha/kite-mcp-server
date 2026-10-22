@@ -2,6 +2,7 @@ package kc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,16 +14,68 @@ import (
 // Mutations are never replayed; their rejection invalidates the cached credential
 // so a subsequent tool call can renew before making another upstream request.
 type sessionTransport struct {
-	manager   *Manager
-	sessionID string
-	base      http.RoundTripper
+	manager     *Manager
+	sessionID   string
+	base        http.RoundTripper
+	callContext context.Context
 }
 
 func (t *sessionTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.callContext == nil {
+		return t.roundTrip(req)
+	}
+	// Keep net/http's timeout context as well as the tool's cancellation. Retain
+	// both until the response body is closed, not merely until headers arrive.
+	ctx, cancel := context.WithCancel(req.Context())
+	stop := context.AfterFunc(t.callContext, cancel)
+	cleanup := func() { stop(); cancel() }
+	if err := t.callContext.Err(); err != nil {
+		cleanup()
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return nil, err
+	}
+	response, err := t.roundTrip(req.Clone(ctx))
+	if err != nil {
+		cleanup()
+		return response, err
+	}
+	if response.Body == nil {
+		cleanup()
+	} else {
+		response.Body = &contextResponseBody{ReadCloser: response.Body, cleanup: cleanup}
+	}
+	return response, nil
+}
+
+type contextResponseBody struct {
+	io.ReadCloser
+	cleanup func()
+}
+
+func (b *contextResponseBody) Close() error {
+	defer b.cleanup()
+	return b.ReadCloser.Close()
+}
+
+func (t *sessionTransport) roundTrip(req *http.Request) (*http.Response, error) {
+	if err := t.requestContextError(req); err != nil {
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return nil, err
+	}
 	// Check again at send time: this client may have been retained across a
 	// renewal, logout, or grant expiry.
 	creds, err := t.manager.authenticatedCredentials(t.sessionID)
 	if err != nil {
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return nil, err
+	}
+	if err := t.requestContextError(req); err != nil {
 		if req.Body != nil {
 			_ = req.Body.Close()
 		}
@@ -45,6 +98,10 @@ func (t *sessionTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		_ = response.Body.Close()
 		return nil, err
 	}
+	if err := t.requestContextError(req); err != nil {
+		_ = response.Body.Close()
+		return nil, err
+	}
 	retry := req.Clone(req.Context())
 	retry.Header.Set("Authorization", "token "+t.manager.apiKey+":"+creds.AccessToken)
 	_ = response.Body.Close()
@@ -53,6 +110,17 @@ func (t *sessionTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		t.manager.sessionManager.rejectAccessToken(t.sessionID, creds.AccessToken, creds.generation)
 	}
 	return response, err
+}
+
+// Check the tool context synchronously too: AfterFunc's cancellation callback
+// may not have run yet when a credential renewal unblocks.
+func (t *sessionTransport) requestContextError(req *http.Request) error {
+	if t.callContext != nil {
+		if err := t.callContext.Err(); err != nil {
+			return err
+		}
+	}
+	return req.Context().Err()
 }
 
 // Inspect a bounded error body and restore it for the Kite SDK to parse. A 403

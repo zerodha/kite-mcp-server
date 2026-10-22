@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -25,12 +26,18 @@ var portfolioSchema = json.RawMessage(`{
 			"enum": ["full", "summary", "compact"]
 		},
 		"from": {
-			"type": "number",
+			"type": "integer",
+			"minimum": 0,
+			"maximum": 2147483647,
+			"default": 0,
 			"description": "Starting index for pagination (0-based). Applies to holdings (full/compact) and positions modes. Default: 0"
 		},
 		"limit": {
-			"type": "number",
-			"description": "Maximum number of items to return. When specified, response includes pagination metadata"
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 500,
+			"default": 100,
+			"description": "Page size (integer 1-500, default 100). Responses always include pagination metadata"
 		}
 	},
 	"required": ["mode"]
@@ -38,14 +45,14 @@ var portfolioSchema = json.RawMessage(`{
 
 func (*PortfolioTool) Definition() *mcp.Tool {
 	return NewTool("portfolio",
-		"Retrieve portfolio and account information. Use mode=profile for user details (name, email, account type), mode=margins for available funds and margins, mode=holdings for demat holdings with P&L, mode=positions for open intraday and overnight positions. Holdings and positions support pagination via from/limit parameters.",
+		"Retrieve portfolio and account information. Use mode=profile for user details (name, email, account type), mode=margins for available funds and margins, mode=holdings for demat holdings with P&L, mode=positions for open intraday and overnight positions. Full/compact holdings and positions return data/pagination with default limit 100 and maximum 500. Summary holdings are unpaginated.",
 		portfolioSchema,
 	)
 }
 
 func (*PortfolioTool) Handler(manager *kc.Manager) ToolHandler {
 	handler := NewToolHandler(manager)
-	return func(request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := GetArguments(request)
 		mode := SafeAssertString(args["mode"], "")
 
@@ -69,6 +76,10 @@ func (*PortfolioTool) Handler(manager *kc.Manager) ToolHandler {
 			})
 
 		case "holdings":
+			params, err := ParsePaginationParams(args)
+			if err != nil {
+				return NewToolResultError(err.Error()), nil
+			}
 			return handler.WithKiteClient(request, "portfolio_holdings", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				holdingsType := SafeAssertString(args["type"], "full")
 
@@ -89,16 +100,8 @@ func (*PortfolioTool) Handler(manager *kc.Manager) ToolHandler {
 					for i, h := range compactHoldings {
 						result[i] = h
 					}
-					params := ParsePaginationParams(args)
-					originalLength := len(result)
-					paginatedData := ApplyPagination(result, params)
-					var responseData interface{}
-					if params.Limit > 0 {
-						responseData = CreatePaginatedResponse(result, paginatedData, params, originalLength)
-					} else {
-						responseData = paginatedData
-					}
-					return handler.MarshalResponse(responseData, "portfolio_holdings")
+					page := ApplyPagination(result, params)
+					return handler.MarshalResponse(CreatePaginatedResponse(page, params, len(result)), "portfolio_holdings")
 
 				default: // "full"
 					holdings, err := client.GetHoldings()
@@ -109,16 +112,8 @@ func (*PortfolioTool) Handler(manager *kc.Manager) ToolHandler {
 					for i, h := range holdings {
 						result[i] = h
 					}
-					params := ParsePaginationParams(args)
-					originalLength := len(result)
-					paginatedData := ApplyPagination(result, params)
-					var responseData interface{}
-					if params.Limit > 0 {
-						responseData = CreatePaginatedResponse(result, paginatedData, params, originalLength)
-					} else {
-						responseData = paginatedData
-					}
-					return handler.MarshalResponse(responseData, "portfolio_holdings")
+					page := ApplyPagination(result, params)
+					return handler.MarshalResponse(CreatePaginatedResponse(page, params, len(result)), "portfolio_holdings")
 				}
 			})
 
@@ -136,7 +131,7 @@ func (*PortfolioTool) Handler(manager *kc.Manager) ToolHandler {
 					result = append(result, pos)
 				}
 				return result, nil
-			})(request)
+			})(ctx, request)
 
 		default:
 			return NewToolResultError("Invalid mode. Must be one of: profile, margins, holdings, positions"), nil
