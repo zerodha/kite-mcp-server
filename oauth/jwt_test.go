@@ -1,9 +1,18 @@
 package oauth
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -164,5 +173,100 @@ func TestValidateRedirectURI_PrefixHostedCallbacks(t *testing.T) {
 		if err := srv.ValidateRedirectURI(uri); err == nil {
 			t.Fatalf("expected %q to be rejected", uri)
 		}
+	}
+}
+
+func TestDefaultTokenLifetimeIsSevenDays(t *testing.T) {
+	srv := New(Config{Issuer: "https://mcp.example", JWTSecret: []byte("01234567890123456789012345678901")})
+	token, err := srv.generateAccessToken("user", "grant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := srv.ValidateToken(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := claims.ExpiresAt.Sub(claims.IssuedAt.Time); got != 7*24*time.Hour {
+		t.Fatalf("token lifetime = %v, want seven days", got)
+	}
+}
+
+func TestDelayedExchangeUsesGrantDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		deadline := time.Now().Add(7 * 24 * time.Hour)
+		srv := New(Config{Issuer: "https://mcp.example", JWTSecret: []byte("01234567890123456789012345678901"), SessionExpiry: func(id string) (time.Time, error) {
+			if id != "grant" || !time.Now().Before(deadline) {
+				return time.Time{}, errors.New("expired grant")
+			}
+			return deadline, nil
+		}})
+		verifier := "test-pkce-verifier-of-at-least-forty-three-characters"
+		hash := sha256.Sum256([]byte(verifier))
+		code, err := srv.CreateAuthCode("client", "http://localhost/callback", "user", "grant", base64.RawURLEncoding.EncodeToString(hash[:]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(9 * time.Minute)
+		form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "client_id": {"client"}, "redirect_uri": {"http://localhost/callback"}, "code_verifier": {verifier}}
+		request := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader(form.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		recorder := httptest.NewRecorder()
+		handler := NewHandlers(srv, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		handler.HandleToken(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("token exchange returned %d", recorder.Code)
+		}
+		var response struct {
+			AccessToken string `json:"access_token"`
+			ExpiresIn   int    `json:"expires_in"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		claims, err := srv.ValidateToken(response.AccessToken)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !claims.ExpiresAt.Equal(deadline) {
+			t.Fatal("JWT outlives grant")
+		}
+		if response.ExpiresIn != int(time.Until(deadline).Seconds()) {
+			t.Fatalf("expires_in=%d does not match remaining lifetime", response.ExpiresIn)
+		}
+		time.Sleep(time.Until(deadline))
+		if _, err := srv.ValidateToken(response.AccessToken); err == nil {
+			t.Fatal("JWT still valid at grant expiry")
+		}
+	})
+}
+
+func TestMiddlewareChallengesEndedGrant(t *testing.T) {
+	for _, reason := range []string{"expired", "logged-out", "missing"} {
+		t.Run(reason, func(t *testing.T) {
+			ended := false
+			srv := New(Config{Issuer: "https://mcp.example", JWTSecret: []byte("01234567890123456789012345678901"), SessionExpiry: func(string) (time.Time, error) {
+				if ended {
+					return time.Time{}, errors.New(reason)
+				}
+				return time.Now().Add(time.Hour), nil
+			}})
+			token, err := srv.generateAccessToken("user", "grant")
+			if err != nil {
+				t.Fatal(err)
+			}
+			ended = true
+			called := false
+			handler := srv.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+			request := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+			request.Header.Set("Authorization", "Bearer "+token)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if called || recorder.Code != http.StatusUnauthorized || recorder.Header().Get("WWW-Authenticate") == "" {
+				t.Fatal("ended grant did not produce a 401 challenge")
+			}
+			if _, err := srv.generateAccessToken("user", "grant"); err == nil {
+				t.Fatal("issued a JWT for an ended grant")
+			}
+		})
 	}
 }

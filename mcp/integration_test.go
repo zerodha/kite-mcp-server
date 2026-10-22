@@ -146,8 +146,16 @@ func newTestHarness(t *testing.T) *testHarness {
 	// 1. Start mock Kite API server.
 	kiteServer := mockKiteServer(t)
 
-	// 2. Create instruments manager (empty for speed, search tests can populate).
-	instManager, err := instruments.New(instruments.Config{Logger: logger})
+	// 2. Use a deterministic catalog; SDK compatibility tests must not fetch
+	// live production instruments for every client connection.
+	config := instruments.DefaultUpdateConfig()
+	config.EnableScheduler = false
+	instManager, err := instruments.New(instruments.Config{
+		Logger: logger, UpdateConfig: config,
+		TestData: map[uint32]*instruments.Instrument{
+			408065: {ID: "NSE:INFY", InstrumentToken: 408065, Exchange: "NSE", Tradingsymbol: "INFY", Name: "INFOSYS", Segment: "NSE", InstrumentType: "EQ", Active: true},
+		},
+	})
 	require.NoError(t, err)
 
 	// 3. Create KC manager pointing to mock Kite server.
@@ -159,7 +167,6 @@ func newTestHarness(t *testing.T) *testHarness {
 		KiteBaseURI: kiteServer.URL,
 	})
 	require.NoError(t, err)
-	require.NoError(t, instManager.UpdateInstruments())
 
 	// 4. Pre-seed a session with valid credentials.
 	sess, _, err := kcManager.SessionManager().GetOrCreate("test-session")
@@ -173,9 +180,10 @@ func newTestHarness(t *testing.T) *testHarness {
 
 	// 5. Create OAuth server and generate a test JWT.
 	oauthSrv := oauth.New(oauth.Config{
-		Issuer:    "http://localhost:0",
-		JWTSecret: []byte("test-jwt-secret-at-least-32-bytes-long"),
-		TokenTTL:  24 * time.Hour,
+		Issuer:        "http://localhost:0",
+		JWTSecret:     []byte("test-jwt-secret-at-least-32-bytes-long"),
+		TokenTTL:      24 * time.Hour,
+		SessionExpiry: kcManager.SessionExpiry,
 	})
 
 	// 6. Create and register MCP tools.
@@ -615,21 +623,13 @@ func TestSession_Logout(t *testing.T) {
 	assertNotError(t, logoutResult)
 	assertTextContentContains(t, logoutResult, `"status":"logged_out"`)
 
-	statusResult, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{
-		Name:      "session",
-		Arguments: map[string]any{"mode": "status"},
+	// A revoked grant must produce an HTTP authentication challenge rather
+	// than a successful MCP response containing a textual login instruction.
+	_, err = h.session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "portfolio", Arguments: map[string]any{"mode": "profile"},
 	})
-	require.NoError(t, err)
-	assertNotError(t, statusResult)
-	assertTextContentContains(t, statusResult, `"status":"logged_out"`)
-
-	portfolioResult, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{
-		Name:      "portfolio",
-		Arguments: map[string]any{"mode": "profile"},
-	})
-	require.NoError(t, err)
-	assertIsError(t, portfolioResult)
-	assertTextContentContains(t, portfolioResult, "not logged into Kite. Please authenticate via the OAuth flow")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Unauthorized")
 }
 
 func TestMutualFunds_Holdings(t *testing.T) {
@@ -735,4 +735,26 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func TestSessionStatusWithRenewableCredentials(t *testing.T) {
+	h := newTestHarness(t)
+	err := h.kcManager.SessionManager().UpdateCredentials("test-session", &kc.KiteCredentials{
+		UserID: "AB1234", AccessToken: "expired", RefreshToken: "private-refresh-token", ExpiresAt: time.Now().Add(-time.Hour),
+	})
+	require.NoError(t, err)
+	result, err := h.session.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name: "session", Arguments: map[string]any{"mode": "status"},
+	})
+	require.NoError(t, err)
+	assertNotError(t, result)
+	status := parseJSONResponse(t, result)
+	assert.Equal(t, true, status["authenticated"])
+	assert.Equal(t, true, status["refresh_available"])
+	assert.Equal(t, true, status["kite_session_expired"])
+	for _, content := range result.Content {
+		if text, ok := content.(*mcpsdk.TextContent); ok {
+			assert.NotContains(t, text.Text, "private-refresh-token")
+		}
+	}
 }

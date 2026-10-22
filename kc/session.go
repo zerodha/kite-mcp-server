@@ -15,8 +15,9 @@ const (
 	// Keep the backing session alive for at least the default OAuth token
 	// lifetime. Callers that configure longer-lived tokens should pass that
 	// duration through NewSessionManagerWithDuration.
-	DefaultSessionDuration = 24 * time.Hour
-	DefaultCleanupInterval = 30 * time.Minute
+	DefaultSessionDuration        = 7 * 24 * time.Hour
+	DefaultPendingSessionDuration = 10 * time.Minute
+	DefaultCleanupInterval        = 30 * time.Minute
 
 	// Error messages
 	errSessionNotFound        = "session ID not found"
@@ -26,12 +27,14 @@ const (
 
 // Session represents a single, long-lived user/client session.
 type Session struct {
-	ID          string
-	Terminated  bool
-	CreatedAt   time.Time
-	ExpiresAt   time.Time
-	Credentials *KiteCredentials // Holds the short-lived Kite credentials.
-	OAuthData   any              // Holds temporary data for an in-progress OAuth flow.
+	ID             string
+	Terminated     bool
+	CreatedAt      time.Time
+	ExpiresAt      time.Time
+	Credentials    *KiteCredentials // Holds the short-lived Kite credentials.
+	OAuthData      any              // Holds temporary data for an in-progress OAuth flow.
+	refreshRetryAt time.Time
+	refreshFailure error
 }
 
 // SessionManager manages all active sessions.
@@ -70,7 +73,8 @@ func NewSessionManagerWithDuration(logger *slog.Logger, sessionDuration time.Dur
 	}
 }
 
-// GenerateWithData creates a new session with a unique ID and optional initial data.
+// GenerateWithData creates a unique session. Pending authorization data uses
+// a short lifetime independently of authenticated application grants.
 func (sm *SessionManager) GenerateWithData(initialData any) string {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -78,6 +82,9 @@ func (sm *SessionManager) GenerateWithData(initialData any) string {
 	sessionID := mcpSessionPrefix + uuid.New().String()
 	now := time.Now()
 	expiresAt := now.Add(sm.sessionDuration)
+	if initialData != nil {
+		expiresAt = now.Add(DefaultPendingSessionDuration)
+	}
 
 	sm.sessions[sessionID] = &Session{
 		ID:        sessionID,
@@ -201,14 +208,45 @@ func (sm *SessionManager) UpdateCredentials(sessionID string, creds *KiteCredent
 	if session.Terminated {
 		return errors.New(errCannotUpdateTerminated)
 	}
+	if !time.Now().Before(session.ExpiresAt) {
+		return errors.New("session has expired")
+	}
 
 	// Credentials are caller-owned. Copy them so a caller cannot mutate session
 	// state after releasing this lock.
-	session.Credentials = copyCredentials(creds)
-	// A successful reauthentication starts a fresh session lifetime. This keeps
-	// the backing session available for tokens minted from the refreshed grant.
-	session.ExpiresAt = time.Now().Add(sm.sessionDuration)
+	updated := copyCredentials(creds)
+	if updated != nil {
+		updated.generation = 1
+		if session.Credentials != nil {
+			updated.generation = session.Credentials.generation + 1
+		}
+	}
+	session.Credentials = updated
+	session.refreshRetryAt = time.Time{}
+	session.refreshFailure = nil
+	// Credential renewal preserves the fixed grant deadline. A new login
+	// creates a fresh opaque grant instead of extending an existing one.
 	return nil
+}
+
+// rejectAccessToken invalidates only the credential version that was rejected.
+// A delayed response from an old request must not invalidate a newer token.
+func (sm *SessionManager) rejectAccessToken(sessionID, accessToken string, generation uint64) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	session := sm.sessions[sessionID]
+	if session != nil && session.Credentials != nil && session.Credentials.AccessToken == accessToken && session.Credentials.generation == generation {
+		session.Credentials.ExpiresAt = time.Time{}
+	}
+}
+
+func (sm *SessionManager) recordRefreshFailure(sessionID string, err error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if session := sm.sessions[sessionID]; session != nil {
+		session.refreshFailure = err
+		session.refreshRetryAt = time.Now().Add(5 * time.Second)
+	}
 }
 
 // CleanupExpiredSessions removes expired sessions from memory.
@@ -220,7 +258,7 @@ func (sm *SessionManager) CleanupExpiredSessions() int {
 	cleaned := 0
 
 	for sessionID, session := range sm.sessions {
-		if now.After(session.ExpiresAt) {
+		if !now.Before(session.ExpiresAt) {
 			if !session.Terminated {
 				session.Terminated = true
 				for _, hook := range sm.cleanupHooks {
@@ -309,11 +347,13 @@ func (sm *SessionManager) Validate(sessionID string) (bool, error) {
 // This ensures that returned sessions cannot be modified by callers.
 func (sm *SessionManager) copySession(original *Session) *Session {
 	copy := &Session{
-		ID:         original.ID,
-		Terminated: original.Terminated,
-		CreatedAt:  original.CreatedAt,
-		ExpiresAt:  original.ExpiresAt,
-		OAuthData:  original.OAuthData, // Shallow copy - assuming immutable
+		ID:             original.ID,
+		Terminated:     original.Terminated,
+		CreatedAt:      original.CreatedAt,
+		ExpiresAt:      original.ExpiresAt,
+		OAuthData:      original.OAuthData, // Shallow copy - assuming immutable
+		refreshRetryAt: original.refreshRetryAt,
+		refreshFailure: original.refreshFailure,
 	}
 
 	// Deep copy credentials if present
@@ -327,8 +367,10 @@ func copyCredentials(original *KiteCredentials) *KiteCredentials {
 		return nil
 	}
 	return &KiteCredentials{
-		AccessToken: original.AccessToken,
-		UserID:      original.UserID,
-		ExpiresAt:   original.ExpiresAt,
+		AccessToken:  original.AccessToken,
+		RefreshToken: original.RefreshToken,
+		UserID:       original.UserID,
+		ExpiresAt:    original.ExpiresAt,
+		generation:   original.generation,
 	}
 }

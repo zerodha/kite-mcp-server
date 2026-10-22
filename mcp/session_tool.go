@@ -67,8 +67,8 @@ func handleSessionStatus(handler *BaseToolHandler, sessionID string) (*mcp.CallT
 	authenticated := false
 	kiteSessionExpired := false
 	if session.Credentials != nil {
-		authenticated = now.Before(session.Credentials.ExpiresAt)
-		kiteSessionExpired = now.After(session.Credentials.ExpiresAt)
+		authenticated = now.Before(session.ExpiresAt) && (now.Before(session.Credentials.ExpiresAt) || session.Credentials.RefreshToken != "")
+		kiteSessionExpired = !now.Before(session.Credentials.ExpiresAt)
 		kiteExpiresAt = session.Credentials.ExpiresAt.Format(time.RFC3339)
 	}
 
@@ -81,6 +81,7 @@ func handleSessionStatus(handler *BaseToolHandler, sessionID string) (*mcp.CallT
 		"expires_at":              session.ExpiresAt.Format(time.RFC3339),
 		"kite_session_expires_at": kiteExpiresAt,
 		"kite_session_expired":    kiteSessionExpired,
+		"refresh_available":       session.Credentials != nil && session.Credentials.RefreshToken != "",
 	}
 	return handler.MarshalResponse(status, "session_status")
 }

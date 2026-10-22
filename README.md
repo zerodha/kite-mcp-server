@@ -49,7 +49,7 @@ For self-hosting with your own API keys, follow the installation steps below.
 ### Prerequisites
 
 - **For hosted version (recommended)**: Nothing! Just use `https://mcp.kite.trade/mcp`
-- **For self-hosting**: Go 1.21 or later
+- **For self-hosting**: Go 1.25 or later
 - **For self-hosting**: Valid Kite Connect API credentials
 
 ### Getting started
@@ -251,7 +251,7 @@ just coverage   # Generate coverage report
 
 **Requirements:**
 
-- Go 1.23+ with `GOEXPERIMENT=synctest` (required for timing-dependent tests)
+- Go 1.25+ (includes `testing/synctest` for timing-dependent tests)
 
 ```bash
 # Run all tests
@@ -264,18 +264,18 @@ just coverage
 just test-race
 
 # Direct go command (if you prefer)
-CGO_ENABLED=0 GOEXPERIMENT=synctest go test -v ./...
+CGO_ENABLED=0 go test -tags=testing -v ./...
 ```
 
 #### Synctest Integration
 
-This project requires Go's `synctest` package for time-dependent tests (session expiry, clock skew tolerance). All timing tests use `synctest.Run()` for:
+This project uses Go's `testing/synctest` package for time-dependent tests (session expiry, clock skew tolerance). Timing tests can use `synctest.Test()` for:
 
 - **Fast execution**: Time-dependent tests complete in milliseconds instead of minutes
 - **Deterministic timing**: No flaky timing-based test failures
 - **Controlled time**: Tests can advance time without actual delays
 
-The justfile automatically includes `GOEXPERIMENT=synctest` in all test commands.
+`testing/synctest` is available without experiment flags in Go 1.25 and later.
 
 ## Configuration Options
 
@@ -288,12 +288,40 @@ The justfile automatically includes `GOEXPERIMENT=synctest` in all test commands
 | `APP_MODE`           | `http`      | Server mode: `stdio`, `http`, `sse`, or `hybrid`           |
 | `APP_PORT`           | `8080`      | Server port (HTTP/SSE/hybrid modes)                        |
 | `APP_HOST`                  | `localhost` | Server host (HTTP/SSE/hybrid modes)                        |
-| `OAUTH_TOKEN_TTL`           | `24h`       | OAuth access token lifetime (Go duration format)           |
-| `MCP_SESSION_TIMEOUT`       | `24h`       | Streamable HTTP MCP session lifetime (Go duration format)  |
+| `OAUTH_TOKEN_TTL`           | `168h`       | OAuth access token lifetime (maximum 168h)           |
+| `MCP_SESSION_TIMEOUT`       | `24h`       | Streamable HTTP transport idle timeout (Go duration format)  |
 | `ALLOWED_REDIRECT_PATTERNS` | `localhost` | Comma-separated redirect URI allowlist patterns            |
 | `EXCLUDED_TOOLS`            | _(empty)_   | Comma-separated list of tools to exclude from registration |
 
 **Note:** In production, we use hybrid mode which supports both `/sse` and `/mcp` endpoints, making both HTTP and SSE protocols available for different client needs.
+
+### Session lifetime and Kite renewal
+
+Application grants have a fixed seven-day lifetime from login. OAuth access tokens
+also default to seven days (`OAUTH_TOKEN_TTL=168h`); a shorter token lifetime can
+be configured. Logging out invalidates the grant immediately. Automatic Kite
+renewal never extends the seven-day deadline.
+
+Kite access credentials expire independently at the next 06:00 IST cutoff. When
+Kite issues a non-empty refresh token, the server retains it privately and renews
+expired access credentials on the next tool call. Concurrent calls share the
+renewed credentials; requests that place or modify trades are never automatically
+replayed. Refresh tokens are available only to approved Kite platforms and grant
+long-standing read permissions; renewal does not imply permission to trade.
+Without a refresh token, or when Kite rejects it, the user must authenticate again.
+Explicit access-token rejection before the estimated cutoff also triggers
+renewal for read requests, followed by at most one retry. Mutating requests are
+never replayed; their rejected credential is marked stale for the next call.
+Temporary renewal failures are shared for five seconds before another attempt.
+JWT expiry and the reported `expires_in` are capped by the remaining grant
+lifetime. Logged-out, missing, and expired grants receive an HTTP 401 challenge
+so MCP clients can initiate authentication again.
+
+Sessions and credentials remain in memory: restarting the server requires users
+to log in again, even within seven days. `MCP_SESSION_TIMEOUT` is an independent
+transport idle timeout, not the application or Kite credential lifetime.
+The server's `/token` endpoint still supports only `authorization_code`; this
+renewal is server-to-Kite and does not expose Kite refresh tokens to MCP clients.
 
 ### Tool Exclusion
 

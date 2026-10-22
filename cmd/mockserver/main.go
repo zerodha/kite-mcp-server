@@ -101,9 +101,10 @@ func main() {
 
 	// 5. OAuth server + test JWT.
 	oauthSrv := oauth.New(oauth.Config{
-		Issuer:    addr,
-		JWTSecret: []byte("mock-jwt-secret-at-least-32-bytes!"),
-		TokenTTL:  24 * time.Hour,
+		Issuer:        addr,
+		JWTSecret:     []byte("mock-jwt-secret-at-least-32-bytes!"),
+		TokenTTL:      24 * time.Hour,
+		SessionExpiry: kcManager.SessionExpiry,
 	})
 	token, err := oauthSrv.GenerateTestToken("AB1234", "mock-session")
 	if err != nil {

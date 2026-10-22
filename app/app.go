@@ -53,7 +53,7 @@ type Config struct {
 const (
 	DefaultPort              = "8080"
 	DefaultHost              = "localhost"
-	DefaultOAuthTokenTTL     = "24h"
+	DefaultOAuthTokenTTL     = "168h"
 	DefaultMCPSessionTimeout = "24h"
 )
 
@@ -125,7 +125,7 @@ func (app *App) LoadConfig() error {
 	if tokenTTL, _ := time.ParseDuration(app.Config.OAuthTokenTTL); tokenTTL <= 0 {
 		return fmt.Errorf("OAUTH_TOKEN_TTL must be greater than zero")
 	} else if tokenTTL > kc.DefaultSessionDuration {
-		return fmt.Errorf("OAUTH_TOKEN_TTL must not exceed the Kite session lifetime of %s", kc.DefaultSessionDuration)
+		return fmt.Errorf("OAUTH_TOKEN_TTL must not exceed the application grant lifetime of %s", kc.DefaultSessionDuration)
 	}
 	if app.Config.MCPSessionTimeout == "" {
 		app.Config.MCPSessionTimeout = DefaultMCPSessionTimeout
@@ -191,7 +191,7 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 		Logger:          app.logger,
 		Metrics:         app.metrics,
 		Instruments:     instManager,
-		SessionDuration: max(tokenTTL, kc.DefaultSessionDuration),
+		SessionDuration: kc.DefaultSessionDuration,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Kite Connect manager: %w", err)
@@ -203,6 +203,7 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 		Issuer:                  app.Config.OAuthIssuer,
 		JWTSecret:               []byte(app.Config.JWTSecret),
 		TokenTTL:                tokenTTL,
+		SessionExpiry:           kcManager.SessionExpiry,
 		AllowedRedirectPatterns: app.Config.AllowedRedirectPatterns,
 		TrustedProxyCIDRs:       app.Config.TrustedProxyCIDRs,
 	})

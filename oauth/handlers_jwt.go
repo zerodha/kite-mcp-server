@@ -196,11 +196,18 @@ func (h *Handlers) HandleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Report the actual remaining JWT lifetime, which may be shorter than the
+	// configured maximum when authorization-code exchange was delayed.
+	claims, err := h.server.ValidateToken(accessToken)
+	if err != nil || claims.ExpiresAt == nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
+		return
+	}
 	h.logger.Info("token issued", "client_id", req.ClientID)
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"access_token": accessToken,
 		"token_type":   "Bearer",
-		"expires_in":   int(h.server.config.TokenTTL.Seconds()),
+		"expires_in":   max(0, int(time.Until(claims.ExpiresAt.Time).Seconds())),
 		"scope":        "default",
 	})
 }

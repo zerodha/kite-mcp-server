@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"html/template"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
@@ -68,9 +70,11 @@ func New(cfg Config) (*Manager, error) {
 
 // KiteCredentials holds the short-lived Kite Connect access token and user info.
 type KiteCredentials struct {
-	AccessToken string
-	UserID      string
-	ExpiresAt   time.Time
+	AccessToken  string
+	RefreshToken string
+	UserID       string
+	ExpiresAt    time.Time
+	generation   uint64
 }
 
 const (
@@ -84,12 +88,14 @@ type Manager struct {
 	apiSecret       string
 	kiteBaseURI     string // Override for Kite Connect API base URL (testing)
 	sessionDuration time.Duration
-	Logger          *slog.Logger
-	metrics         *metrics.Manager
-	templates       map[string]*template.Template
-	sessionManager  *SessionManager
-	sessionSigner   *SessionSigner
-	Instruments     *instruments.Manager
+	// Bounded striped locks serialize renewal without retaining per-session lock entries.
+	refreshLocks   [64]sync.Mutex
+	Logger         *slog.Logger
+	metrics        *metrics.Manager
+	templates      map[string]*template.Template
+	sessionManager *SessionManager
+	sessionSigner  *SessionSigner
+	Instruments    *instruments.Manager
 }
 
 // Metrics returns the metrics manager instance
@@ -126,42 +132,115 @@ func (m *Manager) initializeSessionManager() {
 
 // GetAuthenticatedClient is the single entry point for tools to get a valid Kite client.
 func (m *Manager) GetAuthenticatedClient(sessionID string) (*kiteconnect.Client, error) {
+	creds, err := m.authenticatedCredentials(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	client := m.newKiteClient()
+	client.SetAccessToken(creds.AccessToken)
+	client.SetHTTPClient(newKiteHTTPClient(&sessionTransport{manager: m, sessionID: sessionID, base: http.DefaultTransport}))
+	return client, nil
+}
+
+func (m *Manager) authenticatedCredentials(sessionID string) (*KiteCredentials, error) {
 	if sessionID == "" {
 		return nil, errors.New("invalid session ID")
 	}
 
+	// Re-read credentials after acquiring the lock: another request may already
+	// have renewed them. Network calls never hold the session store mutex.
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(sessionID))
+	lock := &m.refreshLocks[hash.Sum32()%uint32(len(m.refreshLocks))]
+	lock.Lock()
+	defer lock.Unlock()
+
 	session, err := m.sessionManager.Get(sessionID)
-	if err != nil {
-		// A logged-out or expired grant must never be recreated here. Preserve the
-		// existing user-facing reauthentication guidance without revealing whether
-		// a particular opaque session ID ever existed.
+	if err != nil || session.Terminated || session.Credentials == nil {
 		return nil, errors.New("not logged into Kite. Please authenticate via the OAuth flow")
 	}
-	if time.Now().After(session.ExpiresAt) {
-		return nil, errors.New("kite session has expired. Please re-authenticate via the OAuth flow")
+	if !time.Now().Before(session.ExpiresAt) {
+		return nil, errors.New("session has expired. Please re-authenticate via the OAuth flow")
 	}
-
-	if session.Credentials == nil {
-		return nil, errors.New("not logged into Kite. Please authenticate via the OAuth flow")
+	creds := session.Credentials
+	if !time.Now().Before(creds.ExpiresAt) {
+		if session.refreshFailure != nil && time.Now().Before(session.refreshRetryAt) {
+			return nil, session.refreshFailure
+		}
+		if creds.RefreshToken == "" {
+			return nil, errors.New("kite session has expired. Please re-authenticate via the OAuth flow")
+		}
+		renewed, err := m.newKiteClient().RenewAccessToken(creds.RefreshToken, m.apiSecret)
+		if err != nil {
+			var apiErr kiteconnect.Error
+			if errors.As(err, &apiErr) && apiErr.ErrorType == kiteconnect.TokenError {
+				// Discard a permanently rejected grant. Temporary upstream failures leave
+				// the refresh token intact so a later request can try again.
+				_, _ = m.sessionManager.Terminate(sessionID)
+				return nil, errors.New("kite refresh token is invalid or expired. Please re-authenticate via the OAuth flow")
+			}
+			err := errors.New("unable to refresh Kite access right now. Please try again later")
+			m.sessionManager.recordRefreshFailure(sessionID, err)
+			return nil, err
+		}
+		if renewed.AccessToken == "" || (renewed.UserID != "" && renewed.UserID != creds.UserID) {
+			err := errors.New("invalid Kite token renewal response")
+			m.sessionManager.recordRefreshFailure(sessionID, err)
+			return nil, err
+		}
+		creds.AccessToken = renewed.AccessToken
+		if renewed.RefreshToken != "" {
+			creds.RefreshToken = renewed.RefreshToken
+		}
+		creds.ExpiresAt = kiteAccessTokenExpiry(time.Now())
+		// This lookup-only update rejects logout/expiry during renewal and keeps
+		// the original grant deadline. A refresh must never recreate a session.
+		if err := m.sessionManager.UpdateCredentials(sessionID, creds); err != nil {
+			return nil, errors.New("session ended during token renewal. Please re-authenticate via the OAuth flow")
+		}
+		updated, err := m.sessionManager.Get(sessionID)
+		if err != nil {
+			return nil, errors.New("session ended during token renewal. Please re-authenticate via the OAuth flow")
+		}
+		creds = updated.Credentials
 	}
+	return creds, nil
+}
 
-	if time.Now().After(session.Credentials.ExpiresAt) {
-		return nil, errors.New("kite session has expired. Please re-authenticate via the OAuth flow")
+// SessionExpiry validates the application grant independently of the shorter
+// Kite credential lifetime. OAuth uses it for issuance and every HTTP request.
+func (m *Manager) SessionExpiry(sessionID string) (time.Time, error) {
+	session, err := m.sessionManager.Get(sessionID)
+	if err != nil || session.Terminated || session.Credentials == nil || !time.Now().Before(session.ExpiresAt) {
+		return time.Time{}, errors.New("invalid or expired application grant")
 	}
+	return session.ExpiresAt, nil
+}
 
+func (m *Manager) newKiteClient() *kiteconnect.Client {
 	client := kiteconnect.New(m.apiKey)
+	client.SetHTTPClient(newKiteHTTPClient(nil))
 	client.SetAppName("kite-mcp")
-	client.SetAccessToken(session.Credentials.AccessToken)
 	if m.kiteBaseURI != "" {
 		client.SetBaseURI(m.kiteBaseURI)
 	}
-	return client, nil
+	return client
+}
+
+// Kite access tokens expire at the next 06:00 IST cutoff, independently of
+// the application grant. IST has no daylight-saving transitions.
+func kiteAccessTokenExpiry(now time.Time) time.Time {
+	local := now.In(time.FixedZone("IST", 5*60*60+30*60))
+	cutoff := time.Date(local.Year(), local.Month(), local.Day(), 6, 0, 0, 0, local.Location())
+	if !local.Before(cutoff) {
+		cutoff = cutoff.AddDate(0, 0, 1)
+	}
+	return cutoff
 }
 
 // CompleteLogin exchanges a request token for a new set of Kite credentials.
 func (m *Manager) CompleteLogin(requestToken string) (*KiteCredentials, error) {
-	kc := kiteconnect.New(m.apiKey)
-	kc.SetAppName("kite-mcp")
+	kc := m.newKiteClient()
 	userSess, err := kc.GenerateSession(requestToken, m.apiSecret)
 	if err != nil {
 		m.Logger.Error("Failed to generate Kite session from request token", "error", err)
@@ -169,9 +248,10 @@ func (m *Manager) CompleteLogin(requestToken string) (*KiteCredentials, error) {
 	}
 
 	creds := &KiteCredentials{
-		AccessToken: userSess.AccessToken,
-		UserID:      userSess.UserID,
-		ExpiresAt:   time.Now().Add(24 * time.Hour),
+		AccessToken:  userSess.AccessToken,
+		RefreshToken: userSess.RefreshToken,
+		UserID:       userSess.UserID,
+		ExpiresAt:    kiteAccessTokenExpiry(time.Now()),
 	}
 
 	if m.metrics != nil {

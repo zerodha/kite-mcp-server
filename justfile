@@ -4,13 +4,13 @@
 # Note: All build and test commands use CGO_ENABLED=0 for static binaries
 # and better cross-platform compatibility
 #
-# Tests require GOEXPERIMENT=synctest (Go 1.23+) for time-dependent tests
+# Tests require Go 1.25+ (testing/synctest is part of the standard library)
 
 # Configuration variables
 BINARY_NAME := "kite-mcp.bin"
 GO_FLAGS := "CGO_ENABLED=0"
-TEST_FLAGS := "CGO_ENABLED=0 GOEXPERIMENT=synctest"
-TEST_RACE_FLAGS := "CGO_ENABLED=1 GOEXPERIMENT=synctest"
+TEST_FLAGS := "CGO_ENABLED=0"
+TEST_RACE_FLAGS := "CGO_ENABLED=1"
 TEST_TAGS := "-tags=testing"
 LDFLAGS := "-s -w"
 MAIN_FILE := "main.go"

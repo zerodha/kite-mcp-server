@@ -121,7 +121,7 @@ func TestGetOrCreate(t *testing.T) {
 	}
 }
 
-func TestUpdateCredentialsRefreshesSessionAndCopiesCredentials(t *testing.T) {
+func TestUpdateCredentialsPreservesDeadlineAndCopiesCredentials(t *testing.T) {
 	manager := NewSessionManagerWithDuration(testLogger(), time.Hour)
 	sessionID := manager.Generate()
 	before, err := manager.Get(sessionID)
@@ -140,8 +140,8 @@ func TestUpdateCredentialsRefreshesSessionAndCopiesCredentials(t *testing.T) {
 	if after.Credentials.AccessToken != "original" {
 		t.Fatalf("session retained caller-owned credentials pointer")
 	}
-	if !after.ExpiresAt.After(before.ExpiresAt) {
-		t.Fatalf("reauthentication did not refresh session expiry: before=%v after=%v", before.ExpiresAt, after.ExpiresAt)
+	if !after.ExpiresAt.Equal(before.ExpiresAt) {
+		t.Fatalf("credential update changed grant expiry: before=%v after=%v", before.ExpiresAt, after.ExpiresAt)
 	}
 }
 

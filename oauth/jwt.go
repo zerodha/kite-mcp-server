@@ -37,6 +37,8 @@ type Config struct {
 	JWTSecret []byte
 	// TokenTTL is how long access tokens are valid
 	TokenTTL time.Duration
+	// SessionExpiry validates the backing grant and returns its fixed deadline.
+	SessionExpiry func(string) (time.Time, error)
 	// AuthCodeTTL is how long authorization codes are valid
 	AuthCodeTTL time.Duration
 	// AllowedRedirectPatterns defines allowed redirect URI patterns for DCR.
@@ -101,7 +103,7 @@ type TokenClaims struct {
 // New creates a new simplified OAuth server
 func New(cfg Config) *Server {
 	if cfg.TokenTTL == 0 {
-		cfg.TokenTTL = 24 * time.Hour
+		cfg.TokenTTL = 7 * 24 * time.Hour
 	}
 	if cfg.AuthCodeTTL == 0 {
 		cfg.AuthCodeTTL = 10 * time.Minute
@@ -438,12 +440,25 @@ func (s *Server) ExchangeCode(req *TokenRequest) (accessToken string, err error)
 
 func (s *Server) generateAccessToken(kiteUserID, sessionID string) (string, error) {
 	now := time.Now()
+	expiresAt := now.Add(s.config.TokenTTL)
+	if s.config.SessionExpiry != nil {
+		deadline, err := s.config.SessionExpiry(sessionID)
+		if err != nil {
+			return "", err
+		}
+		if deadline.Before(expiresAt) {
+			expiresAt = deadline
+		}
+	}
+	if !expiresAt.Truncate(time.Second).After(now) {
+		return "", errors.New("application grant has expired")
+	}
 	claims := TokenClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.config.Issuer,
 			Subject:   kiteUserID,
 			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(s.config.TokenTTL)),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			ID:        generateSecureToken(16),
 		},
 		KiteUserID: kiteUserID,
@@ -485,8 +500,13 @@ func (s *Server) ValidateToken(tokenString string) (*TokenClaims, error) {
 func (s *Server) Middleware(next http.Handler) http.Handler {
 	verifier := func(_ context.Context, token string, r *http.Request) (*auth.TokenInfo, error) {
 		claims, err := s.ValidateToken(token)
-		if err != nil {
+		if err != nil || claims.ExpiresAt == nil {
 			return nil, auth.ErrInvalidToken
+		}
+		if s.config.SessionExpiry != nil {
+			if _, err := s.config.SessionExpiry(claims.SessionID); err != nil {
+				return nil, auth.ErrInvalidToken
+			}
 		}
 		// This is distinct from Mcp-Session-Id, which is owned by the SDK.
 		r.Header.Set("X-Kite-Session-Id", claims.SessionID)
