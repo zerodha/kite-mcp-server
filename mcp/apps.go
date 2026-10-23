@@ -8,12 +8,14 @@ import (
 	"slices"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zerodha/kite-mcp-server/kc"
 )
 
 const (
 	appExtension   = "io.modelcontextprotocol/ui"
 	appResourceURI = "ui://kite/explorer-v1.html"
 	appMIMEType    = "text/html;profile=mcp-app"
+	appLauncher    = "kite_explorer"
 )
 
 // The committed bundle keeps ordinary Go builds independent of Node and CDNs.
@@ -37,13 +39,17 @@ func registerAppResource(server *mcp.Server) {
 			}
 			if listing, ok := result.(*mcp.ListToolsResult); ok {
 				copy := *listing
-				copy.Tools = make([]*mcp.Tool, len(listing.Tools))
-				for i, tool := range listing.Tools {
+				copy.Tools = make([]*mcp.Tool, 0, len(listing.Tools))
+				for _, tool := range listing.Tools {
+					if tool.Name == appLauncher {
+						continue
+					}
 					cloned := *tool
 					cloned.Meta = maps.Clone(tool.Meta)
 					delete(cloned.Meta, "ui")
 					delete(cloned.Meta, "ui/resourceUri")
-					copy.Tools[i] = &cloned
+					delete(cloned.Meta, "openai/ui")
+					copy.Tools = append(copy.Tools, &cloned)
 				}
 				return &copy, nil
 			}
@@ -51,7 +57,10 @@ func registerAppResource(server *mcp.Server) {
 		}
 	})
 	metadata := func() mcp.Meta {
-		return mcp.Meta{"ui": map[string]any{
+		return mcp.Meta{"openai/ui": map[string]any{
+			"availableDisplayModes": []string{"inline", "fullscreen"},
+			"preferredDisplayMode":  "inline",
+		}, "ui": map[string]any{
 			"prefersBorder": true,
 			"csp":           map[string]any{"connectDomains": []string{}, "resourceDomains": []string{}},
 		}}
@@ -67,6 +76,34 @@ func registerAppResource(server *mcp.Server) {
 			URI: appResourceURI, MIMEType: appMIMEType, Text: appHTML, Meta: metadata(),
 		}}}, nil
 	})
+}
+
+// Entrypoints receive {} from the host. Keep the portfolio tool's required
+// arguments intact and route this app-only launcher through its authenticated
+// handler with an explicit, bounded initial snapshot.
+func registerAppLauncher(server *mcp.Server, manager *kc.Manager) {
+	tool := NewTool(appLauncher, "Open the read-only Kite portfolio explorer.", json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`))
+	tool.Title = "Kite explorer"
+	tool.Annotations = &mcp.ToolAnnotations{ReadOnlyHint: true}
+	tool.Meta = mcp.Meta{
+		"ui":             map[string]any{"resourceUri": appResourceURI, "visibility": []string{"app"}},
+		"ui/resourceUri": appResourceURI,
+		"openai/ui":      map[string]any{"entrypoints": []map[string]any{{"type": "global"}, {"type": "thread"}}},
+	}
+	portfolio := withAppData("portfolio", (&PortfolioTool{}).Handler(manager))
+	server.AddTool(tool, wrapHandler(func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		copy := *request
+		params := *request.Params
+		params.Name = "portfolio"
+		params.Arguments = json.RawMessage(`{"mode":"holdings","type":"full","from":0,"limit":100}`)
+		copy.Params = &params
+		result, err := portfolio(ctx, &copy)
+		if err == nil && result != nil {
+			info := result.Meta["trade.kite/app"].(map[string]any)
+			info["origin"] = map[string]any{"tool": appLauncher, "arguments": GetArguments(request)}
+		}
+		return result, err
+	}))
 }
 
 func supportsApps(caps *mcp.ClientCapabilities) bool {

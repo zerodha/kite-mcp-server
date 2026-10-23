@@ -16,7 +16,7 @@ Want to use AI with your Kite trading account? Just add `https://mcp.kite.trade/
 - **Comprehensive Coverage**: Implements most Kite Connect API endpoints
 - **Streamable HTTP Transport**: Connect through the `/mcp` endpoint
 - **Built-in Documentation**: Auto-served documentation at runtime
-- **MCP Apps**: Inline portfolio tables and historical charts in compatible clients, with text fallback. See [MCP Apps](docs/03-reference/05-mcp-apps.md).
+- **MCP Apps**: Inline portfolio tables and historical charts, plus sidebar and conversation-panel entrypoints in hosts supporting OpenAI MCP Extensions, with text fallback. See [MCP Apps](docs/03-reference/05-mcp-apps.md).
 
 ## Quick Start
 

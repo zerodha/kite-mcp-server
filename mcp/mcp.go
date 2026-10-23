@@ -112,6 +112,10 @@ func RegisterTools(srv *mcp.Server, manager *kc.Manager, excludedTools string, l
 		srv.AddTool(def, wrapHandler(handler))
 	}
 
+	if !excludedSet["portfolio"] && !excludedSet[appLauncher] {
+		registerAppLauncher(srv, manager)
+	}
+
 	logger.Info("Tool registration complete",
 		"registered", registeredCount,
 		"excluded", excludedCount,

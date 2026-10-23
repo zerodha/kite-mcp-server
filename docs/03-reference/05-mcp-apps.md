@@ -23,12 +23,20 @@ The server checks each client's `extensions["io.modelcontextprotocol/ui"].mimeTy
 
 Existing `EXCLUDED_TOOLS` settings apply as before. Excluding `portfolio` or `market` removes that tool, including its UI entry point. The static UI resource contains no account data and can remain discoverable independently of the tool list. The existing trade approval protocol and trading tools are unchanged.
 
+## OpenAI plugin entrypoints
+
+Hosts implementing [OpenAI MCP Extensions](https://developers.openai.com/plugins/build/extensions) can open **Kite explorer** from the sidebar or a conversation panel. The app-only `kite_explorer` tool declares `global` and `thread` entrypoints in `_meta["openai/ui"].entrypoints` and accepts `{}`. It loads the first 100 full holdings through the existing authenticated portfolio handler; refresh, pagination, summary, and instrument inspection continue through the standard MCP Apps bridge.
+
+The launcher is advertised only to clients supporting MCP Apps. Apps clients without OpenAI entrypoint support can continue using the inline explorer on `portfolio` and `market`; clients without Apps support retain their original tool list. No client-name detection is used. `EXCLUDED_TOOLS=portfolio` also removes the launcher; `EXCLUDED_TOOLS=kite_explorer` disables only the sidebar/panel integration. Excluding `market` removes the corresponding tool used by the inspector.
+
+The UI resource declares support for inline and fullscreen display, preferring inline for ordinary chat tool calls. Entrypoints open fullscreen as specified by the host. No OpenAI SDK or API key is required for this metadata-only integration. After deploying, refresh the plugin connection and check both entrypoints in a supporting host. Protocol tests cover discovery and launch; native ChatGPT/Codex navigation still requires a manual host check.
+
 ## Implementation
 
 - Resource: `ui://kite/explorer-v1.html`, MIME type `text/html;profile=mcp-app`.
 - Tool linkage: `_meta.ui.resourceUri`, with the official SDK helper's compatibility alias `_meta["ui/resourceUri"]`.
 - Data: existing `content` is retained, with object `structuredContent` for rendering. Existing market output schemas and structured responses remain intact.
-- Result metadata: `_meta["trade.kite/app"]` identifies the originating tool and arguments. This lets the shared resource refresh the correct request even if a host omits `hostContext.toolInfo`.
+- Result metadata: `_meta["trade.kite/app"]` identifies the originating tool and arguments. This lets the shared resource refresh the correct request even if a host omits `hostContext.toolInfo`. Launcher results also carry an `origin` with the launcher tool and its original empty arguments, so the UI can correlate the launch input with the portfolio snapshot without host tool metadata.
 - Bridge: the pinned official `@modelcontextprotocol/ext-apps` SDK handles initialization, notifications, tool calls, resizing and teardown.
 - Build: bundled HTML is committed and embedded in Go. Ordinary Go builds do not require Node.js, npm, or external asset access.
 

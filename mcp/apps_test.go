@@ -56,9 +56,20 @@ func TestAppsMixedClientDiscoveryAndReads(t *testing.T) {
 		for index, cs := range sessions {
 			listing, err := cs.ListTools(ctx, nil)
 			require.NoError(t, err)
-			require.Len(t, listing.Tools, len(GetAllTools())-1)
+			expectedCount := len(GetAllTools()) - 1
+			if index == 0 || index == 3 {
+				expectedCount++
+			}
+			require.Len(t, listing.Tools, expectedCount)
 			for _, tool := range listing.Tools {
 				require.NotEqual(t, "orders", tool.Name)
+				if tool.Name == appLauncher {
+					require.Equal(t, "Kite explorer", tool.Title)
+					require.True(t, tool.Annotations.ReadOnlyHint)
+					require.Equal(t, []any{"app"}, tool.Meta["ui"].(map[string]any)["visibility"])
+					require.Equal(t, []any{map[string]any{"type": "global"}, map[string]any{"type": "thread"}}, tool.Meta["openai/ui"].(map[string]any)["entrypoints"])
+					continue
+				}
 				if (index == 0 || index == 3) && (tool.Name == "portfolio" || tool.Name == "market") {
 					ui := tool.Meta["ui"].(map[string]any)
 					require.Equal(t, appResourceURI, ui["resourceUri"])
@@ -79,6 +90,14 @@ func TestAppsMixedClientDiscoveryAndReads(t *testing.T) {
 			require.Equal(t, "panel-test-1", info["arguments"].(map[string]any)["_app_request_id"])
 		}
 	}
+	launch, err := sessions[0].CallTool(ctx, &sdk.CallToolParams{Name: appLauncher, Arguments: map[string]any{}})
+	require.NoError(t, err)
+	require.False(t, launch.IsError)
+	info := launch.Meta["trade.kite/app"].(map[string]any)
+	require.Equal(t, map[string]any{"tool": appLauncher, "arguments": map[string]any{}}, info["origin"])
+	require.Equal(t, "portfolio", info["tool"])
+	require.Equal(t, map[string]any{"mode": "holdings", "type": "full", "from": float64(0), "limit": float64(100)}, info["arguments"])
+	require.NotNil(t, launch.StructuredContent)
 	resources, err := sessions[0].ListResources(ctx, nil)
 	require.NoError(t, err)
 	found := false
@@ -95,6 +114,7 @@ func TestAppsMixedClientDiscoveryAndReads(t *testing.T) {
 	require.Equal(t, appMIMEType, resource.Contents[0].MIMEType)
 	require.Contains(t, resource.Contents[0].Text, "<!doctype html>")
 	require.NotContains(t, resource.Contents[0].Text, "<!-- APP_SCRIPT -->")
+	require.Equal(t, "inline", resource.Contents[0].Meta["openai/ui"].(map[string]any)["preferredDisplayMode"])
 	csp := resource.Contents[0].Meta["ui"].(map[string]any)["csp"].(map[string]any)
 	require.Empty(t, csp["connectDomains"])
 	require.Empty(t, csp["resourceDomains"])
@@ -119,4 +139,32 @@ func TestAppDataPreservesErrorsAndMarketSchema(t *testing.T) {
 	result, err := withAppData("portfolio", func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) { return nil, expected })(context.Background(), request)
 	require.Nil(t, result)
 	require.ErrorIs(t, err, expected)
+}
+
+func TestAppLauncherExclusions(t *testing.T) {
+	for _, excluded := range []string{"portfolio", appLauncher} {
+		t.Run(excluded, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			server := NewServer(&sdk.Implementation{Name: "test", Version: "1"})
+			RegisterTools(server, nil, excluded, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			caps := &sdk.ClientCapabilities{}
+			caps.AddExtension(appExtension, map[string]any{"mimeTypes": []string{appMIMEType}})
+			client := sdk.NewClient(&sdk.Implementation{Name: "client", Version: "1"}, &sdk.ClientOptions{Capabilities: caps})
+			ct, st := sdk.NewInMemoryTransports()
+			ss, err := server.Connect(ctx, st, nil)
+			require.NoError(t, err)
+			defer ss.Close()
+			cs, err := client.Connect(ctx, ct, &sdk.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
+			require.NoError(t, err)
+			defer cs.Close()
+			listing, err := cs.ListTools(ctx, nil)
+			require.NoError(t, err)
+			for _, tool := range listing.Tools {
+				require.NotEqual(t, appLauncher, tool.Name)
+			}
+			_, err = cs.CallTool(ctx, &sdk.CallToolParams{Name: appLauncher, Arguments: map[string]any{}})
+			require.Error(t, err)
+		})
+	}
 }

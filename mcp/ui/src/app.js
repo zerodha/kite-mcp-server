@@ -174,7 +174,13 @@ function render(){
 function receive(result,fallbackArgs){
   if(cancelled||acceptedRevision===revision)return;
   const info=result._meta?.['trade.kite/app'];
-  if(info&&expectedArgs&&requestKey(info.arguments||{})!==requestKey(expectedArgs))return;
+  // The launcher receives {}, but returns a portfolio snapshot. Its explicit
+  // origin correlates that response even when the host omits toolInfo. Only
+  // an outstanding empty input may accept a launcher result.
+  const launcherResult=info?.origin?.tool==='kite_explorer'&&info.tool==='portfolio'&&
+    expectedArgs&&Object.keys(expectedArgs).length===0&&
+    requestKey(info.origin.arguments)===requestKey(expectedArgs);
+  if(info&&expectedArgs&&!launcherResult&&requestKey(info.arguments||{})!==requestKey(expectedArgs))return;
   if(info&&allowedTools.has(info.tool)){tool=info.tool;args=info.arguments||{};}else if(fallbackArgs)args=fallbackArgs;
   acceptedRevision=revision;waiting=false;errorMessage='';hasResult=true;
   try{
