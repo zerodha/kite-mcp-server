@@ -38,7 +38,7 @@ try{
    }
    if(args.mode==='quote'){
     const id=args.instruments[0],token=id.includes('TCS')?222:id.includes('NIFTY')?444:111;
-    const price=token===222?3540.25:token===444?125.5:1523.8;
+    const price=window.depthPrice??(token===222?3540.25:token===444?125.5:1523.8);
     return {data:{[id]:{instrument_token:token,last_price:price,ohlc:{open:price-10,high:price+15,low:price-25,close:price-8},average_price:price-2,volume:235600,oi:token===444?560000:0,last_quantity:25,last_trade_time:'2026-10-23T10:30:00+05:30',timestamp:'2026-10-23T10:30:01+05:30',buy_quantity:15000,sell_quantity:18000,lower_circuit_limit:price*.9,upper_circuit_limit:price*1.1,depth:{buy:Array.from({length:5},(_,i)=>({price:price-.05*(i+1),quantity:250+i*100,orders:2+i})),sell:Array.from({length:5},(_,i)=>({price:price+.05*(i+1),quantity:300+i*125,orders:3+i}))}}},meta:{timezone:'Asia/Kolkata'}};
    }
    if(args.mode==='historical')return {data:Array.from({length:25},(_,i)=>{const open=1500+i*2+Math.sin(i)*12,close=open+Math.sin(i+1)*8;return {date:new Date(Date.parse(args.from_date)+i*86400000).toISOString().slice(0,10),open,close,high:Math.max(open,close)+5,low:Math.min(open,close)-6,volume:10000+i*200,oi:0};}),meta:{timezone:'Asia/Kolkata'}};
@@ -107,6 +107,49 @@ try{
  assert.equal(await app.locator('#inspector .buy .depth-bar').evaluateAll(nodes=>new Set(nodes.map(node=>getComputedStyle(node).backgroundColor)).size),1);
  assert.match(await app.locator('#inspector').textContent(),/15,000/);
  await capture('explorer-depth-desktop');
+ // Check content containment rather than a font-dependent stacking breakpoint.
+ const assertDepthLayout=async width=>{
+  const failures=await app.locator('#inspector').evaluate(inspector=>{
+   const failures=[],epsilon=1,rect=inspector.getBoundingClientRect(),style=getComputedStyle(inspector);
+   const bounds={left:rect.left+parseFloat(style.borderLeftWidth)+parseFloat(style.paddingLeft),right:rect.right-parseFloat(style.borderRightWidth)-parseFloat(style.paddingRight)};
+   const inside=(child,parent)=>child.left>=parent.left-epsilon&&child.right<=parent.right+epsilon;
+   for(const side of inspector.querySelectorAll('.depth-side')){
+    const sideRect=side.getBoundingClientRect();
+    if(!inside(sideRect,bounds))failures.push('side outside inspector');
+    if(!inside(side.querySelector('table').getBoundingClientRect(),sideRect))failures.push('table outside side');
+    for(const cell of side.querySelectorAll('th,td')){
+     const range=document.createRange();range.selectNodeContents(cell.firstChild);
+     const rects=[...range.getClientRects()],cellRect=cell.getBoundingClientRect();
+     if(rects.length!==1||rects.some(rect=>!inside(rect,cellRect)))failures.push('wrapped or clipped value');
+    }
+    for(const track of side.querySelectorAll('.depth-track')){
+     const trackRect=track.getBoundingClientRect();
+     if(trackRect.width<64-epsilon||!inside(trackRect,track.closest('td').getBoundingClientRect()))failures.push('cramped or clipped quantity bar');
+    }
+   }
+   return failures;
+  });
+  assert.deepEqual(failures,[],`depth content fits at ${width}px`);
+  assert.equal(await app.locator('body').evaluate(node=>node.scrollWidth>innerWidth),false);
+ };
+ for(const width of [320,900,1180]) {
+  await page.setViewportSize({width,height:1050});
+  await assertDepthLayout(width);
+  if(width===900)await capture('explorer-depth-narrow-desktop');
+ }
+ // Longer prices must keep all four decimals without wrapping or clipping.
+ await page.evaluate(()=>window.depthPrice=123456.7891);
+ await app.getByRole('button',{name:'Refresh quote',exact:true}).click();
+ await app.locator('#inspector').getByText('₹1,23,456.7891',{exact:true}).waitFor();
+ for(const width of [320,900,1180,1600]) {
+  await page.setViewportSize({width,height:1050});
+  await assertDepthLayout(width);
+  if(width===1180)await capture('explorer-depth-long-prices');
+ }
+ await page.setViewportSize({width:1180,height:1050});
+ await page.evaluate(()=>window.depthPrice=null);
+ await app.getByRole('button',{name:'Refresh quote',exact:true}).click();
+ await app.locator('#inspector').getByText('₹1,523.80',{exact:true}).waitFor();
  await app.getByRole('tab',{name:'Chart',exact:true}).click();
  await app.locator('#inspector canvas').waitFor();
  assert.equal(await app.locator('#title').textContent(),'Holdings');

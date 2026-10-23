@@ -44,7 +44,7 @@ function hostContext(ctx){
   if(ctx?.theme){
     document.documentElement.style.colorScheme=ctx.theme;document.documentElement.dataset.theme=ctx.theme;
     const dark=ctx.theme==='dark';
-    const defaults={'--color-text-primary':dark?'#e2e5ea':'#252a34','--color-text-secondary':dark?'#a4aebf':'#657083','--color-background-primary':dark?'#181b20':'#fff','--color-background-secondary':dark?'#222730':'#f6f7f9','--color-border-primary':dark?'#414957':'#ccd1d9','--color-border-secondary':dark?'#343b47':'#e8ebef'};
+    const defaults={'--color-text-primary':dark?'#e2e5ea':'#252a34','--color-text-secondary':dark?'#a4aebf':'#657083','--color-background-primary':dark?'#181b20':'#fff','--color-background-secondary':dark?'#222730':'#f6f7f9','--color-border-primary':dark?'#657083':'#ccd1d9','--color-border-secondary':dark?'#343b47':'#e8ebef'};
     for(const [key,value] of Object.entries(defaults))if(!ctx.styles?.variables?.[key])document.documentElement.style.setProperty(key,value);
   }
   const name=ctx?.toolInfo?.tool?.name;
@@ -124,6 +124,7 @@ function render(){
   const focusedKey=document.activeElement?.dataset?.sortKey;
   $('content').replaceChildren();
   const hasViews=rows.some(row=>row.view==='day'||row.view==='net');const instrumentRows=rows.some(row=>instrumentRef(row));
+  $('controls').dataset.display=instrumentRows?$('display').value:'table';
   const summaryOnly=tool==='portfolio'&&args.mode==='holdings'&&args.type==='summary';
   $('controls').hidden=!rows.length||summaryOnly||args.mode==='margins';$('view-label').hidden=!hasViews;$('position-state-label').hidden=args.mode!=='positions';
   $('display-label').hidden=!instrumentRows;$('list-sort-label').hidden=!instrumentRows;$('sort-direction').hidden=!instrumentRows;

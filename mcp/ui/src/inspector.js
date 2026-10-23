@@ -133,9 +133,10 @@ export class Inspector {
     const q=this.quote,change=finite(q?.last_price)&&finite(q?.ohlc?.close)?q.last_price-q.ohlc.close:null;
     quoteLine.append(el('strong',q?`₹${formatCell(q.last_price,'last_price')}`:'—','quote-price'));
     if(finite(change))quoteLine.append(el('span',`Day change ${formatCell(change,'price_change')}${q.ohlc.close?` (${formatCell(change/q.ohlc.close*100,'return_percent')})`:''}`,tone(change)));
-    const refresh=action(this.quoteLoading?'Loading quote…':'Refresh quote',()=>this.loadQuote(),'quiet');refresh.id='inspector-quote-refresh';refresh.disabled=this.quoteLoading||!this.requests.canCall();quoteLine.append(refresh);this.container.append(quoteLine);
+    const refresh=action(this.quoteLoading?'Loading quote…':'Refresh quote',()=>this.loadQuote(),'quiet');refresh.id='inspector-quote-refresh';refresh.disabled=this.quoteLoading||!this.requests.canCall();this.container.append(quoteLine);
     this.container.append(el('p',this.quoteTime||'Quote not loaded','muted'));
     if(snapshotTime(q?.timestamp||q?.quote_timestamp))this.container.append(el('p',`Quote timestamp: ${snapshotTime(q.timestamp||q.quote_timestamp)}`,'muted'));
+    const quoteActions=el('div',null,'quote-actions');quoteActions.append(refresh);this.container.append(quoteActions);
     if(this.quoteError)this.container.append(el('p',`${this.quoteError}${q?' Displayed quote is the previous snapshot.':''}`,'panel-error'));
     if(!this.requests.canCall())this.container.append(el('p','This host cannot load additional data. Ask for quotes or historical prices in chat.','muted'));
     const tabs=el('div',null,'inspector-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Instrument details');
