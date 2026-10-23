@@ -119,8 +119,8 @@ func main() {
 	mcp.RegisterTools(mcpSrv, kcManager, "", logger)
 
 	// 7. HTTP handler.
-	handler := mcpsdk.NewStreamableHTTPHandler(
-		func(r *http.Request) *mcpsdk.Server { return mcpSrv },
+	handler := mcp.NewHTTPHandler(
+		mcpSrv,
 		&mcpsdk.StreamableHTTPOptions{
 			Logger:         logger,
 			SessionTimeout: 30 * time.Minute,

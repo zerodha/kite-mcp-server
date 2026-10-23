@@ -38,7 +38,9 @@ The view calls only `portfolio` and `market`, through the host's `tools/call` pr
 
 MCP Apps is additive to the server's negotiated protocol versions, including
 `2026-07-28` and `2025-11-25`. Trade approval uses multi-round-trip input requests
-on `2026-07-28` and nested form elicitation on older versions.
+on `2026-07-28` and nested form elicitation on older versions. The `/mcp`
+handler routes requests with `MCP-Protocol-Version: 2026-07-28` or later to
+stateless HTTP; older versions retain stateful HTTP sessions.
 
 ## Developing and verifying the view
 

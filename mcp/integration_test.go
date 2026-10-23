@@ -145,6 +145,11 @@ type testHarness struct {
 
 func newTestHarness(t *testing.T) *testHarness {
 	t.Helper()
+	return newTestHarnessVersion(t, "2025-11-25")
+}
+
+func newTestHarnessVersion(t *testing.T, version string) *testHarness {
+	t.Helper()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -198,8 +203,8 @@ func newTestHarness(t *testing.T) *testHarness {
 	mcp.RegisterTools(mcpSrv, kcManager, "", logger)
 
 	// 7. Create HTTP handler with OAuth middleware.
-	handler := mcpsdk.NewStreamableHTTPHandler(
-		func(r *http.Request) *mcpsdk.Server { return mcpSrv },
+	handler := mcp.NewHTTPHandler(
+		mcpSrv,
 		&mcpsdk.StreamableHTTPOptions{
 			Logger:         logger,
 			SessionTimeout: 5 * time.Minute,
@@ -229,7 +234,7 @@ func newTestHarness(t *testing.T) *testHarness {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	clientSession, err := mcpClient.Connect(ctx, transport, nil)
+	clientSession, err := mcpClient.Connect(ctx, transport, &mcpsdk.ClientSessionOptions{ProtocolVersion: version})
 	require.NoError(t, err, "Failed to connect MCP client")
 
 	h := &testHarness{
@@ -819,5 +824,24 @@ func TestHelpReconciliationRecipe(t *testing.T) {
 		if mode == "trades" {
 			require.Contains(t, result.Content[0].(*mcpsdk.TextContent).Text, `"trade_id":"10000000"`)
 		}
+	}
+}
+
+// Exercise discovery, tool listing and Kite profile through authenticated HTTP.
+func TestHTTPDiscoveryProfile(t *testing.T) {
+	for _, version := range []string{"2026-07-28", "2025-11-25"} {
+		t.Run(version, func(t *testing.T) {
+			h := newTestHarnessVersion(t, version)
+			require.Equal(t, version, h.session.InitializeResult().ProtocolVersion)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			listing, err := h.session.ListTools(ctx, nil)
+			require.NoError(t, err)
+			require.NotEmpty(t, listing.Tools)
+			result, err := h.session.CallTool(ctx, &mcpsdk.CallToolParams{Name: "portfolio", Arguments: map[string]any{"mode": "profile"}})
+			require.NoError(t, err)
+			assertNotError(t, result)
+			assertTextContentContains(t, result, "AB1234")
+		})
 	}
 }

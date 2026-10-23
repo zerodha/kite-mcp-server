@@ -346,8 +346,8 @@ func (app *App) startServer(srv *http.Server, mcpServer *mcpsdk.Server, url stri
 	if err != nil {
 		return fmt.Errorf("invalid MCP_SESSION_TIMEOUT: %w", err)
 	}
-	streamable := mcpsdk.NewStreamableHTTPHandler(
-		func(r *http.Request) *mcpsdk.Server { return mcpServer },
+	streamable := mcp.NewHTTPHandler(
+		mcpServer,
 		&mcpsdk.StreamableHTTPOptions{
 			Logger:         app.logger,
 			SessionTimeout: sessionTimeout,
