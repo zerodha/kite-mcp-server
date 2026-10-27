@@ -173,10 +173,10 @@ func TestAppLauncherExclusions(t *testing.T) {
 			ct, st := sdk.NewInMemoryTransports()
 			ss, err := server.Connect(ctx, st, nil)
 			require.NoError(t, err)
-			defer ss.Close()
+			defer func() { require.NoError(t, ss.Close()) }()
 			cs, err := client.Connect(ctx, ct, &sdk.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 			require.NoError(t, err)
-			defer cs.Close()
+			defer func() { require.NoError(t, cs.Close()) }()
 			listing, err := cs.ListTools(ctx, nil)
 			require.NoError(t, err)
 			for _, tool := range listing.Tools {

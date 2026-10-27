@@ -34,7 +34,7 @@ func TestHTTPTradeApproval(t *testing.T) {
 			}})
 			session, err := client.Connect(ctx, &sdk.StreamableClientTransport{Endpoint: endpoint.URL}, &sdk.ClientSessionOptions{ProtocolVersion: version})
 			require.NoError(t, err)
-			defer session.Close()
+			defer func() { require.NoError(t, session.Close()) }()
 			require.Equal(t, version, session.InitializeResult().ProtocolVersion)
 			result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "approval"})
 			require.NoError(t, err)

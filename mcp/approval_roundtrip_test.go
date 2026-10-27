@@ -62,10 +62,10 @@ func TestApprovalModernDiscoveryAndWire(t *testing.T) {
 		ct, st := sdk.NewInMemoryTransports()
 		ss, err := server.Connect(ctx, st, nil)
 		require.NoError(t, err)
-		defer ss.Close()
+		defer func() { require.NoError(t, ss.Close()) }()
 		cs, err := client.Connect(ctx, ct, &sdk.ClientSessionOptions{ProtocolVersion: "2026-07-28"})
 		require.NoError(t, err)
-		defer cs.Close()
+		defer func() { require.NoError(t, cs.Close()) }()
 		sessions = append(sessions, cs)
 	}
 	// Interleave clients to detect shared tool-definition mutation.

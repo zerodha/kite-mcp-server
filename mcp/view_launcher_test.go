@@ -69,11 +69,17 @@ func TestKiteViewInitialSnapshotsAndOrigins(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/portfolio/holdings", "/orders", "/gtt/triggers":
-			fmt.Fprint(w, `{"status":"success","data":[]}`)
+			if _, err := fmt.Fprint(w, `{"status":"success","data":[]}`); err != nil {
+				t.Errorf("write test response: %v", err)
+			}
 		case "/portfolio/positions":
-			fmt.Fprint(w, `{"status":"success","data":{"net":[],"day":[]}}`)
+			if _, err := fmt.Fprint(w, `{"status":"success","data":{"net":[],"day":[]}}`); err != nil {
+				t.Errorf("write test response: %v", err)
+			}
 		case "/user/margins":
-			fmt.Fprint(w, `{"status":"success","data":{"equity":{"enabled":true,"net":1000},"commodity":{"enabled":false}}}`)
+			if _, err := fmt.Fprint(w, `{"status":"success","data":{"equity":{"enabled":true,"net":1000},"commodity":{"enabled":false}}}`); err != nil {
+				t.Errorf("write test response: %v", err)
+			}
 		default:
 			t.Errorf("unexpected upstream path: %s", r.URL.Path)
 			http.Error(w, "unexpected", http.StatusNotFound)
@@ -110,10 +116,10 @@ func TestKiteViewLauncherRegistrationExclusions(t *testing.T) {
 			ct, st := sdk.NewInMemoryTransports()
 			ss, err := server.Connect(ctx, st, nil)
 			require.NoError(t, err)
-			defer ss.Close()
+			defer func() { require.NoError(t, ss.Close()) }()
 			cs, err := client.Connect(ctx, ct, nil)
 			require.NoError(t, err)
-			defer cs.Close()
+			defer func() { require.NoError(t, cs.Close()) }()
 			listing, err := cs.ListTools(ctx, nil)
 			require.NoError(t, err)
 			for _, tool := range listing.Tools {
