@@ -7,7 +7,12 @@
 :root { font-family:var(--font-sans,system-ui,sans-serif); color:var(--color-text-primary,#252a34); background:var(--color-background-primary,#fff); font-size:14px; color-scheme:light dark; --accent:#b94327; --positive:#16805b; --negative:#c43d49; }
 * { box-sizing:border-box; }
 body { margin:0; padding:24px; }
-header { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+header { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+.header-actions { display:flex; align-items:center; gap:4px; margin-left:auto; }
+.header-actions button { background:transparent; border-color:transparent; font-size:12px; padding:8px 10px; }
+.header-actions button:hover:enabled { border-color:var(--color-border-primary,#ccd1d9); }
+.header-actions:has(#price-refresh:not([hidden])) > button { border-left-color:var(--color-border-secondary,#e8ebef); border-radius:0; }
+#price-status { margin:10px 0 0; }
 h1 { font-size:24px; letter-spacing:-.03em; margin:0; font-weight:600; }
 .heading { display:flex; align-items:center; gap:12px; min-width:0; }
 .brand { display:block; width:30px; height:20px; flex:none; }
@@ -189,7 +194,8 @@ h3 { font-size:13px; font-weight:600; margin:18px 0 12px; }
 </style>
 </head>
 <body>
-<header><div class="heading"><img class="brand" src="data:image/svg+xml;base64,PHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA5MCA2MCI+PGRlZnM+PHN0eWxlPi5jbHMtMXtmaWxsOiNmNjQ2MWE7fS5jbHMtMntmaWxsOiNkYjM0MmM7fTwvc3R5bGU+PC9kZWZzPjx0aXRsZT5LaXRlIGxvZ28gdHJpbW1lZDwvdGl0bGU+PHBvbHlnb24gY2xhc3M9ImNscy0xIiBwb2ludHM9IjMwIDAgMCAzMCAzMCA2MCA2MCAzMCA5MCAwIDMwIDAiLz48cG9seWdvbiBjbGFzcz0iY2xzLTIiIHBvaW50cz0iMzAgNjAgNjAgMzAgOTAgNjAgMzAgNjAiLz48L3N2Zz4=" alt="Kite" width="30" height="20"><h1 id="title">Kite</h1></div><button id="refresh" disabled>Refresh</button></header>
+<header><div class="heading"><img class="brand" src="data:image/svg+xml;base64,PHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA5MCA2MCI+PGRlZnM+PHN0eWxlPi5jbHMtMXtmaWxsOiNmNjQ2MWE7fS5jbHMtMntmaWxsOiNkYjM0MmM7fTwvc3R5bGU+PC9kZWZzPjx0aXRsZT5LaXRlIGxvZ28gdHJpbW1lZDwvdGl0bGU+PHBvbHlnb24gY2xhc3M9ImNscy0xIiBwb2ludHM9IjMwIDAgMCAzMCAzMCA2MCA2MCAzMCA5MCAwIDMwIDAiLz48cG9seWdvbiBjbGFzcz0iY2xzLTIiIHBvaW50cz0iMzAgNjAgNjAgMzAgOTAgNjAgMzAgNjAiLz48L3N2Zz4=" alt="Kite" width="30" height="20"><h1 id="title">Kite</h1></div><div class="header-actions"><span id="price-refresh" hidden><button id="refresh-prices" type="button">Refresh prices</button></span><button id="refresh" disabled>Refresh</button></div></header>
+<p id="price-status" class="muted" role="status" aria-live="polite" hidden></p>
 <p id="status" role="status" aria-live="polite">Connecting to your MCP client…</p>
 <section id="account-summary" aria-label="Account-wide portfolio summary" hidden></section>
 <div id="finder-form" class="finder-form" role="group" aria-label="Find instruments" hidden><label>Find an instrument<input id="finder-query" type="search" placeholder="Enter text for the selected search field" required maxlength="200"></label><label>Search by<select id="finder-field"><option value="id">Instrument ID (exchange:symbol)</option><option value="name">Company / instrument name</option><option value="tradingsymbol">Trading symbol</option><option value="isin">ISIN</option><option value="underlying">Underlying</option></select></label><label class="inline-label"><input id="finder-live" type="checkbox">Include current quotes</label><button id="search-submit" type="button">Search instruments</button></div>

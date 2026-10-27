@@ -16,6 +16,7 @@ const app = new App({ name:'Kite', version:'1.1.0' }, {}, { autoResize:true });
 let tool='', args={}, payload=null, rows=[], connected=false, hasResult=false;
 let sortKey='', direction=1, inFlight=false, waiting=false, cancelled=false, errorMessage='';
 let acceptedRevision=-1, refreshSummaryForRequest=true, countTimer;
+let priceBusy=false, priceGeneration=0, priceMessage='';
 let revision=0, expectedArgs=null, pendingCall=null, expandedColumns=false, selected=null, chartNode=null, chartRows=null;
 const modes={holdings:'Holdings',positions:'Positions',margins:'Funds & margins',profile:'Account',historical:'Historical candles',quote:'Quotes',ltp:'Last traded prices',ohlc:'OHLC',search:'Instrument finder'};
 const panelRequests=new PanelRequests((...params)=>app.callServerTool(...params),()=>connected&&hasResult&&!waiting&&!cancelled&&Boolean(app.getHostCapabilities()?.serverTools));
@@ -32,6 +33,8 @@ function setBusy(){
   const busy=waiting||inFlight;
   $('content').setAttribute('aria-busy',String(busy));
   $('refresh').disabled=busy||!canCall();
+  $('refresh-prices').disabled=busy||priceBusy||!canCall();
+  $('refresh-prices').textContent=priceBusy?'Refreshing prices…':'Refresh prices';
   const page=payload?.pagination;
   $('previous').disabled=busy||!canCall()||!page||page.from<=0;
   $('next').disabled=busy||!canCall()||!page?.has_more;
@@ -51,6 +54,7 @@ function hostContext(ctx){
   if(!tool&&allowedTools.has(name))tool=name;
 }
 function resetPanels(keepSummary=false){
+  ++priceGeneration;priceBusy=false;priceMessage='';panelRequests.cancel('prices');
   inspector.clear();if(!keepSummary||!summary.data)summary.clear();panelRequests.reset();chartNode?.dispose();chartNode=null;chartRows=null;
 }
 function statePanel(title,description,retry=false){
@@ -82,7 +86,7 @@ function populateFilters(){
 }
 function renderTable(visible,container){
   const all=columnsFor(rows);
-  const defaults=args.mode==='historical'?['date','timestamp','open','high','low','close','volume','oi']:args.mode==='search'?['tradingsymbol','exchange','instrument_type','expiry_date','expiry','strike','lot_size','last_price']:['instrument','tradingsymbol','exchange','product','quantity','t1_quantity','average_price','last_price','pnl','net_change','field','value'];
+  const defaults=args.mode==='historical'?['date','timestamp','open','high','low','close','volume','oi']:args.mode==='search'?['tradingsymbol','exchange','instrument_type','expiry_date','expiry','strike','lot_size','last_price','latest_price','latest_quote_timestamp']:['instrument','tradingsymbol','exchange','product','quantity','t1_quantity','average_price','last_price','latest_price','latest_quote_timestamp','pnl','net_change','field','value'];
   const primary=all.filter(key=>defaults.includes(key));
   const columns=expandedColumns||!primary.length?all.filter(key=>key!=='view'):primary;
   $('columns').hidden=all.filter(key=>key!=='view').length<=primary.length;
@@ -119,6 +123,9 @@ function renderTable(visible,container){
   table.append(body);const scroll=el('div',null,'scroll data-table');scroll.tabIndex=0;scroll.setAttribute('role','region');scroll.setAttribute('aria-label','Scrollable snapshot table');scroll.append(table);container.append(scroll);
 }
 function render(){
+  $('price-refresh').hidden=!['holdings','positions','search'].includes(args.mode)||!rows.some(instrumentRef)||waiting||Boolean(errorMessage)||cancelled;
+  $('price-status').hidden=$('price-refresh').hidden||!priceMessage;
+  $('price-status').textContent=priceMessage;
   $('title').textContent=modes[args.mode]||(args.mode?columnLabel(args.mode):'Kite');
   const previousScroll=$('content').querySelector('.data-table');const scrollLeft=previousScroll?.scrollLeft||0,scrollTop=previousScroll?.scrollTop||0;
   const focusedKey=document.activeElement?.dataset?.sortKey;
@@ -208,6 +215,30 @@ async function call(nextArgs,{refreshSummary=true}={}){
   catch(error){if(revision===current){waiting=false;hasResult=true;errorMessage=error.message;payload=null;rows=[];render();status(`Could not load snapshot: ${error.message}`,true);}}
   finally{if(pendingCall===operation){pendingCall=null;inFlight=false;setBusy();}}
 }
+$('refresh-prices').onclick=async()=>{
+  if(priceBusy||waiting||inFlight||!canCall())return;
+  const instruments=[...new Set(rows.map(row=>instrumentRef(row)?.id).filter(Boolean))];
+  if(!instruments.length)return;
+  const generation=++priceGeneration;priceBusy=true;priceMessage='Requesting quotes for this page…';render();
+  try {
+    const quotes=new Map();
+    for(let from=0;from<instruments.length;from+=500){
+      const result=await panelRequests.run('prices','market',{mode:'quote',instruments:instruments.slice(from,from+500)});
+      if(generation!==priceGeneration)return;
+      for(const quote of rowsFor(result))if(finite(quote.last_price))quotes.set(instrumentRef(quote)?.id,quote);
+    }
+    rows=rows.map(row=>{
+      const {latest_price,latest_quote_timestamp,...snapshot}=row;
+      const quote=quotes.get(instrumentRef(row)?.id);
+      return quote?{...snapshot,latest_price:quote.last_price,latest_quote_timestamp:quote.timestamp||quote.quote_timestamp||null}:snapshot;
+    });
+    const missing=instruments.filter(id=>!quotes.has(id));
+    priceMessage=`Quotes received ${receivedTime()} · ${instruments.length-missing.length}/${instruments.length} instruments. Portfolio totals and P&L are unchanged.${missing.length?' Unavailable: '+missing.join(', ')+'.':''}`;
+  }catch(error){
+    if(generation!==priceGeneration||error.name==='AbortError')return;
+    priceMessage=`Price refresh failed: ${error.message}. Any displayed quotes are previous snapshots.`;
+  }finally{if(generation===priceGeneration){priceBusy=false;render();}}
+};
 $('refresh').onclick=()=>call({...args});
 $('previous').onclick=()=>payload?.pagination&&call(pageArguments(args,payload.pagination,-1),{refreshSummary:false});
 $('next').onclick=()=>payload?.pagination&&call(pageArguments(args,payload.pagination,1),{refreshSummary:false});

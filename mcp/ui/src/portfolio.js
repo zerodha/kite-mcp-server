@@ -66,6 +66,7 @@ export function instrumentList(rows,mode,select,selected){
       const change=finite(row.last_price)&&finite(row.ohlc?.close)?row.last_price-row.ohlc.close:null;
       if(finite(change))right.append(el('span',`${formatCell(change,'price_change')} (${row.ohlc.close?formatCell(change/row.ohlc.close*100,'return_percent'):'—'})`,tone(change)));
     }
+    if(finite(row.latest_price)){right.append(el('span',`Latest ${formatCell(row.latest_price,'last_price')}`));if(row.latest_quote_timestamp)right.append(el('span',`As of ${row.latest_quote_timestamp}`,'muted'));}
     button.append(left,right);wrapper.append(button);group.append(wrapper);
   }
   return list;

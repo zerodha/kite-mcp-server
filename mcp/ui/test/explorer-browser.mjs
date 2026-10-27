@@ -73,6 +73,22 @@ try{
  assert.match(await app.locator('#account-summary').textContent(),/\+25,000.00/);
  assert.equal(await app.locator('.primary .data-table tbody tr').count(),2);
  assert.equal(await page.evaluate(()=>window.calls.filter(call=>call.arguments.type==='summary').length),1);
+ // Batch price refresh must preserve portfolio figures and identify partial results.
+ await page.evaluate(()=>window.depthPrice=1600);
+ await app.getByRole('button',{name:'Refresh prices',exact:true}).click();
+ await app.locator('#price-status').filter({hasText:'1/2 instruments'}).waitFor();
+ assert.match(await app.locator('#price-status').textContent(),/Unavailable: NSE:TCS/);
+ assert.match(await app.locator('#content').textContent(),/1,600.00/);
+ assert.match(await app.locator('#content').textContent(),/1,832.50/);
+ assert.match(await app.locator('#account-summary').textContent(),/25,000.00/);
+ assert.deepEqual(await page.evaluate(()=>window.calls.find(call=>call.arguments.mode==='quote').arguments.instruments),['NSE:INFY','NSE:TCS']);
+ await capture('price-refresh-desktop');
+ await page.setViewportSize({width:444,height:1100});await capture('price-refresh-mobile');await page.setViewportSize({width:1180,height:1050});
+ await page.evaluate(()=>window.failQuote=true);
+ await app.getByRole('button',{name:'Refresh prices',exact:true}).click();
+ await app.locator('#price-status').filter({hasText:'previous snapshots'}).waitFor();
+ assert.match(await app.locator('#content').textContent(),/1,600.00/);
+ await page.evaluate(()=>delete window.depthPrice);
  // Summary input and metadata-free result echoes can arrive after its response.
  await page.evaluate(()=>{const {args,result}=window.responses.find(item=>item.args.type==='summary');window.send('ui/notifications/tool-input',{arguments:args});const copy=structuredClone(result);delete copy._meta;window.send('ui/notifications/tool-result',copy);});
  await page.waitForTimeout(50);assert.equal(await app.locator('#title').textContent(),'Holdings');
@@ -269,7 +285,7 @@ try{
  await capture('explorer-funds-desktop');
  // A later chat request may repeat a panel query and even return the same data.
  await page.evaluate(()=>{
-  const previous=window.responses.find(item=>item.args.mode==='quote'&&item.args.instruments[0]==='NSE:INFY');
+  const previous=window.responses.find(item=>item.args.mode==='quote'&&item.args.instruments.length===1&&item.args.instruments[0]==='NSE:INFY');
   const args={mode:'quote',instruments:['NSE:INFY']};window.emit('market',args,previous.result.structuredContent);
  });
  await app.getByRole('heading',{name:'Quotes',exact:true}).waitFor();
@@ -277,7 +293,7 @@ try{
  await page.evaluate(()=>window.send('ui/notifications/tool-input',{arguments:{mode:'quote',instruments:['NSE:INFY']}}));
  await app.getByText('Loading snapshot',{exact:true}).waitFor();
  await page.evaluate(()=>{
-  const previous=window.responses.find(item=>item.args.mode==='quote'&&item.args.instruments[0]==='NSE:INFY');
+  const previous=window.responses.find(item=>item.args.mode==='quote'&&item.args.instruments.length===1&&item.args.instruments[0]==='NSE:INFY');
   const copy=structuredClone(previous.result);delete copy._meta;window.send('ui/notifications/tool-result',copy);
  });
  await app.locator('.primary .data-views').waitFor();
