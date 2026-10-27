@@ -12,7 +12,7 @@ $('view-options').open=!compactControls.matches;
 let disclosureChosen=false;
 $('view-options').querySelector('summary').addEventListener('click',()=>{disclosureChosen=true;});
 compactControls.addEventListener('change',()=>{if(!disclosureChosen)$('view-options').open=!compactControls.matches;});
-const app = new App({ name:'Kite explorer', version:'1.1.0' }, {}, { autoResize:true });
+const app = new App({ name:'Kite', version:'1.1.0' }, {}, { autoResize:true });
 let tool='', args={}, payload=null, rows=[], connected=false, hasResult=false;
 let sortKey='', direction=1, inFlight=false, waiting=false, cancelled=false, errorMessage='';
 let acceptedRevision=-1, refreshSummaryForRequest=true, countTimer;
@@ -119,7 +119,7 @@ function renderTable(visible,container){
   table.append(body);const scroll=el('div',null,'scroll data-table');scroll.tabIndex=0;scroll.setAttribute('role','region');scroll.setAttribute('aria-label','Scrollable snapshot table');scroll.append(table);container.append(scroll);
 }
 function render(){
-  $('title').textContent=modes[args.mode]||(args.mode?columnLabel(args.mode):'Kite explorer');
+  $('title').textContent=modes[args.mode]||(args.mode?columnLabel(args.mode):'Kite');
   const previousScroll=$('content').querySelector('.data-table');const scrollLeft=previousScroll?.scrollLeft||0,scrollTop=previousScroll?.scrollTop||0;
   const focusedKey=document.activeElement?.dataset?.sortKey;
   $('content').replaceChildren();
