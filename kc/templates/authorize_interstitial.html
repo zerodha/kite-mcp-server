@@ -1,13 +1,19 @@
+{{define "card-class"}}card-consent{{end}}
+
 {{define "content"}}
 <div>
     <h1>Authorize MCP client</h1>
-    <div class="status">Review and continue</div>
-    <p>Client: <strong style="overflow-wrap:anywhere">{{.ClientName}}</strong> (client-provided name).</p>
-    <p>Return address: <strong style="overflow-wrap:anywhere">{{.RedirectURI}}</strong></p>
-    <p>This client requests access to the Kite Connect API through your account:
-       profile, balances, holdings, positions, market data, and enabled trading tools.
-       The default scope grants all enabled tools; additional trade confirmations are requested when the client supports them.</p>
-    <p>Approve only if you recognize this client and its return address. You will then sign in on Kite.</p>
+    <p class="consent-intro">Review this client’s access before signing in to Kite.</p>
+    <dl class="client-details">
+        <dt>Client</dt>
+        <dd><strong>{{.ClientName}}</strong><small>This name is provided by the client.</small></dd>
+        <dt>Return address</dt>
+        <dd>{{.RedirectURI}}</dd>
+    </dl>
+    <h2>Requested access</h2>
+    <p>This client requests access to your profile, balances, holdings, positions, market data, and enabled trading tools through the Kite Connect API.</p>
+    <p>Approval grants access to all enabled tools. Additional trade confirmations depend on client support.</p>
+    <p>Continue only if you recognize this client and its return address. You’ll sign in to Kite next.</p>
     <p class="disclaimer">
         <strong>Disclaimer</strong>
         AI systems are unpredictable and non-deterministic. By continuing, you agree to interact with your Zerodha account via AI at your own risk.
@@ -15,7 +21,7 @@
     <form method="post" action="/authorize" class="actions">
         <input type="hidden" name="flow" value="{{.Flow}}">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <button type="submit" name="decision" value="approve" class="button">Approve and continue to Kite login</button>
+        <button type="submit" name="decision" value="approve" class="button">Approve and continue</button>
         <button type="submit" name="decision" value="deny" class="button button-secondary">Decline</button>
     </form>
 </div>

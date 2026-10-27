@@ -38,6 +38,17 @@
                 margin: 60px auto 40px;
                 text-align: center;
             }
+            .card-consent { width: 560px; max-width: calc(100% - 40px); text-align: left; }
+            .card-consent .brand { text-align: center; margin-bottom: 24px; }
+            .card-consent h1 { margin-bottom: 8px; }
+            .consent-intro { margin-bottom: 24px; }
+            .client-details { margin: 0 0 24px; padding: 16px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; }
+            .client-details dt { font-size: 12px; color: #666; margin-bottom: 4px; }
+            .client-details dd { margin: 0; overflow-wrap: anywhere; }
+            .client-details dd + dt { margin-top: 16px; }
+            .client-details small { display: block; margin-top: 4px; font-size: 12px; color: #666; }
+            .card-consent h2 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+            .card-consent .disclaimer { margin-bottom: 24px; }
             .brand { margin-bottom: 30px; }
             .brand img { vertical-align: baseline; }
             h1 {
@@ -106,12 +117,13 @@
             }
             @media (max-width: 550px) {
                 .card { width: 100%; margin: 0 auto 30px; padding: 40px 30px 20px; }
+                .card-consent { max-width: 100%; padding: 32px 24px 24px; }
                 .footer { width: 100%; }
             }
         </style>
     </head>
     <body>
-        <main class="card">
+        <main class="card {{block "card-class" .}}{{end}}">
             <header class="brand">{{template "kite-logo" .}}</header>
             {{template "content" .}}
         </main>

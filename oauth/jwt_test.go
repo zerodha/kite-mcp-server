@@ -344,7 +344,7 @@ func TestRegisteredClientCanAuthorize(t *testing.T) {
 	query := url.Values{"client_id": {client.ID}, "redirect_uri": {"https://new-client.example/callback"}, "code_challenge": {"challenge"}, "code_challenge_method": {"S256"}}
 	resp := httptest.NewRecorder()
 	h.HandleAuthorize(resp, httptest.NewRequest(http.MethodGet, "/authorize?"+query.Encode(), nil))
-	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), "Approve and continue to Kite login") {
+	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), "Approve and continue") {
 		t.Fatalf("registered authorization: %d %s", resp.Code, resp.Body.String())
 	}
 }
