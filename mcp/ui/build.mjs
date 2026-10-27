@@ -24,5 +24,11 @@ for (const directory of [...packages].sort()) {
   for (const file of files) notices.push(`${pkg.name}@${pkg.version} — ${file}\n${await readFile(join(directory, file), 'utf8')}`);
 }
 const template = await readFile(new URL('src/index.html', root), 'utf8');
+const brandAssets = await readFile(new URL('../../kc/templates/brand_assets.html', root), 'utf8');
+const fontFace = brandAssets.match(/@font-face\s*\{[^}]+\}/)?.[0];
+if (!fontFace) throw new Error('Missing embedded Open Sans font');
+const kiteStyles = await readFile(new URL('src/kite.css', root), 'utf8');
+const styledTemplate = template.replace('<!-- APP_STYLES -->', () => `<style>${fontFace}\n${kiteStyles}</style>`);
+notices.push(`Open Sans — SIL Open Font License\n${await readFile(new URL('../../kc/templates/OpenSans-OFL.txt', root), 'utf8')}`);
 const script = (`/*! Third-party notices\n${notices.join('\n\n').replace(/[ \t]+$/gm, '')}\n*/\n` + result.outputFiles[0].text).replace(/<\/script/gi, '<\\/script');
-await writeFile(new URL('app.html', root), template.replace('<!-- APP_SCRIPT -->', () => `<script>${script}</script>`));
+await writeFile(new URL('app.html', root), styledTemplate.replace('<!-- APP_SCRIPT -->', () => `<script>${script}</script>`));

@@ -33,10 +33,15 @@ export function priceChart(rows, label = 'Historical prices') {
     const ctx = canvas.getContext('2d'); if (!ctx) return;
     ctx.scale(ratio, ratio);
     const style = getComputedStyle(document.documentElement);
-    const muted = style.getPropertyValue('--color-text-secondary').trim() || '#657083';
-    const positive = style.getPropertyValue('--positive').trim() || '#16805b';
-    const negative = style.getPropertyValue('--negative').trim() || '#c43d49';
-    const accent = style.getPropertyValue('--accent').trim() || '#b94327';
+    // Resolve host variables through CSS before assigning canvas colors;
+    // custom properties can contain light-dark() or nested var() values.
+    const probe=el('span');probe.hidden=true;root.append(probe);
+    const color=(token,fallback)=>{probe.style.color=`var(${token},${fallback})`;return getComputedStyle(probe).color;};
+    const muted=color('--color-text-secondary','#737373');
+    const positive=color('--positive','#2e7d32');
+    const negative=color('--negative','#c44742');
+    const accent=color('--accent','#ff5722');
+    probe.remove();
     const left = 8, right = width - 72, top = 12, bottom = 168;
     const lows = points.map(p=>type.value==='candles' ? p.low : p.close);
     const highs = points.map(p=>type.value==='candles' ? p.high : p.close);
@@ -44,7 +49,7 @@ export function priceChart(rows, label = 'Historical prices') {
     const min = low-pad, max=high+pad, xStep=(right-left)/points.length;
     const x = index => left + (index+.5)*xStep;
     const y = value => bottom-(value-min)/(max-min)*(bottom-top);
-    ctx.font = '11px system-ui'; ctx.fillStyle=muted;
+    ctx.font = `11px ${style.fontFamily}`; ctx.fillStyle=muted;
     for (let i=0;i<4;i++) {
       const price=min+(max-min)*i/3, yy=y(price);
       ctx.globalAlpha=.16; ctx.strokeStyle=muted; ctx.beginPath();ctx.moveTo(left,yy);ctx.lineTo(right,yy);ctx.stroke();ctx.globalAlpha=1;
@@ -86,5 +91,6 @@ export function priceChart(rows, label = 'Historical prices') {
   const observer=new ResizeObserver(draw);observer.observe(canvas);
   const themeObserver=new MutationObserver(draw);themeObserver.observe(document.documentElement,{attributes:true,attributeFilter:['style','data-theme']});
   root.dispose=()=>{observer.disconnect();themeObserver.disconnect();};
+  document.fonts?.ready.then(()=>{if(root.isConnected)draw();});
   describe(); return root;
 }

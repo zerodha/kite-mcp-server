@@ -108,7 +108,7 @@ var gttSchema = json.RawMessage(`{
 
 func (*GTTTool) Definition() *mcp.Tool {
 	return NewTool("gtt",
-		"List mode returns data/pagination with default limit 100 and maximum 500. Manage GTT (Good Till Triggered) orders that persist across trading sessions and execute when a price condition is met. Use mode=list to see all GTTs, mode=place to create a new GTT (single-leg or two-leg OCO), mode=modify to update an existing GTT, mode=delete to remove a GTT.",
+		"List mode returns data/pagination with default limit 100 and maximum 500. Manage GTT (Good Till Triggered) orders that persist across trading sessions and execute when a price condition is met. Use mode=list to see all GTTs, mode=place to create a new GTT (single-leg or two-leg OCO), mode=modify to update an existing GTT, mode=delete to remove a GTT. To show a read-only interactive GTT monitor with trigger distances, use open_kite_view when available with view=gtt. Continue to use gtt directly for mutations.",
 		gttSchema,
 	)
 }

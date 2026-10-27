@@ -27,8 +27,8 @@ var marketSchema = json.RawMessage(`{
 		},
 		"mode": {
 			"type": "string",
-			"description": "Operation mode: quote=full market data snapshot (OHLC, depth, OI), ltp=last traded price only, ohlc=today's open/high/low/close, historical=historical OHLC candles, search=search instrument master list",
-			"enum": ["quote", "ltp", "ohlc", "historical", "search"]
+			"description": "Operation mode: quote=full market data snapshot (OHLC, depth, OI), ltp=last traded price only, ohlc=today's open/high/low/close, historical=historical OHLC candles, search=search instrument master list, option_chain=complete indexed option chain by underlying and expiry",
+			"enum": ["quote", "ltp", "ohlc", "historical", "search", "option_chain"]
 		},
 		"instruments": {
 			"type": "array",
@@ -91,8 +91,20 @@ var marketSchema = json.RawMessage(`{
 		},
 		"exchange": {
 			"type": "string",
-			"description": "Exchange code (for search_mode=get_by_tradingsymbol and get_by_exch_token)"
+			"description": "Exchange code for exact search; option_chain supports NFO/NSE or BFO/BSE, default NFO"
 		},
+        "underlying": {
+            "type": "string", "minLength": 1, "maxLength": 200,
+            "description": "Option-chain underlying name or symbol, e.g. NIFTY, NIFTY 50, BANKNIFTY, RELIANCE, SENSEX. Required for option_chain."
+        },
+        "expiry": {
+            "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "description": "Option-chain expiry YYYY-MM-DD; omitted selects nearest valid unexpired expiry."
+        },
+        "snapshot": {
+            "type": "string", "maxLength": 80,
+            "description": "Option-chain catalog_revision returned on the first page; send on subsequent pages to reject mixed catalog revisions."
+        },
 		"tradingsymbol": {
 			"type": "string",
 			"description": "Trading symbol (for search_mode=get_by_tradingsymbol)"
@@ -114,7 +126,7 @@ var marketSchema = json.RawMessage(`{
 			"minimum": 0,
 			"maximum": 2147483647,
 			"default": 0,
-			"description": "Starting index for pagination (0-based). Applies to search mode. Default: 0"
+			"description": "Starting index for pagination (0-based). Applies to search results or option_chain strike rows. Default: 0"
 		},
 		"limit": {
 			"type": "integer",
@@ -134,7 +146,7 @@ var marketSchema = json.RawMessage(`{
 
 func (*MarketTool) Definition() *mcp.Tool {
 	tool := NewTool("market",
-		"Retrieve market data and search instruments. Use mode=quote for full market snapshots (OHLC, volume, bid/ask depth, OI) for up to 500 instruments, mode=ltp for last traded price only (lighter), mode=ohlc for today's OHLC, mode=historical for historical candle data, mode=search to find instruments by name, symbol, ISIN, or token across all exchanges. Search returns data/pagination/meta, sorted by ID then token, with default limit 100 and maximum 500. Quote/LTP/OHLC return data/meta with missing_instruments; entirely unresolved requests return an error. Search results come from the BOD instrument master by default; set include_live_quote=true to enrich returned results with live quote fields and quote_timestamp.",
+		"Retrieve market data and search instruments. Use mode=option_chain with underlying and optional exchange/expiry to discover a complete indexed option chain, paginated by strike with expiries, spot and future references; fetch quotes separately. Use mode=quote for full market snapshots (OHLC, volume, bid/ask depth, OI) for up to 500 instruments, mode=ltp for last traded price only (lighter), mode=ohlc for today's OHLC, mode=historical for historical candle data, mode=search to find instruments by name, symbol, ISIN, or token across all exchanges. Search returns data/pagination/meta, sorted by ID then token, with default limit 100 and maximum 500. Quote/LTP/OHLC return data/meta with missing_instruments; entirely unresolved requests return an error. Search results come from the BOD instrument master by default; set include_live_quote=true to enrich returned results with live quote fields and quote_timestamp. For an interactive option chain, quote, historical chart, or instrument finder, use open_kite_view when available with view=option_chain, quote, historical, or search.",
 		marketSchema,
 	)
 	// Negotiated protocols through 2025-11-25 require object output schemas
@@ -228,11 +240,14 @@ func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 				}, "market_historical")
 			})
 
+		case "option_chain":
+			return handleMarketOptionChain(handler, manager, args)
+
 		case "search":
 			return handleMarketSearch(handler, manager, args, request)
 
 		default:
-			return NewToolResultError("Invalid mode. Must be one of: quote, ltp, ohlc, historical, search"), nil
+			return NewToolResultError("Invalid mode. Must be one of: quote, ltp, ohlc, historical, search, option_chain"), nil
 		}
 	}
 }

@@ -1,19 +1,45 @@
 # MCP Apps
 
-Kite's `portfolio` and `market` tools include an inline, read-only explorer in clients supporting the standard `io.modelcontextprotocol/ui` extension. Connect to the same `/mcp` endpoint and authenticate normally; no separate website, browser API key, or UI server is needed.
+Kite's `portfolio` and `market` tools include an inline, read-only Kite app in clients supporting the standard `io.modelcontextprotocol/ui` extension. Connect to the same `/mcp` endpoint and authenticate normally; no separate website, browser API key, or UI server is needed.
 
-Ask for holdings, positions, quotes, instrument search, funds, or historical data. The explorer uses compact instrument rows on mobile, with a table option and local filtering/sorting on desktop. Selecting a holding, position, quote, or search result opens a linked instrument inspector; the list stays alongside it on wide screens. On narrow screens, Back to list returns to the original results.
+Ask for holdings, positions, quotes, instrument search, funds, or historical data. The app uses compact instrument rows on mobile, with a table option and local filtering/sorting on desktop. Selecting a holding, position, quote, or search result opens a linked instrument inspector; the list stays alongside it on wide screens. On narrow screens, Back to list returns to the original results.
 
 - **Portfolio overview:** holdings automatically request the unpaginated holdings summary for invested amount, current value, total P&L, and today's P&L. These account-wide totals are fetched separately and do not change with page filters. Pagination reuses the current summary and its original receipt time; an explicit Refresh fetches a new summary once. Row-level P&L totals are explicitly scoped to the shown rows.
 - **Instrument inspector:** Overview shows portfolio details and quote statistics, including the day's range, previous close, volume, circuits, and OI where supplied. Depth shows up to five bid/offer levels with quantities and order counts. Details exposes the original data in expandable sections.
 - **Linked charts:** Chart requests historical data for the selected instrument token, dates, and interval. Candles include volume when present; incomplete OHLC responses fall back to a closing-price line. Left/Right, Home, and End inspect candle values with the keyboard. The full candle values remain accessible in a table.
 - **Positions:** product, direction, quantity, realised/unrealised P&L, and open/closed status remain distinguishable. Local status filters can select open, closed, long, or short positions.
 - **Instrument finder:** choose the server search field (instrument ID, company name, trading symbol, ISIN, or underlying), then submit a search, optionally including current quotes, or filter the current page by exchange, type, and expiry. Load contract details requests full verbosity when the original result was compact. The selected search field is retained from chat requests. Searches use the server’s literal matching rules; spaces are not interpreted as separate search terms. Contract lists group by the supplied expiry; absent expiry, strike, or lot-size fields are not inferred from symbol text.
+- **Holdings allocation:** a collapsible treemap sizes shown holdings by current value, invested amount, or absolute P&L. Values use the portfolio snapshot; filters and pagination define its coverage.
+- **Position P&L chart:** diverging bars show gains and losses for the selected Day or Net view, keeping products separate.
+- **Orders:** a paginated order book shows fill progress, rejection reasons, status history, and fills through read-only requests.
+- **GTT monitor:** trigger legs and status, with optional current quotes and signed percentage distance from the quote to each trigger.
+- **Option chain:** server-indexed NFO/BFO underlying discovery, expiry selection, paired call/put strikes, OI, volume, bid/ask, and LTP. Every strike page for the selected expiry is loaded from one pinned catalog revision; there is no instrument-search cap. Real underlying and same-expiry future references are quoted separately when available. Quotes are batched in groups of at most 500. Mobile defaults to call LTP, strike, and put LTP, with a full-details toggle.
 - **Funds:** equity and commodity segments show available margin, cash, collateral, debits, and an expandable breakdown. Disabled segments are labelled explicitly.
 
-Paginated responses include Previous and Next controls. Refresh repeats the current request, including its page and server filters. Retry retains the attempted request even after a bridge error. New main requests cancel auxiliary panel requests, and late panel results cannot replace the main list or a newer instrument selection. Quote and chart panels have separate receipt times; quote timestamps are shown when supplied by the source.
+Paginated responses include Previous and Next controls. Refresh repeats the current request, including its page and server filters. Retry retains the attempted request even after a bridge error. New main requests cancel auxiliary panel requests, and late panel results cannot replace the main list or a newer instrument selection. Quote requests from the view share a queue with at least 1.1 seconds between starts, including main refreshes and auxiliary quote batches. Waiting requests are cancelled when their view is superseded. This pacing is local to the view; other clients can still share the upstream API quota. Quote and chart panels have separate receipt times; quote timestamps are shown when supplied by the source.
 
-Position views default to **Net exposure**. **Today's activity** is a separate view; they must not be summed. The view selector and text filter apply only to the current page, so another page may contain additional matching positions. Charts use equal candle spacing rather than elapsed-time spacing. It does not stream ticks; every refresh explicitly requests another snapshot.
+Position views default to **Net exposure**. **Today's activity** is a separate view; they must not be summed. The view selector and text filter apply only to the current page, so another page may contain additional matching positions. Charts use equal candle spacing rather than elapsed-time spacing. It does not stream ticks; every refresh explicitly requests another snapshot. Refresh prices fetches quotes for the current page and adds separate latest-price fields; portfolio P&L and account totals remain tied to their original snapshot.
+
+## Opening a view from chat
+
+Apps-capable clients receive the model-visible, read-only `open_kite_view` tool.
+Its view selector supports `holdings`, `positions`, `funds`, `orders`, `gtt`,
+`option_chain`, `quote`, `historical`, and `search`. The result includes both the
+initial data and the UI resource link, so the client can open the requested
+screen directly. For example:
+
+```json
+{"view":"orders"}
+{"view":"option_chain","underlying":"NIFTY","exchange":"NFO"}
+{"view":"search","query":"Infosys","filter_on":"name"}
+```
+
+Tool descriptions, server instructions, and workflow help identify when to use
+these views. Refresh/pagination aliases and the sidebar launcher remain app-only.
+The view tool is omitted for clients without Apps support; ordinary data tools
+continue to provide text results. Excluding a source tool removes its views from
+the selector and also blocks those views at runtime. Hosts still control UI
+rendering; discoverability does not guarantee model selection on every request.
 
 ## Clients
 
@@ -42,7 +68,7 @@ The UI resource declares support for inline and fullscreen display, preferring i
 
 Prices retain up to four fractional digits so currency ticks and depth levels remain distinguishable; monetary totals use two decimals. Holdings derive invested/current values from settled quantity plus T1 quantity, with the T1 portion shown separately. Source fields in Details remain unmodified.
 
-The view calls only `portfolio` and `market`, through the host's `tools/call` proxy. Panel requests use separate cancellation slots for summary, quote, and history. They also supply an optional `_app_request_id` correlation argument, declared by both read-tool schemas and returned in the existing result argument metadata. Ordinary chat callers omit this field, so a fresh chat query can repeat a panel query without being mistaken for an echoed notification. Hosts without `serverTools` can still display supplied snapshots and source details; additional requests are disabled with an explanation. OAuth and account-session checks remain in the existing server path. It never receives a Kite API secret or token. Both CSP network and resource domain lists are empty, and all upstream strings are rendered as text. There are no external fonts, scripts, analytics, or direct Kite API calls.
+The view calls `portfolio`, `market`, and the app-only `orders_read` and `gtt_read` tools through the host's `tools/call` proxy. Orders and GTT aliases enforce a server-side read-mode allowlist and respect exclusion of their underlying tools. Panel requests use separate cancellation slots for summaries, quotes, history, and widget reads. They also supply an optional `_app_request_id` correlation argument, declared by the read-tool schemas and returned in the existing result argument metadata. Ordinary chat callers omit this field, so a fresh chat query can repeat a panel query without being mistaken for an echoed notification. Hosts without `serverTools` can still display supplied snapshots and source details; additional requests are disabled with an explanation. OAuth and account-session checks remain in the existing server path. It never receives a Kite API secret or token. Both CSP network and resource domain lists are empty, and all upstream strings are rendered as text. There are no external fonts, scripts, analytics, or direct Kite API calls.
 
 MCP Apps is additive to the server's negotiated protocol versions, including
 `2026-07-28` and `2025-11-25`. Trade approval uses multi-round-trip input requests

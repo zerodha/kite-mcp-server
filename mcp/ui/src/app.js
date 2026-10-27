@@ -3,8 +3,12 @@ import { allowedTools, requestKey, readResult, rowsFor, columnsFor, visibleRows,
 import { el, action, detailList } from './dom.js';
 import { PanelRequests } from './requests.js';
 import { Inspector } from './inspector.js';
-import { PortfolioSummary, instrumentList, fundsView } from './portfolio.js';
+import { portfolioChart, PortfolioSummary, instrumentList, fundsView } from './portfolio.js';
 import { priceChart } from './chart.js';
+
+import { OrderBook } from './orders.js';
+import { GTTMonitor } from './gtt.js';
+import { OptionChain } from './option-chain.js';
 
 const $ = id => document.getElementById(id);
 const compactControls=window.matchMedia('(max-width:600px)');
@@ -20,6 +24,21 @@ let priceBusy=false, priceGeneration=0, priceMessage='';
 let revision=0, expectedArgs=null, pendingCall=null, expandedColumns=false, selected=null, chartNode=null, chartRows=null;
 const modes={holdings:'Holdings',positions:'Positions',margins:'Funds & margins',profile:'Account',historical:'Historical candles',quote:'Quotes',ltp:'Last traded prices',ohlc:'OHLC',search:'Instrument finder'};
 const panelRequests=new PanelRequests((...params)=>app.callServerTool(...params),()=>connected&&hasResult&&!waiting&&!cancelled&&Boolean(app.getHostCapabilities()?.serverTools));
+let activeWidget='snapshot';
+const chartStates=new Map();
+const orderBook=new OrderBook($('orders-view'),panelRequests);
+const gttMonitor=new GTTMonitor($('gtt-view'),panelRequests);
+const optionChain=new OptionChain($('options-view'),panelRequests);
+function showWidget(view){
+  activeWidget=view;
+  $('snapshot-view').hidden=view!=='snapshot';
+  for(const name of ['orders','gtt','options'])$(name+'-view').hidden=view!==name;
+  const current=view==='snapshot'?args.mode:view;
+  for(const button of $('widget-nav').querySelectorAll('button'))button.setAttribute('aria-pressed',String(button.dataset.widget===current));
+  $('refresh-prices').closest('#price-refresh').hidden=view!=='snapshot'||!['holdings','positions','search'].includes(args.mode)||!rows.some(instrumentRef);
+  if(view!=='snapshot')$('title').textContent={orders:'Orders',gtt:'GTT',options:'Option chain'}[view];
+  else $('title').textContent=modes[args.mode]||'Kite';
+}
 const summary=new PortfolioSummary($('account-summary'),panelRequests);
 const inspector=new Inspector($('inspector'),panelRequests,key=>{
   selected=key;
@@ -33,6 +52,7 @@ function setBusy(){
   const busy=waiting||inFlight;
   $('content').setAttribute('aria-busy',String(busy));
   $('refresh').disabled=busy||!canCall();
+  for(const button of $('widget-nav').querySelectorAll('button'))button.disabled=busy||!canCall();
   $('refresh-prices').disabled=busy||priceBusy||!canCall();
   $('refresh-prices').textContent=priceBusy?'Refreshing prices…':'Refresh prices';
   const page=payload?.pagination;
@@ -47,7 +67,7 @@ function hostContext(ctx){
   if(ctx?.theme){
     document.documentElement.style.colorScheme=ctx.theme;document.documentElement.dataset.theme=ctx.theme;
     const dark=ctx.theme==='dark';
-    const defaults={'--color-text-primary':dark?'#e2e5ea':'#252a34','--color-text-secondary':dark?'#a4aebf':'#657083','--color-background-primary':dark?'#181b20':'#fff','--color-background-secondary':dark?'#222730':'#f6f7f9','--color-border-primary':dark?'#657083':'#ccd1d9','--color-border-secondary':dark?'#343b47':'#e8ebef'};
+    const defaults={'--color-text-primary':dark?'#bbb':'#444','--color-text-secondary':dark?'#a4a4a4':'#737373','--color-background-primary':dark?'#121212':'#fff','--color-background-secondary':dark?'#1e1e1e':'#f8f8f8','--color-border-primary':dark?'#444':'#ddd','--color-border-secondary':dark?'#303030':'#eee'};
     for(const [key,value] of Object.entries(defaults))if(!ctx.styles?.variables?.[key])document.documentElement.style.setProperty(key,value);
   }
   const name=ctx?.toolInfo?.tool?.name;
@@ -123,6 +143,8 @@ function renderTable(visible,container){
   table.append(body);const scroll=el('div',null,'scroll data-table');scroll.tabIndex=0;scroll.setAttribute('role','region');scroll.setAttribute('aria-label','Scrollable snapshot table');scroll.append(table);container.append(scroll);
 }
 function render(){
+  const previousChart=$('content').querySelector('.portfolio-chart');
+  if(previousChart)chartStates.set(previousChart.dataset.mode,{open:previousChart.open,basis:previousChart.querySelector('select')?.value});
   $('price-refresh').hidden=!['holdings','positions','search'].includes(args.mode)||!rows.some(instrumentRef)||waiting||Boolean(errorMessage)||cancelled;
   $('price-status').hidden=$('price-refresh').hidden||!priceMessage;
   $('price-status').textContent=priceMessage;
@@ -152,6 +174,13 @@ function render(){
       if(chartRows!==rows){chartNode?.dispose();chartNode=priceChart(rows);chartRows=rows;}
       $('content').append(chartNode);
     }
+    const chart=portfolioChart(visible,args.mode,openInstrument);
+    if(chart){
+      chart.dataset.mode=args.mode;
+      const saved=chartStates.get(args.mode);
+      if(saved){chart.open=saved.open;const select=chart.querySelector('select');if(select&&saved.basis){select.value=saved.basis;select.onchange();}}
+      $('content').append(chart);
+    }
     if(visible.length&&visible.every(row=>finite(row.pnl))){
       const total=visible.reduce((sum,row)=>sum+row.pnl,0),block=el('div',null,'summary');block.append(el('span',`P&L · shown ${hasViews?$('view').value+' ':''}rows (INR)`,'muted'),el('strong',formatCell(total,'pnl'),tone(total)));$('content').append(block);
     }
@@ -177,22 +206,31 @@ function render(){
   if(args.mode==='historical')notes.push('Chart shows all candles in this snapshot, unaffected by table filters.');
   if(args.mode==='search')notes.push('Instrument-master prices are reference values unless enriched with a timestamped quote. Contract filters apply to this page. Select an instrument for a fresh quote.');
   if(connected&&!app.getHostCapabilities()?.serverTools)notes.push('This host does not support additional requests from the app. Ask for another snapshot in chat.');
-  $('note').textContent=notes.join(' ');setBusy();
+  $('note').textContent=notes.join(' ');showWidget(activeWidget);setBusy();
 }
 function receive(result,fallbackArgs){
   if(cancelled||acceptedRevision===revision)return;
   const info=result._meta?.['trade.kite/app'];
-  // The launcher receives {}, but returns a portfolio snapshot. Its explicit
-  // origin correlates that response even when the host omits toolInfo. Only
-  // an outstanding empty input may accept a launcher result.
-  const launcherResult=info?.origin?.tool==='kite_explorer'&&info.tool==='portfolio'&&
-    expectedArgs&&Object.keys(expectedArgs).length===0&&
-    requestKey(info.origin.arguments)===requestKey(expectedArgs);
+  // A view launcher routes original view arguments to a read tool. Accept
+  // that changed argument shape only when its explicit origin matches input.
+  const launcherResult=expectedArgs&&requestKey(info?.origin?.arguments)===requestKey(expectedArgs)&&(
+    (info?.origin?.tool==='kite_explorer'&&info.tool==='portfolio'&&Object.keys(expectedArgs).length===0)||
+    (info?.origin?.tool==='open_kite_view'&&allowedTools.has(info.tool))
+  );
   if(info&&expectedArgs&&!launcherResult&&requestKey(info.arguments||{})!==requestKey(expectedArgs))return;
   if(info&&allowedTools.has(info.tool)){tool=info.tool;args=info.arguments||{};}else if(fallbackArgs)args=fallbackArgs;
   acceptedRevision=revision;waiting=false;errorMessage='';hasResult=true;
   try{
-    payload=readResult(result);rows=rowsFor(payload);populateFilters();render();
+    payload=readResult(result);
+    if(tool==='orders_read'||tool==='gtt_read'){
+      rows=[];render();const view=tool==='orders_read'?'orders':'gtt';showWidget(view);
+      (view==='orders'?orderBook:gttMonitor).show(payload);status(`${view==='orders'?'Orders':'GTT triggers'} received.`);return;
+    }
+    if(info?.origin?.tool==='open_kite_view'&&['holdings','positions'].includes(args.mode))chartStates.set(args.mode,{open:true,basis:'current'});
+    if(tool==='market'&&args.mode==='option_chain'){
+      rows=[];render();showWidget('options');optionChain.show(payload,args);status('Option chain received.');return;
+    }
+    rows=rowsFor(payload);populateFilters();render();
     const scope=args.mode==='margins'?`${rows.length} account segments`:args.mode==='holdings'&&args.type==='summary'?'Account-wide summary':args.mode==='historical'?`${rows.length} candles`:`${rows.length} rows on this page`;
     status(`Received ${receivedTime()} · ${scope}. Monetary values in INR.`);
     if(tool==='portfolio'&&args.mode==='holdings'){
@@ -211,7 +249,7 @@ async function call(nextArgs,{refreshSummary=true}={}){
   args={...nextArgs};expectedArgs=args;
   const operation={arguments:args,controller:new AbortController()};pendingCall=operation;
   cancelled=false;errorMessage='';waiting=true;inFlight=true;payload=null;rows=[];resetPanels(!refreshSummary&&tool==='portfolio'&&args.mode==='holdings');render();status('Requesting data from Kite…');
-  try{const result=await app.callServerTool({name:requestedTool,arguments:args},{signal:operation.controller.signal});if(revision===current)receive(result,operation.arguments);}
+  try{const result=await panelRequests.callTool({name:requestedTool,arguments:args},{signal:operation.controller.signal});if(revision===current)receive(result,operation.arguments);}
   catch(error){if(revision===current){waiting=false;hasResult=true;errorMessage=error.message;payload=null;rows=[];render();status(`Could not load snapshot: ${error.message}`,true);}}
   finally{if(pendingCall===operation){pendingCall=null;inFlight=false;setBusy();}}
 }
@@ -239,7 +277,29 @@ $('refresh-prices').onclick=async()=>{
     priceMessage=`Price refresh failed: ${error.message}. Any displayed quotes are previous snapshots.`;
   }finally{if(generation===priceGeneration){priceBusy=false;render();}}
 };
-$('refresh').onclick=()=>call({...args});
+$('refresh').onclick=()=>{
+  if(activeWidget==='orders')return orderBook.load(orderBook.from);
+  if(activeWidget==='gtt')return gttMonitor.load(gttMonitor.from);
+  if(activeWidget==='options')return optionChain.refresh();
+  return call({...args});
+};
+for(const button of $('widget-nav').querySelectorAll('button'))button.onclick=()=>{
+  if(!canCall()||waiting||inFlight)return;
+  const view=button.dataset.widget;
+  inspector.clear();orderBook.clear();gttMonitor.clear();optionChain.clear();
+  if(['holdings','positions','margins'].includes(view)){
+    showWidget('snapshot');
+    if(tool==='portfolio'&&args.mode===view){render();return;}
+    $('filter').value='';$('position-state').value='';$('view').value='net';sortKey='';direction=1;
+    for(const id of ['contract-exchange','contract-type','contract-expiry'])$(id).value='';
+    tool='portfolio';call({mode:view,...(view==='margins'?{}:{from:0,limit:100,...(view==='holdings'?{type:'full'}:{})})});
+  }else{
+    showWidget(view);
+    if(view==='orders')orderBook.load();
+    if(view==='gtt')gttMonitor.load();
+    if(view==='options')optionChain.render();
+  }
+};
 $('previous').onclick=()=>payload?.pagination&&call(pageArguments(args,payload.pagination,-1),{refreshSummary:false});
 $('next').onclick=()=>payload?.pagination&&call(pageArguments(args,payload.pagination,1),{refreshSummary:false});
 $('columns').onclick=()=>{expandedColumns=!expandedColumns;render();};
@@ -253,7 +313,7 @@ app.ontoolinput=params=>{
   const nextArgs=params.arguments||{};
   if(panelRequests.ownsInput(nextArgs))return;
   const ownCall=pendingCall&&requestKey(nextArgs)===requestKey(pendingCall.arguments);
-  if(!ownCall){++revision;pendingCall?.controller.abort();pendingCall=null;inFlight=false;}
+  if(!ownCall){orderBook.clear();gttMonitor.clear();optionChain.clear();showWidget('snapshot');++revision;pendingCall?.controller.abort();pendingCall=null;inFlight=false;}
   resetPanels(Boolean(ownCall)&&!refreshSummaryForRequest&&tool==='portfolio'&&nextArgs.mode==='holdings');cancelled=false;errorMessage='';expectedArgs=nextArgs;args=nextArgs;payload=null;rows=[];hasResult=false;waiting=true;
   if(!ownCall){
     refreshSummaryForRequest=true;
@@ -272,7 +332,7 @@ app.ontoolresult=result=>{
   if(panelRequests.ownsResult(result,expectedArgs)&&(!info||requestKey(info.arguments||{})!==requestKey(expectedArgs||{})))return;
   receive(result);
 };
-app.ontoolcancelled=()=>{++revision;waiting=false;hasResult=true;cancelled=true;pendingCall?.controller.abort();payload=null;rows=[];errorMessage='';resetPanels();render();status('Request cancelled. Refresh to retry.',true);};
+app.ontoolcancelled=()=>{orderBook.clear();gttMonitor.clear();optionChain.clear();showWidget('snapshot');++revision;waiting=false;hasResult=true;cancelled=true;pendingCall?.controller.abort();payload=null;rows=[];errorMessage='';resetPanels();render();status('Request cancelled. Refresh to retry.',true);};
 app.onhostcontextchanged=ctx=>hostContext({...app.getHostContext(),...ctx});
-app.onteardown=async()=>{++revision;connected=false;waiting=false;pendingCall?.controller.abort();clearTimeout(countTimer);resetPanels();setBusy();return {};};
+app.onteardown=async()=>{orderBook.clear();gttMonitor.clear();optionChain.clear();++revision;connected=false;waiting=false;pendingCall?.controller.abort();clearTimeout(countTimer);resetPanels();setBusy();return {};};
 app.connect().then(()=>{connected=true;hostContext(app.getHostContext());setBusy();}).catch(error=>{errorMessage=`Could not connect to the MCP Apps host: ${error.message}`;hasResult=true;render();status('Connection failed.',true);});

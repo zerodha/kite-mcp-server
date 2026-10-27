@@ -57,7 +57,7 @@ var portfolioSchema = json.RawMessage(`{
 
 func (*PortfolioTool) Definition() *mcp.Tool {
 	return NewTool("portfolio",
-		"Retrieve portfolio and account information. Use mode=profile for user details (name, email, account type), mode=margins for available funds and margins, mode=holdings for demat holdings with P&L, mode=positions for open intraday and overnight positions. Position rows include view=day for today's activity or view=net for current exposure; do not sum the two views. Full/compact holdings and positions return data/pagination with default limit 100 and maximum 500. Summary holdings are unpaginated.",
+		"Retrieve portfolio and account information. Use mode=profile for user details (name, email, account type), mode=margins for available funds and margins, mode=holdings for demat holdings with P&L, mode=positions for open intraday and overnight positions. Position rows include view=day for today's activity or view=net for current exposure; do not sum the two views. Full/compact holdings and positions return data/pagination with default limit 100 and maximum 500. Summary holdings are unpaginated. For visual holdings allocation, position P&L, or funds views, use open_kite_view when available with view=holdings, positions, or funds.",
 		portfolioSchema,
 	)
 }

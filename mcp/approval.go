@@ -101,7 +101,10 @@ func NewServer(info *mcp.Implementation) *mcp.Server {
 	capabilities.AddExtension(appExtension, map[string]any{})
 	capabilities.AddExtension(skillsExtension, map[string]any{})
 	capabilities.Resources = &mcp.ResourceCapabilities{}
-	server := mcp.NewServer(info, &mcp.ServerOptions{SupportedProtocolVersions: versions, Capabilities: capabilities})
+	server := mcp.NewServer(info, &mcp.ServerOptions{
+		SupportedProtocolVersions: versions, Capabilities: capabilities,
+		Instructions: "When open_kite_view is listed, use it to show interactive Kite views for portfolio allocation, positions, funds, order status and fills, GTT triggers, option chains, quotes, historical charts, or instrument search when the request calls for a visual view. Select its matching view and supply the relevant instrument or underlying arguments. The view tool is read-only; use the existing data tools for text-only analysis and the existing transaction tools for separately authorized mutations. If open_kite_view is unavailable, return results through the ordinary data tools.",
+	})
 	registerTradeApproval(server)
 	registerAppResource(server)
 	registerSkills(server)

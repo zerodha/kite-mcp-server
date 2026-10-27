@@ -58,13 +58,25 @@ func TestAppsMixedClientDiscoveryAndReads(t *testing.T) {
 			require.NoError(t, err)
 			expectedCount := len(GetAllTools()) - 1
 			if index == 0 || index == 3 {
-				expectedCount++
+				expectedCount += 3
 			}
 			require.Len(t, listing.Tools, expectedCount)
 			for _, tool := range listing.Tools {
 				require.NotEqual(t, "orders", tool.Name)
+				if tool.Name == "gtt_read" {
+					require.True(t, tool.Annotations.ReadOnlyHint)
+					require.Equal(t, []any{"app"}, tool.Meta["ui"].(map[string]any)["visibility"])
+					require.NotContains(t, tool.Meta["ui"].(map[string]any), "resourceUri")
+					continue
+				}
+				if tool.Name == viewLauncher {
+					require.True(t, tool.Annotations.ReadOnlyHint)
+					require.Equal(t, appResourceURI, tool.Meta["ui/resourceUri"])
+					require.Equal(t, []any{"model", "app"}, tool.Meta["ui"].(map[string]any)["visibility"])
+					continue
+				}
 				if tool.Name == appLauncher {
-					require.Equal(t, "Kite explorer", tool.Title)
+					require.Equal(t, "Kite", tool.Title)
 					require.True(t, tool.Annotations.ReadOnlyHint)
 					require.Equal(t, []any{"app"}, tool.Meta["ui"].(map[string]any)["visibility"])
 					require.Equal(t, []any{map[string]any{"type": "global"}, map[string]any{"type": "thread"}}, tool.Meta["openai/ui"].(map[string]any)["entrypoints"])
@@ -90,6 +102,13 @@ func TestAppsMixedClientDiscoveryAndReads(t *testing.T) {
 			require.Equal(t, "panel-test-1", info["arguments"].(map[string]any)["_app_request_id"])
 		}
 	}
+
+	viewResult, err := sessions[0].CallTool(ctx, &sdk.CallToolParams{Name: viewLauncher, Arguments: map[string]any{"view": "holdings", "limit": 1}})
+	require.NoError(t, err)
+	require.False(t, viewResult.IsError)
+	viewInfo := viewResult.Meta["trade.kite/app"].(map[string]any)
+	require.Equal(t, "portfolio", viewInfo["tool"])
+	require.Equal(t, map[string]any{"tool": viewLauncher, "arguments": map[string]any{"view": "holdings", "limit": float64(1)}}, viewInfo["origin"])
 	launch, err := sessions[0].CallTool(ctx, &sdk.CallToolParams{Name: appLauncher, Arguments: map[string]any{}})
 	require.NoError(t, err)
 	require.False(t, launch.IsError)
@@ -166,5 +185,29 @@ func TestAppLauncherExclusions(t *testing.T) {
 			_, err = cs.CallTool(ctx, &sdk.CallToolParams{Name: appLauncher, Arguments: map[string]any{}})
 			require.Error(t, err)
 		})
+	}
+}
+
+func TestReadWidgetHandlerRejectsMutations(t *testing.T) {
+	for _, modes := range [][]string{{"list", "history", "trades", "all_trades"}, {"list"}} {
+		calls := 0
+		handler := readWidgetHandler(modes, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			calls++
+			return &sdk.CallToolResult{}, nil
+		})
+		for _, mode := range []string{"place", "modify", "delete", "cancel", ""} {
+			args, _ := json.Marshal(map[string]any{"mode": mode})
+			result, err := handler(context.Background(), &sdk.CallToolRequest{Params: &sdk.CallToolParamsRaw{Arguments: args}})
+			require.NoError(t, err)
+			require.True(t, result.IsError)
+		}
+		require.Zero(t, calls)
+		for _, mode := range modes {
+			args, _ := json.Marshal(map[string]any{"mode": mode})
+			result, err := handler(context.Background(), &sdk.CallToolRequest{Params: &sdk.CallToolParamsRaw{Arguments: args}})
+			require.NoError(t, err)
+			require.False(t, result.IsError)
+		}
+		require.Equal(t, len(modes), calls)
 	}
 }

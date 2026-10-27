@@ -8,4 +8,6 @@ Resolve instruments before requesting quotes or history. Instrument-master price
 
 - [Resolve and quote instruments](resolve.md)
 
-Use `market` modes `search`, `quote`, `ltp`, `ohlc`, and `historical`. Inspect response metadata instead of assuming completeness.
+Use `market` modes `search`, `quote`, `ltp`, `ohlc`, `historical`, and `option_chain`. Inspect response metadata instead of assuming completeness.
+
+For requests to show an option chain, chart, quotes, or instrument finder, prefer `open_kite_view` when that tool is available: `view=option_chain` with `underlying` and optional `exchange`/`expiry`; `view=historical` with instrument token, dates and interval; `view=quote` with instrument IDs; or `view=search` with a query. The host renders the interactive view. Otherwise use the ordinary market tool and summarize its results. `market` also supports `mode=option_chain`; chain contracts are reference data and quotes are fetched separately.

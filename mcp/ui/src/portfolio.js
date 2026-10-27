@@ -84,3 +84,5 @@ export function fundsView(payload){
   }
   return root.children.length?root:null;
 }
+
+export { portfolioChart } from './portfolio-charts.js';

@@ -67,3 +67,73 @@ Post-fix evidence includes `review-currency-depth-mobile.png` and `review-summar
 - Metadata-free response matching accounts for the expected main query, so an identical payload can legitimately satisfy a new main request. The fallback ledger uses compact fingerprints rather than retaining full quote/candle payloads.
 - Historical captions now use the query that actually produced the displayed candles, not edited draft controls. Impossible dates such as 30 February are rejected.
 - Regression tests cover repeated panel/chat quote and summary queries, stripped metadata with identical data, very late echoes after 70 panel calls, unchanged caller arguments, and draft chart-period edits. The full `go test ./mcp -count=1` package also passes, including a correlation-ID round trip through the authenticated read handler.
+
+## Additional read-only widgets (2026-10-27)
+
+The view navigation now includes Holdings, Positions, Funds, Orders, GTT, and
+Option chain. Holdings allocation is a collapsible treemap with Current value,
+Invested, and Absolute P&L area choices. Position P&L bars use only the selected
+Day or Net view and retain separate product labels. Both charts use filtered
+rows on the current page; they do not represent the entire account unless all
+holdings or positions fit that page.
+
+Orders show status, rejection reasons, timeline, and fills. GTT shows trigger
+legs and optional quote-relative distance. Their `orders_read` and `gtt_read`
+server tools accept read modes only and remain hidden from non-Apps clients.
+Option chains load backend-indexed NFO/BFO contracts for an underlying, fetch
+every strike page of a selected expiry from one pinned catalog revision, and
+quote in batches of at most 500. Catalog changes and missing quotes are identified. Mobile defaults to call
+LTP, strike, and put LTP; full quote details are available through a toggle.
+
+Validation uses sample data and the local mock host, not a live account:
+
+- `npm test`: chart geometry/data, option discovery/partial responses, order
+  detail cancellation, GTT distances/receipt times, bridge request correlation.
+- `npm run test:browser`: existing app behavior plus widget navigation, chart
+  scope/state, order history/fills, GTT quote distances, compact/full mobile
+  chains, overflow, and absence of direct network requests.
+- `go test ./...`: server tests, including read-only mode enforcement.
+
+Visual captures are generated in ignored `test-artifacts/widget-*.png`.
+
+Large-chain visual verification uses 601 strikes (1,202 option contracts plus a
+spot reference), two catalog pages, and three quote batches. The browser checks
+that the last strike is reachable, both sticky header rows remain separate,
+and desktop/mobile can jump to the nearest strike to the underlying quote.
+The initial quoted view centers that strike; later renders preserve table
+scroll position. Fixtures are synthetic and do not represent live market data.
+
+## Kite styling adaptation
+
+`src/kite.css` adapts the local kite-front-js Open Sans typography, 3px control
+radii, orange underline tabs, neutral table rules, compact option-chain rows,
+ITM-side shading and emphasized strike column. Standard MCP host font and color
+variables override the Kite fallbacks. The build reuses the embedded Open Sans
+font from the auth templates and includes its SIL OFL notice in the generated
+bundle; it does not load a font from the network.
+
+Large-chain screenshots cover light/dark desktop and mobile. Browser checks
+also verify custom host palette/font overrides, tablet account-total sizing,
+ITM rendering and existing widget behavior.
+
+Remaining component review: funds cards, mobile instrument rows, inspector tabs,
+quote/depth metrics, historical charts, order statuses/timelines, GTT legs,
+empty/loading/error states, and portfolio chart disclosures now share the Kite
+spacing and control treatments. Removed empty chart readout space and corrected
+late-inserted chart style specificity. Candle canvas text uses the effective host
+font and resolves theme-aware CSS colors through computed styles before drawing.
+Account widget captures include mobile dark-mode views and overflow assertions.
+All four browser suites and JavaScript unit tests pass after this review.
+
+Final review corrected cancellation recovery for active auxiliary widgets, shared
+quote request pacing (main and auxiliary calls), and dark semantic host color
+overrides. Regression tests cover cancellation/retry/late responses, paced quote
+starts with cancelled queued work, and host-provided success colors.
+
+Model-visible view entrypoint: `open_kite_view` declares model/app visibility,
+links the shared resource, and delegates strict read-only view selections.
+Browser checks cover direct holdings, positions, funds, orders, GTT and chain
+launches using original view arguments and returned origin metadata. SDK tests
+cover discovery, source exclusions, mutation rejection, and transport invocation.
+Server instructions, ordinary tool descriptions and relevant workflow help now
+explain when to use the view tool, with ordinary-tool fallback for non-Apps clients.

@@ -41,7 +41,7 @@ func registerAppResource(server *mcp.Server) {
 				copy := *listing
 				copy.Tools = make([]*mcp.Tool, 0, len(listing.Tools))
 				for _, tool := range listing.Tools {
-					if tool.Name == appLauncher {
+					if tool.Name == appLauncher || tool.Name == viewLauncher || tool.Name == "orders_read" || tool.Name == "gtt_read" {
 						continue
 					}
 					cloned := *tool
@@ -66,8 +66,8 @@ func registerAppResource(server *mcp.Server) {
 		}}
 	}
 	server.AddResource(&mcp.Resource{
-		URI: appResourceURI, Name: "kite-explorer", Title: "Kite portfolio and market explorer",
-		Description: "Read-only portfolio tables and historical price charts.",
+		URI: appResourceURI, Name: "kite-explorer", Title: "Kite",
+		Description: "Read-only portfolio charts, orders, GTT triggers, option chains, and market snapshots.",
 		MIMEType:    appMIMEType, Meta: metadata(),
 	}, func(context.Context, *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		// This template contains no account data or credentials. All authenticated
@@ -82,8 +82,8 @@ func registerAppResource(server *mcp.Server) {
 // arguments intact and route this app-only launcher through its authenticated
 // handler with an explicit, bounded initial snapshot.
 func registerAppLauncher(server *mcp.Server, manager *kc.Manager) {
-	tool := NewTool(appLauncher, "Open the read-only Kite portfolio explorer.", json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`))
-	tool.Title = "Kite explorer"
+	tool := NewTool(appLauncher, "Open Kite to view read-only portfolio and market widgets.", json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`))
+	tool.Title = "Kite"
 	tool.Annotations = &mcp.ToolAnnotations{ReadOnlyHint: true}
 	tool.Meta = mcp.Meta{
 		"ui":             map[string]any{"resourceUri": appResourceURI, "visibility": []string{"app"}},
@@ -150,5 +150,46 @@ func withAppData(toolName string, next ToolHandler) ToolHandler {
 			}
 		}
 		return result, nil
+	}
+}
+
+// Widget reads use distinct app-only tools: the underlying orders/GTT tools
+// also mutate accounts and must never be advertised as read-only.
+func registerReadWidgetTools(server *mcp.Server, manager *kc.Manager, excluded map[string]bool) {
+	for _, spec := range []struct {
+		name, original, description string
+		modes                       []string
+		handler                     ToolHandler
+	}{
+		{"orders_read", "orders", "Read today's orders, order status history, and trade fills for the Kite order book widget.", []string{"list", "history", "trades", "all_trades"}, (&OrdersTool{}).Handler(manager)},
+		{"gtt_read", "gtt", "Read GTT trigger snapshots for the Kite GTT monitor widget.", []string{"list"}, (&GTTTool{}).Handler(manager)},
+	} {
+		if excluded[spec.original] || excluded[spec.name] {
+			continue
+		}
+		properties := map[string]any{
+			"mode":            map[string]any{"type": "string", "enum": spec.modes},
+			"from":            map[string]any{"type": "integer", "minimum": 0, "maximum": 2147483647},
+			"limit":           map[string]any{"type": "integer", "minimum": 1, "maximum": 500},
+			"_app_request_id": map[string]any{"type": "string", "maxLength": 200},
+		}
+		if spec.original == "orders" {
+			properties["order_id"] = map[string]any{"type": "string"}
+		}
+		schema, _ := json.Marshal(map[string]any{"type": "object", "properties": properties, "required": []string{"mode"}, "additionalProperties": false})
+		tool := NewTool(spec.name, spec.description, schema)
+		tool.Annotations = &mcp.ToolAnnotations{ReadOnlyHint: true}
+		tool.Meta = mcp.Meta{"ui": map[string]any{"visibility": []string{"app"}}}
+		server.AddTool(tool, wrapHandler(withAppData(spec.name, readWidgetHandler(spec.modes, spec.handler))))
+	}
+}
+
+func readWidgetHandler(modes []string, next ToolHandler) ToolHandler {
+	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		mode := SafeAssertString(GetArguments(request)["mode"], "")
+		if !slices.Contains(modes, mode) {
+			return NewToolResultError("This widget only supports read-only modes."), nil
+		}
+		return next(ctx, request)
 	}
 }

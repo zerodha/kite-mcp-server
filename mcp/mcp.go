@@ -112,6 +112,9 @@ func RegisterTools(srv *mcp.Server, manager *kc.Manager, excludedTools string, l
 		srv.AddTool(def, wrapHandler(handler))
 	}
 
+	registerReadWidgetTools(srv, manager, excludedSet)
+	registerViewLauncher(srv, manager, excludedSet)
+
 	if !excludedSet["portfolio"] && !excludedSet[appLauncher] {
 		registerAppLauncher(srv, manager)
 	}

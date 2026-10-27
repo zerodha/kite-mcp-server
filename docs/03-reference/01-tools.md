@@ -22,7 +22,7 @@ protocol interface.
 ## Pagination contract
 
 Paginated modes are `portfolio holdings` (`full` and `compact`), `portfolio positions`,
-`orders list`, `orders all_trades`, `gtt list`, and `market search`.
+`orders list`, `orders all_trades`, `gtt list`, `market search`, and `market option_chain` (strike rows).
 
 - `from` is an integer from 0 to 2147483647, default 0.
 - `limit` is an integer from 1 to 500, default 100. Zero, negative, fractional,
@@ -196,6 +196,22 @@ Manage GTT (Good Till Triggered) orders. GTT orders persist across trading sessi
 
 ---
 
+## open_kite_view
+
+Model-visible on Apps-capable clients. Opens a read-only interactive Kite view
+with initial data. Required `view`: `holdings`, `positions`, `funds`, `orders`,
+`gtt`, `option_chain`, `quote`, `historical`, or `search`.
+
+- `option_chain`: `underlying` (default `NIFTY`), optional `exchange` and `expiry`.
+- `quote`: required `instruments` (up to 500 IDs).
+- `historical`: required `instrument_token`, `from_date`, `to_date`, `interval`.
+- `search`: required `query`, optional `filter_on` (default `id`).
+- List views support `from` and `limit` with the normal pagination bounds.
+
+The selector is filtered by server tool exclusions. It cannot place, modify,
+cancel, or delete orders/triggers. Use ordinary tools for text-only analysis or
+clients without Apps support.
+
 ## market
 
 Retrieve market data and search instruments.
@@ -207,6 +223,7 @@ Retrieve market data and search instruments.
 | `ohlc` | Today's open, high, low, close |
 | `historical` | Historical OHLC candle data for a single instrument |
 | `search` | Search the instrument master list across all exchanges |
+| `option_chain` | Indexed option chain by underlying and expiry, paginated by strike |
 
 **Common parameters:**
 
@@ -236,6 +253,33 @@ reading a bare candle array must now read `data`. Object envelopes conform to th
 LTP and OHLC metadata includes `as_of_available: false` and `timestamp_note`:
 these upstream endpoints supply no timestamps. Use `mode=quote` for upstream
 `timestamp` and `last_trade_time`; receipt time is not a price as-of timestamp.
+
+**Option-chain parameters** (`mode=option_chain`):
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `underlying` | string | — | Required symbol or index name, e.g. `NIFTY`, `NIFTY 50`, `BANKNIFTY`, `RELIANCE`, `SENSEX` |
+| `exchange` | string | `NFO` | `NFO`/`NSE` or `BFO`/`BSE` |
+| `expiry` | string | Nearest unexpired date | Optional exact `YYYY-MM-DD` |
+| `from`, `limit` | integer | 0, 100 | Strike-row pagination; maximum 500 rows per call |
+| `snapshot` | string | — | Use the previous response's `meta.catalog_revision` for subsequent pages; a changed catalog returns an error |
+
+`data` contains canonical underlying information, optional real spot and
+same-expiry future instrument records, the selected expiry, all available
+unexpired expiries, and sorted `strikes`. Each strike has `strike`, `call`, and
+`put`; missing sides are null. The index covers the entire loaded instrument
+catalog and includes active derivative contracts only. It is rebuilt atomically
+with catalog updates. `loaded_at` identifies that catalog snapshot.
+
+Pagination counts **strikes**, not instruments. `meta.complete` and
+`meta.truncated` describe the returned page. Continue while `has_more` is true,
+using the selected `data.expiry` and catalog revision from page one. Chain
+formation makes no live quote calls; request `mode=quote` separately for contract
+IDs and distinguish the catalog's reference prices from current quotes.
+
+```json
+{"mode":"option_chain","exchange":"NFO","underlying":"NIFTY","limit":500}
+```
 
 **Historical parameters** (mode=historical):
 

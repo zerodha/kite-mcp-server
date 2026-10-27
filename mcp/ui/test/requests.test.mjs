@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PanelRequests } from '../src/requests.js';
+import { PanelRequests as ProductionPanelRequests } from '../src/requests.js';
+
+class PanelRequests extends ProductionPanelRequests { constructor(call,canCall){super(call,canCall,{quoteIntervalMs:0});} }
 
 test('a slow panel result cannot overwrite a newer instrument, even if the bridge ignores abort',async()=>{
   const pending=[];
@@ -70,4 +72,28 @@ test('very late tagged echoes remain recognizable after response-history evictio
   assert.equal(requests.ownsInput(calls[0].arguments),true);
   assert.equal(requests.ownsInput({mode:'quote',instruments:['NSE:S0']}),false);
   assert.equal(requests.ownsResult({_meta:{'trade.kite/app':{tool:'market',arguments:calls[0].arguments}}}),true);
+});
+
+
+test('widgets only call explicitly allowed read modes and correlate their echoes',async()=>{
+  const calls=[];
+  const requests=new PanelRequests(async params=>{calls.push(params);return {structuredContent:{data:[]},_meta:{'trade.kite/app':{tool:params.name,arguments:params.arguments}}};},()=>true);
+  for(const [name,mode] of [['orders_read','list'],['orders_read','history'],['orders_read','trades'],['gtt_read','list'],['market','option_chain']]){
+    await requests.run('widget',name,{mode});
+    assert.equal(requests.ownsResult({_meta:{'trade.kite/app':{tool:name,arguments:calls.at(-1).arguments}}}),true);
+  }
+  for(const [name,mode] of [['orders','list'],['orders_read','place'],['orders_read','cancel'],['gtt_read','delete'],['portfolio','convert'],['market','unknown']])await assert.rejects(requests.run('widget',name,{mode}),/read-only/);
+  assert.equal(calls.length,5);
+});
+
+
+test('quote calls across widget slots are paced and queued cancellations do not call the host',async()=>{
+  const starts=[];
+  const requests=new ProductionPanelRequests(async params=>{starts.push({name:params.name,time:Date.now()});return {structuredContent:{data:[]}};},()=>true,{quoteIntervalMs:25});
+  await requests.callTool({name:'market',arguments:{mode:'quote',instruments:['NSE:A']}});
+  const cancelled=requests.run('prices','market',{mode:'quote',instruments:['NSE:B']});
+  const checked=assert.rejects(cancelled,{name:'AbortError'});requests.cancel('prices');
+  await requests.run('chain-quotes','market',{mode:'quote',instruments:['NSE:C']});await checked;
+  assert.equal(starts.length,2);
+  assert.ok(starts[1].time-starts[0].time>=25);
 });

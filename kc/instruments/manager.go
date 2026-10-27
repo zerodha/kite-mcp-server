@@ -92,6 +92,9 @@ type Manager struct {
 	// as they're loaded.
 	segmentIDs map[string]uint32
 
+	optionChains         optionChainIndex
+	optionChainsLoadedAt time.Time
+
 	lastUpdated time.Time
 
 	// Configuration and scheduling
@@ -317,6 +320,8 @@ func (m *Manager) updateInstruments(force bool) (int, error) {
 		tokenToInstrument[inst.InstrumentToken] = inst
 	}
 
+	optionChains := buildOptionChainIndex(tokenToInstrument)
+
 	// Now that all processing is done, acquire the lock to update the maps
 	m.mutex.Lock()
 	m.isinToInstruments = isinToInstruments
@@ -324,7 +329,9 @@ func (m *Manager) updateInstruments(force bool) (int, error) {
 	m.idToToken = idToToken
 	m.tokenToInstrument = tokenToInstrument
 	m.segmentIDs = segmentIDs
+	m.optionChains = optionChains
 	m.lastUpdated = time.Now()
+	m.optionChainsLoadedAt = m.lastUpdated
 	instrumentCount := len(tokenToInstrument)
 	m.mutex.Unlock()
 
@@ -446,6 +453,8 @@ func (m *Manager) Insert(inst *Instrument) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.insertUnsafe(inst)
+	m.optionChains = buildOptionChainIndex(m.tokenToInstrument)
+	m.optionChainsLoadedAt = time.Now()
 }
 
 // LoadMap from tokenToInstrument map to the manager.
@@ -466,6 +475,8 @@ func (m *Manager) LoadMap(tokenToInstrument map[uint32]*Instrument) {
 			m.logger.Debug("LoadMap: progress", "inserted", count, "total", len(tokenToInstrument))
 		}
 	}
+	m.optionChains = buildOptionChainIndex(m.tokenToInstrument)
+	m.optionChainsLoadedAt = time.Now()
 	m.logger.Debug("LoadMap: completed", "count", count)
 }
 

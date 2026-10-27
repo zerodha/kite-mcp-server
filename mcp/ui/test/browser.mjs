@@ -120,7 +120,7 @@ try {
   window.send('ui/notifications/tool-input', {arguments:{mode:'historical',instrument_token:123,interval:'day',from_date:'2026-10-20',to_date:'2026-10-21'}});
   window.send('ui/notifications/tool-result', {structuredContent:{data:[{date:'2026-10-20',open:99,close:100},{date:'2026-10-21',open:100,close:110}],meta:{timezone:'Asia/Kolkata'}},_meta:{'trade.kite/app':{tool:'market',arguments:{mode:'historical',instrument_token:123,interval:'day',from_date:'2026-10-20',to_date:'2026-10-21'}}}});
  });
- await app.getByRole('img').waitFor();
+ await app.getByRole('img',{name:/Historical prices/}).waitFor();
  assert.equal(await app.locator('tbody tr').count(), 2);
  await mkdir(new URL('../test-artifacts/', import.meta.url), {recursive:true});
  await page.screenshot({path:new URL('../test-artifacts/chart-light.png',import.meta.url).pathname});

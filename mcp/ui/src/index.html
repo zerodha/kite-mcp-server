@@ -7,6 +7,16 @@
 :root { font-family:var(--font-sans,system-ui,sans-serif); color:var(--color-text-primary,#252a34); background:var(--color-background-primary,#fff); font-size:14px; color-scheme:light dark; --accent:#b94327; --positive:#16805b; --negative:#c43d49; }
 * { box-sizing:border-box; }
 body { margin:0; padding:24px; }
+.order-card,.gtt-card { padding:18px 0; border-bottom:1px solid var(--color-border-secondary,#e8ebef); }
+.order-card h3,.gtt-card h3 { margin:0; font-size:16px; }
+.order-card p,.gtt-card p { margin:8px 0; }
+.order-card details,.gtt-card details { margin:12px 0; }
+.order-timeline { padding-left:24px; }
+.order-timeline li { margin:16px 0; padding-left:8px; }
+#orders-view,#gtt-view,#options-view { min-height:240px; }
+#widget-nav { display:flex; flex-wrap:wrap; gap:4px; border-bottom:1px solid var(--color-border-secondary,#e8ebef); margin:20px 0; padding-bottom:8px; }
+#widget-nav button { flex:none; border-color:transparent; background:transparent; font-size:13px; }
+#widget-nav button[aria-pressed="true"] { background:var(--color-background-secondary,#f6f7f9); border-color:var(--color-border-primary,#ccd1d9); font-weight:600; }
 header { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
 .header-actions { display:flex; align-items:center; gap:4px; margin-left:auto; }
 .header-actions button { background:transparent; border-color:transparent; font-size:12px; padding:8px 10px; }
@@ -91,7 +101,7 @@ h3 { font-size:13px; font-weight:600; margin:18px 0 12px; }
 .inspector-header h2 { overflow-wrap:anywhere; max-width:100%; }
 .quote-price { font-size:26px; font-variant-numeric:tabular-nums; }
 .quote-line { justify-content:flex-start; margin-top:20px; }
-.quote-actions { display:flex; justify-content:flex-end; margin-top:12px; }
+.quote-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
 .quiet { font-size:12px; padding:6px 10px; min-height:32px; }
 .inspector-tabs { display:flex; gap:4px; border-bottom:1px solid var(--color-border-secondary,#e8ebef); margin:20px 0; }
 .inspector-tabs button { border:0; border-radius:0; flex:1; font-size:13px; padding:10px 4px; background:none; border-bottom:2px solid transparent; }
@@ -192,9 +202,14 @@ h3 { font-size:13px; font-weight:600; margin:18px 0 12px; }
  .chart-controls label { min-width:110px; }
 }
 </style>
+<!-- APP_STYLES -->
 </head>
 <body>
 <header><div class="heading"><img class="brand" src="data:image/svg+xml;base64,PHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA5MCA2MCI+PGRlZnM+PHN0eWxlPi5jbHMtMXtmaWxsOiNmNjQ2MWE7fS5jbHMtMntmaWxsOiNkYjM0MmM7fTwvc3R5bGU+PC9kZWZzPjx0aXRsZT5LaXRlIGxvZ28gdHJpbW1lZDwvdGl0bGU+PHBvbHlnb24gY2xhc3M9ImNscy0xIiBwb2ludHM9IjMwIDAgMCAzMCAzMCA2MCA2MCAzMCA5MCAwIDMwIDAiLz48cG9seWdvbiBjbGFzcz0iY2xzLTIiIHBvaW50cz0iMzAgNjAgNjAgMzAgOTAgNjAgMzAgNjAiLz48L3N2Zz4=" alt="Kite" width="30" height="20"><h1 id="title">Kite</h1></div><div class="header-actions"><span id="price-refresh" hidden><button id="refresh-prices" type="button">Refresh prices</button></span><button id="refresh" disabled>Refresh</button></div></header>
+<nav id="widget-nav" aria-label="Kite views">
+<button data-widget="holdings" aria-pressed="true">Holdings</button><button data-widget="positions" aria-pressed="false">Positions</button><button data-widget="margins" aria-pressed="false">Funds</button><button data-widget="orders" aria-pressed="false">Orders</button><button data-widget="gtt" aria-pressed="false">GTT</button><button data-widget="options" aria-pressed="false">Option chain</button>
+</nav>
+<div id="snapshot-view">
 <p id="price-status" class="muted" role="status" aria-live="polite" hidden></p>
 <p id="status" role="status" aria-live="polite">Connecting to your MCP client…</p>
 <section id="account-summary" aria-label="Account-wide portfolio summary" hidden></section>
@@ -218,6 +233,10 @@ h3 { font-size:13px; font-weight:600; margin:18px 0 12px; }
 </section>
 <aside id="inspector" aria-label="Instrument inspector" hidden></aside>
 </div>
+</div>
+<section id="orders-view" aria-label="Order book" hidden></section>
+<section id="gtt-view" aria-label="GTT monitor" hidden></section>
+<section id="options-view" aria-label="Option chain" hidden></section>
 <footer>Read-only · Kite Connect. Prices and values are snapshots, not a live feed.</footer>
 <!-- APP_SCRIPT -->
 </body></html>

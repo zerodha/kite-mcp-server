@@ -1,4 +1,4 @@
-export const allowedTools = new Set(['portfolio', 'market']);
+export const allowedTools = new Set(['portfolio', 'market', 'orders_read', 'gtt_read']);
 // Argument object key order can differ between host notifications and Go JSON.
 export function requestKey(value) {
   function ordered(item) {
