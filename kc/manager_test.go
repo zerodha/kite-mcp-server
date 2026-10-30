@@ -1,6 +1,7 @@
 package kc
 
 import (
+	"html/template"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -293,5 +294,23 @@ func TestSessionSigner(t *testing.T) {
 
 	if verifiedSessionID != testSessionID {
 		t.Errorf("Expected verified session ID %s, got %s", testSessionID, verifiedSessionID)
+	}
+}
+
+func TestSuccessTemplateFailureDoesNotWritePartialPage(t *testing.T) {
+	broken := template.Must(template.New("base").Parse(`{{define "base"}}partial output{{.MissingField}}{{end}}`))
+	manager := &Manager{templates: map[string]*template.Template{indexTemplate: broken}}
+	w := httptest.NewRecorder()
+	if err := manager.RenderSuccessTemplate(w); err == nil {
+		t.Fatal("expected template execution error")
+	}
+	if w.Body.Len() != 0 || len(w.Header()) != 0 {
+		t.Fatalf("response committed before template completed: %s", w.Body.String())
+	}
+	if err := manager.RenderLoginError(w, 500, "Unable to sign in", "Please try again.", "Return to your MCP client."); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 500 || strings.Contains(w.Body.String(), "partial output") {
+		t.Fatal("could not replace failed success page")
 	}
 }

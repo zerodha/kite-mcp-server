@@ -98,10 +98,18 @@ func (m *RateLimiter) getLimiter(ip string) *rate.Limiter {
 
 // Middleware returns a middleware that enforces rate limiting.
 func (m *RateLimiter) Middleware(next http.Handler) http.Handler {
+	return m.MiddlewareWithRejection(next, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+	})
+}
+
+// MiddlewareWithRejection lets browser routes render their own rate-limit page.
+func (m *RateLimiter) MiddlewareWithRejection(next http.Handler, reject http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := m.clientIP(r)
 		if !m.getLimiter(ip).Allow() {
-			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			w.Header().Set("Retry-After", "12")
+			reject(w, r)
 			return
 		}
 		next.ServeHTTP(w, r)

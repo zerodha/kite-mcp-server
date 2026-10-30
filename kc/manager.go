@@ -250,10 +250,25 @@ func kiteAccessTokenExpiry(now time.Time) time.Time {
 // CompleteLogin exchanges a request token for a new set of Kite credentials.
 func (m *Manager) CompleteLogin(requestToken string) (*KiteCredentials, error) {
 	kc := m.newKiteClient()
+	response := &loginResponseTransport{base: http.DefaultTransport}
+	kc.SetHTTPClient(newKiteHTTPClient(response))
+	started := time.Now()
+	m.Logger.Debug("Starting Kite token exchange", "stage", "kite_token_exchange")
 	userSess, err := kc.GenerateSession(requestToken, m.apiSecret)
 	if err != nil {
-		m.Logger.Error("Failed to generate Kite session from request token", "error", err)
-		return nil, fmt.Errorf("failed to generate Kite session: %w", err)
+		status := int(response.status.Load())
+		fields := []any{"stage", "kite_token_exchange", "duration_ms", time.Since(started).Milliseconds(), "error", err, "rate_limited", status == http.StatusTooManyRequests}
+		if status != 0 {
+			fields = append(fields, "upstream_status", status)
+		} else {
+			fields = append(fields, "failure_kind", "transport_error")
+		}
+		var apiErr kiteconnect.Error
+		if errors.As(err, &apiErr) {
+			fields = append(fields, "sdk_status", apiErr.Code, "sdk_error_type", apiErr.ErrorType)
+		}
+		m.Logger.Error("Failed to generate Kite session from request token", fields...)
+		return nil, &LoginError{UpstreamStatus: status, Err: err}
 	}
 
 	creds := &KiteCredentials{
@@ -268,7 +283,7 @@ func (m *Manager) CompleteLogin(requestToken string) (*KiteCredentials, error) {
 		m.metrics.Increment("user_logins")
 	}
 
-	m.Logger.Info("Successfully completed login and created new Kite credentials", "user_id", creds.UserID)
+	m.Logger.Info("Successfully completed login and created new Kite credentials", "user_id", creds.UserID, "duration_ms", time.Since(started).Milliseconds())
 	return creds, nil
 }
 
@@ -324,7 +339,16 @@ func (m *Manager) RenderSuccessTemplate(w http.ResponseWriter) error {
 	if !ok {
 		return errors.New("template not found")
 	}
-	return templ.ExecuteTemplate(w, "base", struct{ Title string }{"Login Successful"})
+	return templates.RenderPage(w, http.StatusOK, templ, struct{ Title string }{"Login Successful"})
+}
+
+// RenderLoginError renders a browser error before committing its HTTP status.
+// Messages are selected by the handler; raw upstream errors must not be passed here.
+func (m *Manager) RenderLoginError(w http.ResponseWriter, status int, title, message, guidance string) error {
+	return templates.RenderError(w, status, templates.ErrorPage{
+		Title: title, Message: message, Guidance: guidance,
+		Footer: "You can close this tab and return to your MCP client.",
+	})
 }
 
 // RenderClientConsent identifies the client and callback before starting Kite login.
@@ -333,7 +357,7 @@ func (m *Manager) RenderClientConsent(w http.ResponseWriter, clientName, redirec
 	if !ok {
 		return errors.New("template not found")
 	}
-	return templ.ExecuteTemplate(w, "base", struct{ Title, ClientName, RedirectURI, Flow, CSRF string }{
+	return templates.RenderPage(w, http.StatusOK, templ, struct{ Title, ClientName, RedirectURI, Flow, CSRF string }{
 		"Authorize MCP client", clientName, redirectURI, flow, csrf,
 	})
 }

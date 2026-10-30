@@ -3,6 +3,7 @@ package oauth
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zerodha/kite-mcp-server/kc"
+	"github.com/zerodha/kite-mcp-server/kc/templates"
 )
 
 // Handlers wraps the OAuth server with HTTP handlers
@@ -32,6 +34,62 @@ func NewHandlers(server *Server, kcManager *kc.Manager, logger *slog.Logger) *Ha
 		kcManager:      kcManager,
 		logger:         logger,
 	}
+}
+
+// browserError gives browser-facing authorization failures the shared Kite layout.
+// Keep protocol endpoints on their existing OAuth JSON responses.
+func (h *Handlers) browserError(w http.ResponseWriter, r *http.Request, reason string, status int) {
+	h.logger.Warn("browser authorization failed", "path", r.URL.Path, "method", r.Method, "reason", reason, "status", status)
+	title := "Unable to sign in"
+	message := "We couldn't complete your authorization."
+	guidance := "Return to your MCP client and start a new login. Avoid refreshing this page."
+	switch reason {
+	case "too many requests":
+		title = "Too many login attempts"
+		message = "There have been too many login requests."
+		guidance = "Wait a few minutes, then start a new login from your MCP client."
+	case "kite rate limited":
+		title = "Kite login temporarily limited"
+		message = "The Kite Connect login request was rate limited."
+		guidance = "Wait a few minutes, then start a new login from your MCP client. Avoid refreshing this page or making repeated login attempts."
+	case "authorization expired", "consent expired":
+		title = "Login expired"
+		message = "This login session has expired or is no longer available."
+	case "authorization browser mismatch or consent missing", "invalid consent":
+		title = "Login could not be verified"
+		message = "We couldn't verify this login in your browser."
+		guidance = "Start a new login from your MCP client and complete it in the same browser."
+	case "invalid client", "invalid client or redirect_uri":
+		title = "Client could not be verified"
+		message = "The client or its return address could not be verified."
+	case "invalid_target":
+		title = "Unsupported resource"
+		message = "This client requested access to an unsupported resource (invalid_target)."
+		guidance = "Check the server address configured in your MCP client, then start a new login."
+	case "invalid request", "method not allowed":
+		title = "Invalid login request"
+		message = "This login request is incomplete or unsupported."
+	case "kite unavailable":
+		title = "Unable to connect to Kite"
+		message = "We couldn't complete your login with Kite Connect."
+		guidance = "Wait a few minutes, then start a new login from your MCP client. If the problem continues, contact the server administrator."
+	case "internal error", "session error":
+		message = "The server couldn't complete your login. Please try again later."
+	}
+	if err := h.kcManager.RenderLoginError(w, status, title, message, guidance); err != nil {
+		h.logger.Error("failed to render login error", "error", err)
+		if templates.IsWriteError(err) {
+			return
+		}
+		// Template execution failed before the response was committed.
+		http.Error(w, "Unable to sign in. Return to your MCP client and start a new login.", http.StatusInternalServerError)
+	}
+}
+
+// HandleAuthorizeRateLimit renders failures rejected before HandleAuthorize runs.
+func (h *Handlers) HandleAuthorizeRateLimit(w http.ResponseWriter, r *http.Request) {
+	consentHeaders(w)
+	h.browserError(w, r, "too many requests", http.StatusTooManyRequests)
 }
 
 // pendingAuth stores the OAuth request while user authenticates with Kite
@@ -57,31 +115,31 @@ func (h *Handlers) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		h.browserError(w, r, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	// Parse the OAuth request
 	req, err := ParseAuthorizeRequest(r)
 	if err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		h.browserError(w, r, "invalid request", http.StatusBadRequest)
 		return
 	}
 
 	if err := h.server.ValidateResource(req.Resource); err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_target"})
+		h.browserError(w, r, "invalid_target", http.StatusBadRequest)
 		return
 	}
 
 	// Validate redirect URI syntax before checking the registered callback
 	if err := h.server.ValidateRedirectURI(req.RedirectURI); err != nil {
 		h.logger.Warn("rejected redirect_uri", "redirect_uri", req.RedirectURI, "error", err)
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		h.browserError(w, r, "invalid request", http.StatusBadRequest)
 		return
 	}
 
 	// Require a signed DCR client ID and its exact registered callback.
 	if err := h.server.ValidateClientRedirect(req.ClientID, req.RedirectURI); err != nil {
-		http.Error(w, "invalid client or redirect_uri", http.StatusBadRequest)
+		h.browserError(w, r, "invalid client or redirect_uri", http.StatusBadRequest)
 		return
 	}
 
@@ -103,7 +161,7 @@ func (h *Handlers) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	h.setFlowCookie(w, tempSessionID, "consent", pending.csrf, 600)
 	clientName, err := h.server.ClientName(req.ClientID)
 	if err != nil {
-		http.Error(w, "invalid client", http.StatusBadRequest)
+		h.browserError(w, r, "invalid client", http.StatusBadRequest)
 		return
 	}
 	if strings.TrimSpace(clientName) == "" {
@@ -111,7 +169,10 @@ func (h *Handlers) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.kcManager.RenderClientConsent(w, clientName, req.RedirectURI, tempSessionID, pending.csrf); err != nil {
 		h.logger.Error("failed to render consent", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		if templates.IsWriteError(err) {
+			return
+		}
+		h.browserError(w, r, "internal error", http.StatusInternalServerError)
 	}
 
 }
@@ -121,30 +182,30 @@ func (h *Handlers) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) handleConsent(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 8192)
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		h.browserError(w, r, "invalid request", http.StatusBadRequest)
 		return
 	}
 	flow := r.PostForm.Get("flow")
 	session, err := h.kcManager.SessionManager().Get(flow)
 	if err != nil || session.Terminated || !time.Now().Before(session.ExpiresAt) {
-		http.Error(w, "consent expired", http.StatusBadRequest)
+		h.browserError(w, r, "consent expired", http.StatusBadRequest)
 		return
 	}
 	pending, ok := session.OAuthData.(*pendingAuth)
 	if !ok {
-		http.Error(w, "invalid consent", http.StatusBadRequest)
+		h.browserError(w, r, "invalid consent", http.StatusBadRequest)
 		return
 	}
 	cookie, err := r.Cookie(h.flowCookieName(flow, "consent"))
 	pending.mu.Lock()
 	defer pending.mu.Unlock()
 	if err != nil || pending.approved || pending.consumed || !sameSecret(cookie.Value, pending.csrf) || !sameSecret(r.PostForm.Get("csrf"), pending.csrf) {
-		http.Error(w, "invalid consent", http.StatusBadRequest)
+		h.browserError(w, r, "invalid consent", http.StatusBadRequest)
 		return
 	}
 	h.setFlowCookie(w, flow, "consent", "", -1)
 	if err := h.server.ValidateClientRedirect(pending.ClientID, pending.RedirectURI); err != nil {
-		http.Error(w, "invalid client", http.StatusBadRequest)
+		h.browserError(w, r, "invalid client", http.StatusBadRequest)
 		return
 	}
 	if r.PostForm.Get("decision") != "approve" {
@@ -163,7 +224,7 @@ func (h *Handlers) handleConsent(w http.ResponseWriter, r *http.Request) {
 	pending.browserState = generateSecureToken(32)
 	loginURL, err := h.kcManager.GenerateLoginURL(flow, pending.browserState)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		h.browserError(w, r, "internal error", http.StatusInternalServerError)
 		return
 	}
 	pending.approved = true
@@ -213,12 +274,12 @@ var callbackRateLimiter = NewRateLimiter(30, time.Minute)
 func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	consentHeaders(w)
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		h.browserError(w, r, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	clientIP := h.server.ClientIP(r)
 	if !callbackRateLimiter.Allow(clientIP) {
-		http.Error(w, "too many requests", http.StatusTooManyRequests)
+		h.browserError(w, r, "too many requests", http.StatusTooManyRequests)
 		return
 	}
 
@@ -229,16 +290,16 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// Verify the signed session ID
 	sessionID, err := h.kcManager.SessionSigner().VerifySessionID(signedSessionID)
 	if err != nil {
-		h.logger.Warn("invalid callback session", "error", err)
-		http.Error(w, "authorization failed", http.StatusBadRequest)
+		h.logger.Warn("invalid callback session", "stage", "verify_session_signature", "error", err)
+		h.browserError(w, r, "authorization failed", http.StatusBadRequest)
 		return
 	}
 
 	// Get the session
 	session, err := h.kcManager.SessionManager().Get(sessionID)
 	if err != nil {
-		h.logger.Warn("callback session not found", "session_id", sessionID, "error", err)
-		http.Error(w, "authorization failed", http.StatusBadRequest)
+		h.logger.Warn("callback session not found", "session_id", sessionID, "stage", "lookup_pending_session", "error", err)
+		h.browserError(w, r, "authorization failed", http.StatusBadRequest)
 		return
 	}
 
@@ -246,7 +307,8 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// credential. Claim the callback once, including when upstream login fails.
 	pending, isOAuth := session.OAuthData.(*pendingAuth)
 	if session.Terminated || !time.Now().Before(session.ExpiresAt) {
-		http.Error(w, "authorization expired", http.StatusBadRequest)
+		h.logger.Warn("callback session expired", "session_id", sessionID, "expires_at", session.ExpiresAt, "terminated", session.Terminated)
+		h.browserError(w, r, "authorization expired", http.StatusBadRequest)
 		return
 	}
 	if isOAuth {
@@ -258,7 +320,8 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		}
 		pending.mu.Unlock()
 		if !valid {
-			http.Error(w, "authorization browser mismatch or consent missing", http.StatusBadRequest)
+			h.logger.Warn("callback browser verification failed", "session_id", sessionID, "stage", "verify_browser_binding", "state_cookie_present", cookieErr == nil)
+			h.browserError(w, r, "authorization browser mismatch or consent missing", http.StatusBadRequest)
 			return
 		}
 		h.setFlowCookie(w, sessionID, "state", "", -1)
@@ -267,8 +330,13 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// Complete KiteConnect login
 	creds, err := h.kcManager.CompleteLogin(requestToken)
 	if err != nil {
-		h.logger.Error("failed to complete Kite login", "error", err)
-		http.Error(w, "authorization failed", http.StatusInternalServerError)
+		h.logger.Error("failed to complete Kite login", "session_id", sessionID, "stage", "kite_token_exchange", "error", err)
+		var loginErr *kc.LoginError
+		if errors.As(err, &loginErr) && loginErr.UpstreamStatus == http.StatusTooManyRequests {
+			h.browserError(w, r, "kite rate limited", http.StatusTooManyRequests)
+		} else {
+			h.browserError(w, r, "kite unavailable", http.StatusBadGateway)
+		}
 		return
 	}
 
@@ -277,11 +345,17 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		// Regular login tool flow - store credentials and render success page
 		if err := h.kcManager.SessionManager().UpdateCredentials(sessionID, creds); err != nil {
 			h.logger.Error("failed to update session credentials", "error", err)
-			http.Error(w, "session error", http.StatusInternalServerError)
+			h.browserError(w, r, "session error", http.StatusInternalServerError)
 			return
 		}
 		h.logger.Info("login tool callback", "user_id", creds.UserID)
-		_ = h.kcManager.RenderSuccessTemplate(w)
+		if err := h.kcManager.RenderSuccessTemplate(w); err != nil {
+			h.logger.Error("failed to render login success", "session_id", sessionID, "stage", "render_success", "error", err)
+			if templates.IsWriteError(err) {
+				return
+			}
+			h.browserError(w, r, "internal error", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -294,7 +368,7 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	if err := h.kcManager.SessionManager().UpdateCredentials(userSessionID, creds); err != nil {
 		_, _ = h.kcManager.SessionManager().Terminate(userSessionID)
 		h.logger.Error("failed to update user session credentials", "error", err)
-		http.Error(w, "session error", http.StatusInternalServerError)
+		h.browserError(w, r, "session error", http.StatusInternalServerError)
 		return
 	}
 
@@ -309,7 +383,7 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		_, _ = h.kcManager.SessionManager().Terminate(userSessionID)
 		h.logger.Error("failed to create auth code", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		h.browserError(w, r, "internal error", http.StatusInternalServerError)
 		return
 	}
 

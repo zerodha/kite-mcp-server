@@ -253,7 +253,8 @@ func TestAuthorizeRequiresRegisteredCallback(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		h := NewHandlers(srv, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		h := consentTestHandlers(t, "")
+		h.server = srv
 		for _, tc := range []struct{ name, clientID, redirect string }{
 			{"unknown client", "unregistered", callback},
 			{"attacker callback", id, "https://attacker.example/callback"},

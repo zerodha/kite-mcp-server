@@ -268,6 +268,7 @@ func TestHandlersRejectForeignResources(t *testing.T) {
 	if w.Code != 400 || !strings.Contains(w.Body.String(), "invalid_target") || len(w.Result().Cookies()) != 0 {
 		t.Fatal("foreign authorization resource accepted")
 	}
+	assertBrowserError(t, w, 400, "Unsupported resource")
 	q.Set("grant_type", "authorization_code")
 	q.Set("code", "unused")
 	q.Set("code_verifier", "verifier")
@@ -277,6 +278,9 @@ func TestHandlersRejectForeignResources(t *testing.T) {
 	h.HandleToken(w, r)
 	if w.Code != 400 || !strings.Contains(w.Body.String(), "invalid_target") {
 		t.Fatal("foreign token resource accepted")
+	}
+	if !strings.HasPrefix(w.Header().Get("Content-Type"), "application/json") {
+		t.Fatal("token error must remain JSON")
 	}
 }
 

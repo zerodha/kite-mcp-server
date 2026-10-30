@@ -1,0 +1,11 @@
+{{define "content"}}
+<div>
+    <h1>{{.Title}}</h1>
+    <p>{{.Message}}</p>
+    <p class="disclaimer">{{.Guidance}}</p>
+    {{if .ActionURL}}<a class="button" href="{{.ActionURL}}">{{.ActionLabel}}</a>{{end}}
+    {{if .Footer}}<p class="info">{{.Footer}}</p>{{end}}
+</div>
+{{end}}
+
+{{template "base" .}}

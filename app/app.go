@@ -257,7 +257,7 @@ func (app *App) setupMux() *http.ServeMux {
 
 	// OAuth endpoints (JWT-based)
 	mux.HandleFunc("/callback", app.jwtOauthHandlers.HandleCallback)
-	mux.Handle("/authorize", app.rateLimiter.Middleware(http.HandlerFunc(app.jwtOauthHandlers.HandleAuthorize)))
+	mux.Handle("/authorize", app.rateLimiter.MiddlewareWithRejection(http.HandlerFunc(app.jwtOauthHandlers.HandleAuthorize), app.jwtOauthHandlers.HandleAuthorizeRateLimit))
 	mux.Handle("/token", app.rateLimiter.Middleware(http.HandlerFunc(app.jwtOauthHandlers.HandleToken)))
 	mux.HandleFunc("/.well-known/oauth-authorization-server", app.jwtOauthHandlers.HandleDiscovery)
 	mux.HandleFunc("/.well-known/oauth-protected-resource", app.jwtOauthHandlers.HandleProtectedResourceMetadata)

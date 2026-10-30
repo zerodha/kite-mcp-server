@@ -3,7 +3,9 @@ package app
 import (
 	"bytes"
 	"embed"
+	"github.com/zerodha/kite-mcp-server/kc/templates"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"path"
 	"strings"
@@ -26,18 +28,35 @@ func newDocsHandler(root fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resolved, ok := resolveDocsPath(root, r.URL.Path)
 		if !ok {
-			http.NotFound(w, r)
+			renderDocsNotFound(w, r)
 			return
 		}
 
 		data, err := fs.ReadFile(root, resolved)
 		if err != nil {
-			http.NotFound(w, r)
+			renderDocsNotFound(w, r)
 			return
 		}
 
 		http.ServeContent(w, r, path.Base(resolved), time.Time{}, bytes.NewReader(data))
 	})
+}
+
+func renderDocsNotFound(w http.ResponseWriter, r *http.Request) {
+	slog.Debug("documentation page not found", "path", r.URL.Path, "status", http.StatusNotFound)
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	if err := templates.RenderError(w, http.StatusNotFound, templates.ErrorPage{
+		Title:     "Page not found",
+		Message:   "The page you're looking for isn't available.",
+		Guidance:  "Check the address or return to the documentation home page.",
+		ActionURL: "/", ActionLabel: "Go to documentation",
+	}); err != nil {
+		slog.Error("failed to render documentation error", "error", err)
+		if templates.IsWriteError(err) {
+			return
+		}
+		http.Error(w, "Page not found. Visit / for documentation.", http.StatusNotFound)
+	}
 }
 
 func resolveDocsPath(root fs.FS, requestPath string) (string, bool) {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -70,5 +71,46 @@ func TestDocsHandlerBlocksDotfiles(t *testing.T) {
 
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rr.Code)
+	}
+}
+
+func TestDocsNotFoundPage(t *testing.T) {
+	handler := newDocsHandler(fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("home")}})
+	for _, method := range []string{"GET", "HEAD"} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(method, "/missing?request_token=secret", nil))
+		if w.Code != 404 || w.Header().Get("Content-Type") != "text/html; charset=utf-8" {
+			t.Fatalf("incorrect response: %d %v", w.Code, w.Header())
+		}
+		for _, want := range []string{"<!doctype html>", "Page not found", `href="/"`, "Go to documentation"} {
+			if !strings.Contains(w.Body.String(), want) {
+				t.Fatalf("missing %q", want)
+			}
+		}
+		for _, unwanted := range []string{"secret", "request_token", "MCP client"} {
+			if strings.Contains(w.Body.String(), unwanted) {
+				t.Fatalf("unexpected %q", unwanted)
+			}
+		}
+	}
+}
+
+type failedDocsWriter struct {
+	header   http.Header
+	statuses []int
+	writes   int
+}
+
+func (w *failedDocsWriter) Header() http.Header    { return w.header }
+func (w *failedDocsWriter) WriteHeader(status int) { w.statuses = append(w.statuses, status) }
+func (w *failedDocsWriter) Write(p []byte) (int, error) {
+	w.writes++
+	return min(16, len(p)), io.ErrUnexpectedEOF
+}
+func TestDocsWriteFailureDoesNotAppendFallback(t *testing.T) {
+	w := &failedDocsWriter{header: make(http.Header)}
+	newDocsHandler(fstest.MapFS{}).ServeHTTP(w, httptest.NewRequest("GET", "/missing", nil))
+	if w.writes != 1 || len(w.statuses) != 1 || w.statuses[0] != 404 {
+		t.Fatalf("fallback appended: writes=%d statuses=%v", w.writes, w.statuses)
 	}
 }
