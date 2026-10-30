@@ -131,20 +131,24 @@ gate.
 | `exchange` | string | place | Exchange: `NSE` (default), `BSE`, `MCX`, `NFO`, `BFO` |
 | `tradingsymbol` | string | place | Trading symbol (e.g. `INFY`, `NIFTY2560118000CE`) |
 | `transaction_type` | string | place | `BUY` or `SELL` |
-| `quantity` | number | place | Number of shares or lots (default: 1) |
+| `quantity` | integer | place, modify | Order quantity in units. Required for place; optional for modify |
 | `product` | string | place | `CNC` (delivery), `MIS` (intraday), `NRML` (F&O overnight), `MTF` (margin funding) |
 | `order_type` | string | place, modify | `MARKET`, `LIMIT`, `SL` (stop-loss limit), `SL-M` (stop-loss market) |
 | `price` | number | place, modify | Limit price. Required for `LIMIT` and `SL` orders |
 | `trigger_price` | number | place, modify | Trigger price. Required for `SL` and `SL-M` orders |
 | `validity` | string | place, modify | `DAY`, `IOC` (immediate or cancel), `TTL` (time-to-live) |
-| `validity_ttl` | number | place | Life span in minutes. Required when validity is `TTL` |
-| `disclosed_quantity` | number | place, modify | Quantity disclosed to the market |
-| `iceberg_legs` | number | place | Number of legs for iceberg orders |
-| `iceberg_quantity` | number | place | Quantity per leg for iceberg orders |
+| `validity_ttl` | integer | place, modify | Life span in minutes. Required when the request sets validity to `TTL` |
+| `disclosed_quantity` | integer | place, modify | Quantity disclosed to the market |
+| `iceberg_legs` | integer | place | Number of legs for iceberg orders |
+| `iceberg_quantity` | integer | place | Quantity per leg for iceberg orders |
 | `tag` | string | place | Optional alphanumeric label (max 20 characters) |
 | `market_protection` | number | place | Market protection % for MARKET/SL-M. `0`=disabled, `1`-`100`=custom, `-1`=auto |
 | `from` | integer | list, all_trades | Pagination start index (0-based) |
 | `limit` | integer | list, all_trades | Page size: 1-500, default 100 |
+
+For placement and modification, supplied `quantity`, `validity_ttl`, `iceberg_legs`, and `iceberg_quantity` values must be integers from 1 to 2147483647, inclusive. `disclosed_quantity` accepts integers from 0 to 2147483647, inclusive. Fractions, strings, null, and values outside these ranges are rejected before any Kite API request.
+
+Modification leaves omitted fields unchanged. Setting `validity` to `TTL` requires a positive `validity_ttl` in the same request; the duration is included in the approval details and sent to Kite.
 
 ---
 
