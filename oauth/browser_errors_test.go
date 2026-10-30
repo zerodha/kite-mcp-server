@@ -73,12 +73,16 @@ func TestKiteLoginFailurePage(t *testing.T) {
 				if tc.plain {
 					w.Header().Set("Content-Type", "text/plain")
 					w.WriteHeader(tc.status)
-					fmt.Fprint(w, "Too many requests")
+					if _, err := fmt.Fprint(w, "Too many requests"); err != nil {
+						t.Errorf("write upstream response: %v", err)
+					}
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tc.status)
-				fmt.Fprint(w, `{"status":"error","error_type":"GeneralException","message":"private-upstream-detail"}`)
+				if _, err := fmt.Fprint(w, `{"status":"error","error_type":"GeneralException","message":"private-upstream-detail"}`); err != nil {
+					t.Errorf("write upstream response: %v", err)
+				}
 			}))
 			defer upstream.Close()
 			if tc.status == 0 {
@@ -167,7 +171,9 @@ func (w *partialResponseWriter) Write(p []byte) (int, error) {
 func TestBrowserWriteFailureDoesNotAppendFallback(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"status":"success","data":{"user_id":"user","access_token":"access"}}`)
+		if _, err := fmt.Fprint(w, `{"status":"success","data":{"user_id":"user","access_token":"access"}}`); err != nil {
+			t.Errorf("write upstream response: %v", err)
+		}
 	}))
 	defer upstream.Close()
 	for _, kind := range []string{"error", "success", "consent"} {
