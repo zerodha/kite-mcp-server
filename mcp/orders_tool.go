@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"math"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
@@ -45,10 +46,11 @@ var ordersSchema = json.RawMessage(`{
 			"enum": ["BUY", "SELL"]
 		},
 		"quantity": {
-			"type": "number",
+			"type": "integer",
 			"description": "Number of shares or lots (required for place mode)",
 			"default": 1,
-			"minimum": 1
+			"minimum": 1,
+			"maximum": 2147483647
 		},
 		"product": {
 			"type": "string",
@@ -74,20 +76,28 @@ var ordersSchema = json.RawMessage(`{
 			"enum": ["DAY", "IOC", "TTL"]
 		},
 		"validity_ttl": {
-			"type": "number",
-			"description": "Order life span in minutes (required when validity=TTL)"
+			"type": "integer",
+			"description": "Order life span in minutes (required when validity=TTL)",
+			"minimum": 1,
+			"maximum": 2147483647
 		},
 		"disclosed_quantity": {
-			"type": "number",
-			"description": "Quantity disclosed to the market"
+			"type": "integer",
+			"description": "Quantity disclosed to the market",
+			"minimum": 0,
+			"maximum": 2147483647
 		},
 		"iceberg_legs": {
-			"type": "number",
-			"description": "Number of legs for iceberg orders"
+			"type": "integer",
+			"description": "Number of legs for iceberg orders",
+			"minimum": 1,
+			"maximum": 2147483647
 		},
 		"iceberg_quantity": {
-			"type": "number",
-			"description": "Quantity per leg for iceberg orders"
+			"type": "integer",
+			"description": "Quantity per leg for iceberg orders",
+			"minimum": 1,
+			"maximum": 2147483647
 		},
 		"tag": {
 			"type": "string",
@@ -190,6 +200,9 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 			if err := ValidateRequired(args, "exchange", "tradingsymbol", "transaction_type", "quantity", "product", "order_type"); err != nil {
 				return NewToolResultError(err.Error()), nil
 			}
+			if err := validateOrderIntegers(args); err != nil {
+				return NewToolResultError(err.Error()), nil
+			}
 			variety := SafeAssertString(args["variety"], "regular")
 			orderParams := kiteconnect.OrderParams{
 				Exchange:          SafeAssertString(args["exchange"], "NSE"),
@@ -224,6 +237,9 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 			if err := ValidateRequired(args, "order_id", "order_type"); err != nil {
 				return NewToolResultError(err.Error()), nil
 			}
+			if err := validateOrderIntegers(args); err != nil {
+				return NewToolResultError(err.Error()), nil
+			}
 			variety := SafeAssertString(args["variety"], "regular")
 			orderID := SafeAssertString(args["order_id"], "")
 			// Only include fields explicitly provided by the caller.
@@ -243,6 +259,9 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 			}
 			if _, ok := args["validity"]; ok {
 				orderParams.Validity = SafeAssertString(args["validity"], "")
+			}
+			if _, ok := args["validity_ttl"]; ok {
+				orderParams.ValidityTTL = SafeAssertInt(args["validity_ttl"], 0)
 			}
 			if _, ok := args["disclosed_quantity"]; ok {
 				orderParams.DisclosedQuantity = SafeAssertInt(args["disclosed_quantity"], 0)
@@ -297,4 +316,42 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 			return NewToolResultError("Invalid mode. Must be one of: list, history, trades, all_trades, place, modify, cancel"), nil
 		}
 	}
+}
+
+// Validate supplied integer fields before SafeAssertInt can truncate or default
+// them. The raw SDK tool handler does not enforce the advertised input schema.
+func validateOrderIntegers(args map[string]interface{}) error {
+	for _, field := range []struct {
+		name string
+		min  int
+	}{
+		{"quantity", 1},
+		{"validity_ttl", 1},
+		{"disclosed_quantity", 0},
+		{"iceberg_legs", 1},
+		{"iceberg_quantity", 1},
+	} {
+		raw, exists := args[field.name]
+		if !exists {
+			continue
+		}
+		var value float64
+		switch v := raw.(type) {
+		case int:
+			value = float64(v)
+		case float64:
+			value = v
+		default:
+			return ValidationError{field.name, "must be an integer in the supported range"}
+		}
+		if math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value || value < float64(field.min) || value > 2147483647 {
+			return ValidationError{field.name, "must be an integer in the supported range"}
+		}
+	}
+	if args["validity"] == "TTL" {
+		if _, exists := args["validity_ttl"]; !exists {
+			return ValidationError{"validity_ttl", "is required when validity is TTL"}
+		}
+	}
+	return nil
 }

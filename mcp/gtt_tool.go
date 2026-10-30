@@ -141,7 +141,7 @@ func (*GTTTool) Handler(manager *kc.Manager) ToolHandler {
 			if err != nil {
 				return NewToolResultError(err.Error()), nil
 			}
-			return handler.WithKiteClient(request, "gtt_place", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "gtt_place", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				resp, err := client.PlaceGTT(gttParams)
 				if err != nil {
 					handler.manager.Logger.Error("Failed to place GTT order", "error", err)
@@ -159,7 +159,7 @@ func (*GTTTool) Handler(manager *kc.Manager) ToolHandler {
 			if err != nil {
 				return NewToolResultError(err.Error()), nil
 			}
-			return handler.WithKiteClient(request, "gtt_modify", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "gtt_modify", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				resp, err := client.ModifyGTT(triggerID, gttParams)
 				if err != nil {
 					handler.manager.Logger.Error("Failed to modify GTT order", "error", err)
@@ -173,7 +173,7 @@ func (*GTTTool) Handler(manager *kc.Manager) ToolHandler {
 				return NewToolResultError(err.Error()), nil
 			}
 			triggerID := SafeAssertInt(args["trigger_id"], 0)
-			return handler.WithKiteClient(request, "gtt_delete", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "gtt_delete", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				resp, err := client.DeleteGTT(triggerID)
 				if err != nil {
 					handler.manager.Logger.Error("Failed to delete GTT order", "error", err)
