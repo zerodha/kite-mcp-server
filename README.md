@@ -242,6 +242,7 @@ This project uses Go's `testing/synctest` package for time-dependent tests (sess
 | -------------------- | ----------- | ---------------------------------------------------------- |
 | `KITE_API_KEY`       | Required    | Your Kite Connect API key                                  |
 | `KITE_API_SECRET`    | Required    | Your Kite Connect API secret                               |
+| `KITE_TRADE_API_BASE_URI` | SDK default | Optional Kite Connect API base URI for internal routing |
 | `JWT_SECRET`         | Required    | Secret for signing JWT tokens (min 32 bytes)               |
 | `OAUTH_ISSUER`       | _(auto)_    | OAuth issuer URL (defaults to http://host:port)            |
 | `APP_PORT`           | `8080`      | HTTP server port                        |

@@ -38,17 +38,18 @@ type App struct {
 
 // Config holds the application configuration
 type Config struct {
-	KiteAPIKey        string
-	KiteAPISecret     string
-	AppPort           string
-	AppHost           string
-	ExcludedTools     string
-	AdminSecretPath   string
-	JWTSecret         string
-	OAuthIssuer       string
-	OAuthTokenTTL     string
-	MCPSessionTimeout string
-	TrustedProxyCIDRs []string
+	KiteAPIKey          string
+	KiteAPISecret       string
+	KiteTradeAPIBaseURI string
+	AppPort             string
+	AppHost             string
+	ExcludedTools       string
+	AdminSecretPath     string
+	JWTSecret           string
+	OAuthIssuer         string
+	OAuthTokenTTL       string
+	MCPSessionTimeout   string
+	TrustedProxyCIDRs   []string
 }
 
 const (
@@ -61,17 +62,18 @@ const (
 func NewApp(logger *slog.Logger) *App {
 	return &App{
 		Config: &Config{
-			KiteAPIKey:        os.Getenv("KITE_API_KEY"),
-			KiteAPISecret:     os.Getenv("KITE_API_SECRET"),
-			AppPort:           os.Getenv("APP_PORT"),
-			AppHost:           os.Getenv("APP_HOST"),
-			ExcludedTools:     os.Getenv("EXCLUDED_TOOLS"),
-			AdminSecretPath:   os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
-			JWTSecret:         os.Getenv("JWT_SECRET"),
-			OAuthIssuer:       os.Getenv("OAUTH_ISSUER"),
-			OAuthTokenTTL:     os.Getenv("OAUTH_TOKEN_TTL"),
-			MCPSessionTimeout: os.Getenv("MCP_SESSION_TIMEOUT"),
-			TrustedProxyCIDRs: parseCSVEnv(os.Getenv("TRUSTED_PROXY_CIDRS")),
+			KiteAPIKey:          os.Getenv("KITE_API_KEY"),
+			KiteAPISecret:       os.Getenv("KITE_API_SECRET"),
+			KiteTradeAPIBaseURI: os.Getenv("KITE_TRADE_API_BASE_URI"),
+			AppPort:             os.Getenv("APP_PORT"),
+			AppHost:             os.Getenv("APP_HOST"),
+			ExcludedTools:       os.Getenv("EXCLUDED_TOOLS"),
+			AdminSecretPath:     os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
+			JWTSecret:           os.Getenv("JWT_SECRET"),
+			OAuthIssuer:         os.Getenv("OAUTH_ISSUER"),
+			OAuthTokenTTL:       os.Getenv("OAUTH_TOKEN_TTL"),
+			MCPSessionTimeout:   os.Getenv("MCP_SESSION_TIMEOUT"),
+			TrustedProxyCIDRs:   parseCSVEnv(os.Getenv("TRUSTED_PROXY_CIDRS")),
 		},
 		Version:   "v0.0.0",
 		startTime: time.Now(),
@@ -188,6 +190,7 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 	kcManager, err := kc.New(kc.Config{
 		APIKey:          app.Config.KiteAPIKey,
 		APISecret:       app.Config.KiteAPISecret,
+		KiteBaseURI:     app.Config.KiteTradeAPIBaseURI,
 		Logger:          app.logger,
 		Metrics:         app.metrics,
 		Instruments:     instManager,

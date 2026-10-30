@@ -25,7 +25,7 @@ type Config struct {
 	Logger      *slog.Logger
 	Metrics     *metrics.Manager
 	Instruments *instruments.Manager
-	KiteBaseURI string // Override Kite Connect API base URL (for testing)
+	KiteBaseURI string // Optional override for the Kite Connect API base URL
 	// SessionDuration is the backing session lifetime. It must be at least as
 	// long as the OAuth access-token lifetime.
 	SessionDuration time.Duration
@@ -86,7 +86,7 @@ const (
 type Manager struct {
 	apiKey          string
 	apiSecret       string
-	kiteBaseURI     string // Override for Kite Connect API base URL (testing)
+	kiteBaseURI     string // Optional override for the Kite Connect API base URL
 	sessionDuration time.Duration
 	// Bounded striped locks serialize renewal without retaining per-session lock entries.
 	refreshLocks   [64]sync.Mutex
