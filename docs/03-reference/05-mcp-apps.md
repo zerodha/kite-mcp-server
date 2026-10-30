@@ -1,3 +1,8 @@
+---
+title: MCP Apps
+description: Portfolio and market views inside compatible AI clients
+---
+
 # MCP Apps
 
 Kite's `portfolio` and `market` tools include an inline, read-only Kite app in clients supporting the standard `io.modelcontextprotocol/ui` extension. Connect to the same `/mcp` endpoint and authenticate normally; no separate website, browser API key, or UI server is needed.

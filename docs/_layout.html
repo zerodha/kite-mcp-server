@@ -1,13 +1,14 @@
+{{ define "brand" }}<a class="brand" href="{{ .BasePath }}/" aria-label="Kite MCP home"><img src="{{ .BasePath }}/_static/zerodha-logo.svg" width="130" height="18" alt="Zerodha"><span class="brand-product">Kite MCP</span></a>{{ end }}
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ block "title" . }}{{ .Title }} — {{ .SiteName }}{{ end }}</title>
+  <title>{{ block "title" . }}{{ .Title }} | {{ .SiteName }}{{ end }}</title>
   {{ if .Description }}<meta name="description" content="{{ .Description }}">{{ end }}
   {{ if .Favicon }}<link rel="icon" href="{{ .BasePath }}/{{ .Favicon }}">{{ end }}
   {{ if .FeedEnabled }}<link rel="alternate" type="application/rss+xml" title="{{ .SiteName }}" href="{{ .BasePath }}/feed.xml">{{ end }}
-  <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css">
+  <link rel="stylesheet" href="{{ .BasePath }}/_static/oat/oat.min.css">
   <link rel="stylesheet" href="{{ .BasePath }}/_syntax.css">
   <link rel="stylesheet" href="{{ .BasePath }}/_static/zerodha.css">
   <script>
@@ -146,7 +147,7 @@
         var tokens = query.split(/\s+/).filter(Boolean);
 
         loadIndex().then(function(entries) {
-          if (!entries) return;
+          if (!entries || input.value.trim().toLowerCase() !== query) return;
           var matches = entries
             .map(function(e) { return { entry: e, score: scoreEntry(e, tokens) }; })
             .filter(function(item) { return item.score > 0; })
@@ -192,7 +193,8 @@
     });
   </script>
   {{ end }}
-  <script src="https://unpkg.com/@knadh/oat/oat.min.js" defer></script>
+  <script src="{{ .BasePath }}/_static/oat/oat.min.js" defer></script>
+  <script src="{{ .BasePath }}/_static/docs.js" defer></script>
   <style>
     html[data-theme="dark"] .icon-dark { display: none; }
     html:not([data-theme="dark"]) .icon-light { display: none; }
@@ -227,6 +229,8 @@
   {{ block "head" . }}{{ end }}
 </head>
 <body data-sidebar-layout>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  {{ block "site-header" . }}
   <nav data-topnav>
     <div class="row">
       <div class="col-4 hstack gap-2">
@@ -237,19 +241,13 @@
             <line x1="4" y1="17" x2="16" y2="17"></line>
           </svg>
         </button>
-        <a href="{{ .BasePath }}/" {{ if .Logo }}aria-label="{{ .SiteName }}"{{ end }}>
-          {{ if .LogoInline }}
-            {{ .LogoInline }}
-          {{ else if .Logo }}
-            <img src="{{ .BasePath }}/{{ .Logo }}" height="24" alt="{{ .SiteName }}">
-          {{ else }}
-            <strong>{{ .SiteName }}</strong>
-          {{ end }}
-        </a>
+        {{ template "brand" . }}
       </div>
       <div class="col-8 hstack justify-end">
+        <a href="{{ .BasePath }}/guide/getting-started/">Documentation</a>
+        <a href="{{ .BasePath }}/reference/examples/">Examples</a>
         {{ range .TopNav }}
-        <a href="{{ .URL }}">{{ linkIcon .Icon }}{{ .Title }}</a>
+        <a href="{{ .URL }}">{{ .Title }}</a>
         {{ end }}
         {{ if .SearchEnabled }}
         <button class="outline small" onclick="document.getElementById('search-dialog').showModal()" aria-label="Search">
@@ -257,7 +255,7 @@
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
-          Search
+          <span class="search-label">Search</span>
           <kbd>/</kbd>
         </button>
         {{ end }}
@@ -268,11 +266,13 @@
     </div>
   </nav>
 
+  {{ end }}
   {{ if .SearchEnabled }}
   <dialog id="search-dialog">
     <form method="dialog">
       <header>
-        <input type="search" placeholder="Search docs…" data-search-input autofocus autocomplete="off" autocapitalize="off" spellcheck="false">
+        <input type="search" aria-label="Search documentation" placeholder="Search docs…" data-search-input autofocus autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button type="submit" class="outline small" aria-label="Close search">×</button>
       </header>
       <div data-search-results>
       </div>
@@ -283,7 +283,9 @@
   </dialog>
   {{ end }}
 
+  {{ block "sidebar" . }}
   <aside data-sidebar class="main-sidebar">
+    <header data-sidebar-header><strong>Kite MCP documentation</strong></header>
     {{ .Nav }}
     <footer>
       <button class="outline small" onclick="toggleTheme()">
@@ -302,7 +304,8 @@
     </footer>
   </aside>
 
-  <main>
+  {{ end }}
+  <main id="main-content" tabindex="-1">
     <div class="container">
       {{ block "content" . }}
       <article>
@@ -310,9 +313,11 @@
         {{ .Content }}
       </article>
       {{ end }}
-      {{ if index .Site "footer" }}
-      <footer class="footer text-light mt-6 mb-6">
-        <small>{{ index .Site "footer" | safeHTML }}</small>
+      {{ block "site-footer" . }}
+      <footer class="docs-footer" role="contentinfo">
+        <div><strong>Kite MCP</strong><nav aria-label="Footer"><a href="{{ .BasePath }}/guide/getting-started/">Documentation</a><a href="{{ .BasePath }}/reference/examples/">Examples</a><a href="https://github.com/zerodha/kite-mcp-server">GitHub</a><a href="https://support.zerodha.com">Support</a></nav></div>
+        <p>AI assistants can make mistakes. Verify market data and review orders before acting. Investments in securities market are subject to market risks; read all the related documents carefully before investing.</p>
+        <small>© <a href="https://zerodha.com">Zerodha Broking Ltd.</a></small>
       </footer>
       {{ end }}
     </div>

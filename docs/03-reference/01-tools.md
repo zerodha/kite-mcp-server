@@ -195,6 +195,10 @@ Manage GTT (Good Till Triggered) orders. GTT orders persist across trading sessi
 | `lower_quantity` | number | Quantity for the lower leg |
 | `lower_limit_price` | number | Limit price for the lower leg |
 
+**List pagination:**
+
+| Parameter | Type | Modes | Description |
+|-----------|------|-------|-------------|
 | `from` | integer | list | Pagination start index |
 | `limit` | integer | list | Page size: 1-500, default 100 |
 

@@ -1,47 +1,51 @@
-{{ define "title" }}{{ .SiteName }} — Connect AI to Your Zerodha Account{{ end }}
-
-{{ define "head" }}
-<style>
-  /* Hide sidebar on landing page, full-width content */
-  [data-sidebar] { display: none !important; }
-  [data-sidebar-toggle] { display: none !important; }
-  [data-sidebar-layout] { grid-template-columns: 1fr !important; }
-
-  .hero { text-align: center; padding: var(--space-12) var(--space-4) var(--space-8); max-width: 640px; margin: 0 auto; }
-  .hero h1 { margin-bottom: var(--space-3); }
-  .hero .tagline { font-size: var(--text-5); color: var(--muted-foreground); margin-bottom: var(--space-6); line-height: 1.7; }
-  .hero .cta { display: flex; gap: var(--space-3); justify-content: center; margin-bottom: var(--space-8); }
-  .clients-section { text-align: center; padding: var(--space-8) var(--space-4); max-width: 640px; margin: 0 auto; }
-  .clients-section h2 { margin-bottom: var(--space-4); }
-  .client-links { display: flex; justify-content: center; gap: var(--space-8); }
-  .footer { text-align: center; }
-</style>
+{{ define "title" }}Kite MCP | Connect AI to your Zerodha account{{ end }}
+{{ define "head" }}<link rel="stylesheet" href="{{ .BasePath }}/_static/landing.css">{{ end }}
+{{ define "site-header" }}
+<header class="site-header"><nav class="site-nav" aria-label="Main navigation">
+  {{ template "brand" . }}
+  <button class="nav-toggle outline" aria-expanded="false" aria-controls="landing-nav" aria-label="Toggle navigation" onclick="var open = this.getAttribute('aria-expanded') !== 'true'; this.setAttribute('aria-expanded', open); document.getElementById('landing-nav').classList.toggle('is-open', open)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
+  <div class="nav-links" id="landing-nav"><a href="{{ .BasePath }}/guide/getting-started/">Documentation</a><a href="{{ .BasePath }}/reference/examples/">Examples</a><a href="https://github.com/zerodha/kite-mcp-server">GitHub</a></div>
+</nav></header>
 {{ end }}
-
+{{ define "sidebar" }}<!-- The landing page has no documentation sidebar. -->{{ end }}
 {{ define "content" }}
-<section class="hero">
-  <h1>Connect AI assistants to your Zerodha account</h1>
-  <p class="tagline">
-    Model Context Protocol server for Kite Connect API. Use Claude, Cursor, or any MCP-compatible AI to manage your portfolio.
-  </p>
-  <div class="cta">
-    <a href="{{ .BasePath }}/guide/getting-started/" class="button">Get started</a>
-    <a href="{{ .BasePath }}/reference/examples/" class="button outline">See examples</a>
+<section class="landing-hero" aria-labelledby="hero-title">
+  <div class="hero-product-visual" role="img" aria-label="Illustration of a Zerodha portfolio connected through Kite MCP to an AI assistant showing a portfolio allocation chart. Example data.">
+    <div class="portfolio-window product-window">
+      <div class="product-window-header"><img src="{{ .BasePath }}/_static/zerodha-logo.svg" width="98" height="13" alt=""><span>Portfolio</span></div>
+      <div class="window-tabs"><span>Holdings</span><span>Positions</span></div>
+      <div class="portfolio-body">
+        <div class="portfolio-label">Your investments</div>
+        <div class="portfolio-chart"><svg viewBox="0 0 242 72" fill="none" aria-hidden="true"><path d="M0 18h242M0 42h242M0 66h242" stroke="#edf1f5"/><path d="m0 58 16-7 14 4 17-15 15 5 18-11 16 5 17-17 15 8 17-6 16 7 16-19 17 7 17-14 16 5 15-9" stroke="#387ed1" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+        <div class="holding-row"><span><i class="allocation-dot equity"></i>Equity</span><div><i style="width:60%"></i></div></div>
+        <div class="holding-row"><span><i class="allocation-dot etfs"></i>ETFs</span><div><i style="width:25%"></i></div></div>
+        <div class="holding-row"><span><i class="allocation-dot funds"></i>Funds</span><div><i style="width:15%"></i></div></div>
+      </div>
+    </div>
+    <div class="mcp-bridge"><div class="bridge-line"></div><div class="bridge-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 .1l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7-.1l-3 3a5 5 0 0 0 7 7l2-2"/></svg></div><span>Kite MCP</span></div>
+    <div class="assistant-window product-window">
+      <div class="product-window-header"><span class="assistant-title"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h7"/></svg>Your AI assistant</span><span class="connection-status"><i></i>Connected</span></div>
+      <div class="assistant-body"><div class="portfolio-prompt">Show my portfolio allocation</div><div class="allocation-title">Your holdings, at a glance</div><div class="allocation-view"><div class="allocation-donut"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="35" fill="none" stroke="#edf3f9" stroke-width="13"/><g fill="none" stroke-width="13" transform="rotate(-90 50 50)"><circle cx="50" cy="50" r="35" stroke="#387ed1" pathLength="100" stroke-dasharray="60 100"/><circle cx="50" cy="50" r="35" stroke="#8db6e2" pathLength="100" stroke-dasharray="25 100" stroke-dashoffset="-60"/><circle cx="50" cy="50" r="35" stroke="#c9dcee" pathLength="100" stroke-dasharray="15 100" stroke-dashoffset="-85"/></g></svg></div><div class="allocation-legend"><span><i class="allocation-dot equity"></i>Equity<b>60%</b></span><span><i class="allocation-dot etfs"></i>ETFs<b>25%</b></span><span><i class="allocation-dot funds"></i>Funds<b>15%</b></span></div></div><div class="illustration-caption">Illustrative view</div></div>
+    </div>
   </div>
+  <h1 id="hero-title">Your Zerodha account.<br class="mobile-break"> Your AI assistant.</h1>
+  <p class="hero-description">Connect your portfolio and the markets to the AI tools you use.<br class="desktop-break"> Built on Kite Connect, powered by the Model Context Protocol.</p>
+  <a class="button primary-cta" href="{{ .BasePath }}/guide/getting-started/">Get started</a>
+  <a class="hero-secondary" href="{{ .BasePath }}/reference/examples/">See examples <span aria-hidden="true">→</span></a>
 </section>
-
-<section class="clients-section">
-  <h2>Works with your AI tools</h2>
-  <p class="text-light mb-4">
-    Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Cline, JetBrains, and any MCP-compatible client.
-  </p>
-  <div class="client-links">
-    <a href="{{ .BasePath }}/clients/claude-desktop/">Claude Desktop</a>
-    <a href="{{ .BasePath }}/clients/claude-code/">Claude Code</a>
-    <a href="{{ .BasePath }}/clients/cursor/">Cursor</a>
-    <a href="{{ .BasePath }}/clients/vscode/">VS Code</a>
-    <a href="{{ .BasePath }}/clients/windsurf/">Windsurf</a>
-    <a href="{{ .BasePath }}/clients/other/">More</a>
-  </div>
+<section class="landing-section clients-section" aria-labelledby="clients-title">
+  <h2 id="clients-title">Works with your AI tools</h2><p>Choose your assistant. Connect your Zerodha account.</p>
+  <div class="client-grid"><a href="{{ .BasePath }}/clients/chatgpt/">ChatGPT <span aria-hidden="true">↗</span></a><a href="{{ .BasePath }}/clients/claude-web/">Claude <span aria-hidden="true">↗</span></a><a href="{{ .BasePath }}/clients/claude-code/">Claude Code <span aria-hidden="true">↗</span></a><a href="{{ .BasePath }}/clients/cursor/">Cursor <span aria-hidden="true">↗</span></a><a href="{{ .BasePath }}/clients/vscode/">VS Code <span aria-hidden="true">↗</span></a><a href="{{ .BasePath }}/clients/other/">More clients <span aria-hidden="true">→</span></a></div>
 </section>
+<section class="landing-section capabilities" aria-labelledby="capabilities-title">
+  <div><h2 id="capabilities-title">Talk to your portfolio</h2><p>Use natural language to explore your account and market data, without switching between tools.</p><a href="{{ .BasePath }}/reference/tools/">View all tools <span aria-hidden="true">→</span></a></div>
+  <div class="capability-list"><div><h3>Understand your investments</h3><p>Review holdings, positions, and account balances with your assistant.</p></div><div><h3>Stay close to the markets</h3><p>Look up quotes, historical prices, and instruments to support your research.</p></div><div><h3>Explore interactive views</h3><p>See portfolio allocations and price charts alongside your conversation in supported AI assistants.</p></div></div>
+</section>
+<section class="landing-section setup-section" aria-labelledby="setup-title">
+  <h2 id="setup-title">Connect in a few simple steps</h2><div class="setup-grid"><div><span class="step-number">01</span><h3>Choose your client</h3><p>Follow the setup guide for your preferred MCP-compatible assistant.</p></div><div><span class="step-number">02</span><h3>Sign in with Kite</h3><p>Review the requested access and authenticate directly with Zerodha.</p></div><div><span class="step-number">03</span><h3>Start a conversation</h3><p>Ask about your holdings, explore market data, or review your positions.</p></div></div>
+  <p class="security-note">Your Zerodha credentials are never shared with your AI assistant. <a href="{{ .BasePath }}/guide/getting-started/#authentication">Learn about authentication <span aria-hidden="true">→</span></a></p>
+</section>
+{{ end }}
+{{ define "site-footer" }}
+<footer class="landing-footer" role="contentinfo"><div class="footer-inner"><div><a href="https://zerodha.com"><img src="{{ .BasePath }}/_static/zerodha-logo.svg" alt="Zerodha" width="130" height="18"></a><p>Kite MCP<br>Connect your account to your AI tools.</p><small>© Zerodha Broking Ltd.</small></div><div><h2>Get started</h2><a href="{{ .BasePath }}/guide/getting-started/">Quick start</a><a href="{{ .BasePath }}/clients/chatgpt/">ChatGPT</a><a href="{{ .BasePath }}/clients/claude-web/">Claude</a></div><div><h2>Resources</h2><a href="{{ .BasePath }}/reference/tools/">Tools reference</a><a href="{{ .BasePath }}/reference/faq/">FAQs</a><a href="https://github.com/zerodha/kite-mcp-server">Source on GitHub</a></div><div><h2>Zerodha</h2><a href="https://kite.zerodha.com">Kite</a><a href="https://kite.trade">Kite Connect</a><a href="https://support.zerodha.com">Support</a></div></div><p class="footer-disclaimer">AI assistants can make mistakes. Verify market data and review orders before acting. Investments in securities market are subject to market risks; read all the related documents carefully before investing.</p></footer>
 {{ end }}

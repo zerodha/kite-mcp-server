@@ -7,44 +7,44 @@ description: Frequently asked questions about Kite MCP
 
 ## General
 
-**Is Kite MCP official?**
+### Is Kite MCP official?
 Yes. Kite MCP is developed and maintained by Zerodha. The source code is available on [GitHub](https://github.com/zerodha/kite-mcp-server).
 
-**Which AI clients are supported?**
+### Which AI clients are supported?
 Any MCP-compatible client. Setup guides are available for [[Claude Desktop]], [[Claude Code]], [[Claude Web]], [[ChatGPT Web]], [[Cursor]], [[VS Code]], [[Windsurf]], [[Cline]], and [[JetBrains]]. See [[Other Clients]] for generic instructions.
 
-**Is it free?**
+### Is it free?
 Yes. A Zerodha account with Kite is all that is required.
 
-**How long do sessions last?**
+### How long do sessions last?
 Up to seven days from login. Kite credential renewal does not extend that deadline. Automatic renewal requires a Kite-issued refresh token; without one, you must log in again when Kite access expires. A server restart also requires a new login because sessions are kept in memory.
 
 ## Security
 
-**Can the AI access my Zerodha password?**
+### Can the AI access my Zerodha password?
 No. Authentication happens directly on Kite's login page. The AI client only receives a temporary session token after authorization.
 
-**Can the AI place orders without confirmation?**
+### Can the AI place orders without confirmation?
 The AI will describe the intended action and request confirmation before placing, modifying, or cancelling orders.
 
-**Can I self-host?**
+### Can I self-host?
 Yes. Clone the [repository](https://github.com/zerodha/kite-mcp-server) and provide your own Kite Connect API credentials. See the README for setup instructions.
 
 ## Troubleshooting
 
-**"Server disconnected"**
+### "Server disconnected"
 The connection timed out. Restart the AI client and try again.
 
-**"Invalid session"**
+### "Invalid session"
 The session has expired. Authenticate again.
 
-**Tools not appearing**
+### Tools not appearing
 Verify that Node.js is installed (`node --version`), the configuration JSON is valid, and the AI client has been restarted after adding the server.
 
-**Login link not working**
+### Login link not working
 Ensure pop-ups are not blocked. Copy the full URL and open it manually if needed.
 
-**"Rate limit exceeded"**
+### "Rate limit exceeded"
 Wait briefly and retry. Rate limits are in place to prevent abuse.
 
 ## Support

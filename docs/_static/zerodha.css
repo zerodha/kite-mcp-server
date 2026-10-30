@@ -2,7 +2,7 @@
    Overrides oat CSS variables to match zerodha.com brand.
    See https://oat.ink/customizing/ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+@font-face { font-family: Inter; font-style: normal; font-weight: 100 900; font-display: swap; src: url('InterVariable.woff2') format('woff2'); }
 
 :root {
   /* Zerodha Kite blue */
@@ -17,9 +17,9 @@
   --background: #ffffff;
   --card: #ffffff;
   --muted: #fafafa;
-  --muted-foreground: #999999;
+  --muted-foreground: #666666;
   --faint: #fafafa;
-  --faint-foreground: #999999;
+  --faint-foreground: #666666;
 
   /* Flat, minimal accents */
   --accent: #f4f4f5;
@@ -35,7 +35,7 @@
   --ring: #387ed1;
 
   /* Inter font - same as zerodha.com */
-  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 /* Fix GitHub icon alignment in topnav links */
@@ -64,3 +64,119 @@
   --input: #333333;
   --ring: #5a9ae6;
 }
+
+:root { --font-semibold: 500; --font-bold: 600; }
+h1, h2, h3 { font-weight: 500; }
+a:hover { color: #222; }
+.skip-link { color: #387ed1; position: fixed; left: 16px; top: -100px; z-index: 500; background: white; padding: 12px 20px; border: 1px solid #387ed1; }
+.skip-link:focus { top: 8px; }
+[data-topnav] { min-height: 65px; padding: 0 28px; border-bottom: 1px solid #eee; box-shadow: none; }
+[data-topnav] > .row { max-width: 1100px; width: 100%; margin: auto; min-height: 65px; align-items: center; }
+.brand-logo { width: 130px; height: auto; max-height: 18px; }
+[data-topnav] a { color: var(--foreground); font-size: 14px; }
+[data-topnav] .justify-end { gap: 28px; }
+body > main article { max-width: 820px; line-height: 1.8; }
+@media (max-width: 600px) { [data-topnav] { padding: 0 16px; } [data-topnav] .justify-end { gap: 12px; } [data-topnav] kbd { display: none; } }
+
+.brand-logo { display: inline-flex; align-items: center; width: 130px; }
+.brand-logo svg { width: 130px; height: auto; max-height: 18px; }
+html[data-theme="dark"] body:not(:has(.site-header)) a:hover { color: #fff; }
+/* Oat's generic grid stacks on mobile; the documentation header stays a row. */
+[data-topnav] > .row { display: flex; justify-content: space-between; gap: 16px; }
+[data-sidebar-toggle] { color: var(--foreground); min-height: 36px; }
+@media (max-width: 400px) { [data-topnav] .justify-end > a { display: none; } }
+
+/* Documentation reading layout and scrollable reference content. */
+body:not(:has(.site-header)) > main { padding-top: 42px; }
+body:not(:has(.site-header)) main > .container { max-width: 960px; padding-inline: 48px; padding-bottom: 32px; }
+body > main article { margin-inline: auto; overflow-wrap: anywhere; }
+body > main article h1 { font-size: 32px; line-height: 1.4; margin-bottom: 24px; }
+body > main article h2 { font-size: 25px; line-height: 1.4; margin-top: 42px; margin-bottom: 18px; }
+body > main article h3 { font-size: 20px; margin-top: 30px; }
+body > main article :is(h2,h3) { scroll-margin-top: 24px; }
+body > main article li { margin-bottom: 8px; }
+body > main article :is(pre,.table-scroll) { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+body > main article pre { border: 1px solid var(--border); padding: 20px; line-height: 1.7; }
+body > main article pre code { overflow-wrap: normal; white-space: pre; }
+.table-scroll { margin-bottom: 24px; border: 1px solid var(--border); border-radius: 3px; }
+.table-scroll table { margin: 0; font-size: 14px; line-height: 1.7; }
+.table-scroll :is(th,td) { padding: 12px 16px; min-width: 100px; vertical-align: top; }
+.table-scroll th { background: var(--faint); font-weight: 500; }
+.table-scroll td:first-child code { white-space: nowrap; }
+.main-sidebar a[aria-current] { color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--background)); }
+.brand-product { font-size: 14px; font-weight: 400; color: var(--muted-foreground); padding-left: 20px; margin-left: 14px; border-left: 1px solid var(--border); white-space: nowrap; }
+.docs-contents { margin: 0 0 28px; border: 1px solid var(--border); border-radius: 3px; }
+.docs-contents summary { padding: 12px 16px; font-size: 14px; font-weight: 500; }
+.docs-contents nav { padding: 8px 16px 16px; }
+.docs-contents ul { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px 24px; list-style: none; padding: 0; margin: 0; }
+.docs-contents li { margin: 0; font-size: 14px; }
+body:not(:has(.site-header)) .footer { border-top: 1px solid var(--border); margin-top: 48px; padding-top: 24px; color: var(--muted-foreground); }
+@media (max-width: 1100px) { .brand-product { display: none; } }
+@media (max-width: 768px) {
+  body:not(:has(.site-header)) > main { padding-top: 28px; }
+  body:not(:has(.site-header)) main > .container { padding-inline: 24px; }
+  body > main article h1 { font-size: 28px; }
+  body > main article h2 { font-size: 23px; margin-top: 34px; }
+  body > main article pre { padding: 16px; }
+  .docs-contents ul { grid-template-columns: 1fr; }
+}
+.brand { display: inline-flex; align-items: center; gap: 0 !important; }
+.brand img { display: block; width: 130px; height: auto; }
+.brand-product { display: inline-block; }
+[data-topnav] a { font-size: 14.4px; color: var(--muted-foreground); }
+[data-topnav] { height: 65px; }
+[data-topnav] > .row { min-height: 64px; }
+[data-sidebar-toggle] { border: 0; min-width: 32px; }
+main article a, .docs-footer a { text-decoration: none; }
+main article a:hover, .docs-footer a:hover { text-decoration: underline; }
+.code-frame { position: relative; margin-bottom: 24px; min-width: 0; }
+body > main article .code-frame pre { margin: 0; padding-top: 48px; scrollbar-width: thin; }
+.copy-button { min-height: 32px; padding: 4px 10px; color: var(--muted-foreground); font-size: 12px; background: var(--background); }
+.code-frame > .copy-button { position: absolute; top: 8px; right: 8px; }
+body > main article blockquote { font-style: normal; color: var(--foreground); border-color: #bdd3ed; padding: 16px 20px; background: var(--faint); margin: 20px 0; }
+blockquote > .copy-button { display: block; margin-top: 12px; }
+.docs-footer { border-top: 1px solid var(--border); margin-top: 48px; padding-top: 24px; color: var(--muted-foreground); font-size: 13px; line-height: 1.8; }
+.docs-footer > div { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
+.docs-footer strong { font-size: 14px; font-weight: 500; }
+.docs-footer nav { display: flex; flex-wrap: wrap; gap: 12px 20px; }
+.docs-footer p { max-width: 900px; }
+.docs-footer small { font-size: 12px; }
+[data-theme="dark"] { --muted-foreground: #aaa; --faint-foreground: #aaa; }
+@media (max-width: 1100px) { [data-topnav] .brand-product { display: none; } }
+@media (max-width: 768px) {
+  [data-topnav] .justify-end > a { display: none; }
+  [data-topnav] .brand-product { display: inline-block; margin-left: 12px; padding-left: 12px; font-size: 12px; }
+  [data-topnav] .search-label { display: none; }
+  [data-topnav] .justify-end { gap: 0; }
+  [data-topnav] .row { gap: 8px; }
+  [data-topnav] .justify-end > button { min-width: 36px; min-height: 36px; padding: 8px; }
+  body > main article { line-height: 1.65; }
+  .docs-footer > div { align-items: flex-start; flex-direction: column; gap: 12px; }
+}
+@media (max-width: 360px) { [data-topnav] .brand-product { display: none; } }
+#search-dialog > form > header { display: flex; align-items: center; gap: 12px; }
+#search-dialog input { min-width: 0; flex: 1; }
+#search-dialog [aria-label="Close search"] { flex-shrink: 0; min-width: 36px; min-height: 36px; font-size: 22px; }
+#search-dialog > form > header { flex-direction: row; flex-wrap: nowrap; }
+[data-topnav] { border-bottom-color: var(--border); }
+#search-dialog input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.sidebar-backdrop { display: none; }
+body > main article blockquote { position: relative; padding-right: 78px; }
+blockquote > .copy-button { position: absolute; top: 12px; right: 12px; margin: 0; }
+@media (max-width: 768px) {
+  body[data-sidebar-open] .sidebar-backdrop { display: block; position: fixed; inset: 65px 0 0; z-index: 1; width: 100%; height: calc(100dvh - 65px); background: rgb(0 0 0 / .3); border: 0; border-radius: 0; }
+}
+@media (max-width: 600px) {
+  .parameter-table { display: block; width: 100%; }
+  .parameter-table thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .parameter-table tbody { display: block; }
+  .parameter-table tbody tr { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .parameter-table tbody tr:last-child { border-bottom: 0; }
+  .parameter-table tbody td { display: block; min-width: 0; padding: 8px 14px; border: 0; overflow-wrap: anywhere; }
+  .parameter-table tbody td:first-child, .parameter-table tbody td:last-child { grid-column: 1 / -1; }
+  .parameter-table tbody td::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted-foreground); margin-bottom: 4px; }
+  .parameter-table tbody td:first-child code { white-space: normal; }
+}
+.table-scroll { position: relative; }
+@media (max-width: 600px) { .parameter-table thead { top: 0; left: 0; } }
+body > main article blockquote p:last-of-type { margin-bottom: 0; }

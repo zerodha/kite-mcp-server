@@ -1,0 +1,177 @@
+/* Public landing page. Header dimensions follow zerodha.com. */
+html:has(.site-header) { color-scheme: light !important; }
+body:has(.site-header) { display: block; background: #fff; color: #424242; --primary: #387ed1; --primary-foreground: #fff; --foreground: #424242; --background: #fff; --muted-foreground: #666; --border: #e0e0e0; --ring: #387ed1; }
+body:has(.site-header) main { padding: 0; }
+body:has(.site-header) main > .container { width: 100%; max-width: none; padding: 0; margin: 0; }
+.site-header { height: 65px; border-bottom: 1px solid #eee; background: #fff; }
+.site-nav { max-width: 1100px; height: 100%; margin: auto; display: flex; align-items: center; justify-content: space-between; padding: 0; }
+.brand { display: inline-flex; align-items: center; gap: 20px; color: #666; }
+.brand img, .landing-footer img { display: block; width: 130px; height: auto; }
+.brand span { border-left: 1px solid #ddd; padding-left: 20px; font-size: 14px; }
+.nav-links { display: flex; align-items: center; gap: 40px; }
+.nav-links a { color: #666; font-size: 14.4px; }
+.nav-links a:hover, .landing-hero a.hero-secondary:hover, .landing-section a:hover, .landing-footer a:hover { color: #222; }
+.nav-toggle { display: none; }
+.landing-hero { max-width: 1100px; margin: auto; padding: 72px 0 0; text-align: center; }
+.landing-hero h1 { font-size: 32px; font-weight: 500; line-height: 1.4; margin: 44px 0 18px; letter-spacing: -.4px; }
+.hero-description { font-size: 19px; line-height: 1.8; margin: 0 0 28px; }
+.primary-cta { background: #387ed1; color: #fff; font-size: 19px; font-weight: 500; border: 1px solid #387ed1; border-radius: 3px; padding: 10px 36px; min-height: 46px; display: inline-flex; align-items: center; justify-content: center; }
+.primary-cta:hover { background: #222; border-color: #222; color: #fff; }
+.hero-secondary { display: block; width: fit-content; margin: 20px auto 0; font-size: 15px; color: #387ed1; }
+.landing-section { max-width: 1100px; margin: 0 auto; padding: 88px 0; }
+.landing-section h2 { font-size: 28px; font-weight: 500; line-height: 1.5; margin: 0 0 16px; }
+.landing-section p { color: #666; font-size: 16px; line-height: 1.8; }
+.clients-section { text-align: center; padding-bottom: 68px; }
+.client-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-top: 32px; }
+.client-grid a { padding: 20px 8px; border-bottom: 1px solid #eee; white-space: nowrap; font-size: 15px; }
+.client-grid a span { margin-left: 5px; }
+.capabilities { display: grid; grid-template-columns: 1fr 1fr; gap: 100px; border-top: 1px solid #eee; }
+.capabilities > div:first-child { max-width: 400px; }
+.capability-list h3, .setup-grid h3 { font-size: 19px; font-weight: 500; margin: 0 0 12px; }
+.capability-list > div + div { margin-top: 30px; }
+.setup-section { border-top: 1px solid #eee; }
+.setup-section > h2 { text-align: center; }
+.setup-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 56px; margin-top: 42px; }
+.step-number { display: block; color: #387ed1; font-size: 14px; margin-bottom: 18px; }
+.security-note { margin-top: 42px; padding-top: 24px; border-top: 1px solid #eee; font-size: 14px !important; }
+.landing-footer { background: #fafafa; border-top: 1px solid #eee; padding: 48px max(24px, calc((100% - 1100px) / 2)) 30px; }
+.footer-inner { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap: 40px; }
+.footer-inner h2 { font-size: 18px; font-weight: 500; margin: 0 0 20px; }
+.footer-inner p { font-size: 13px; line-height: 1.9; margin-top: 20px; color: #666; }
+.footer-inner small { color: #666; font-size: 12px; }
+.footer-inner > div:not(:first-child) > a { display: block; color: #666; font-size: 14px; margin-bottom: 12px; }
+.footer-disclaimer { font-size: 12px; line-height: 1.8; color: #666; margin-top: 36px; }
+@media (max-width: 1160px) { .site-nav, .landing-hero, .landing-section { margin-left: 28px; margin-right: 28px; } }
+@media (max-width: 700px) {
+  .site-header { height: 65px; position: relative; z-index: 10; }
+  .site-nav { margin: 0 24px; }
+  .brand { gap: 12px; } .brand span { padding-left: 12px; font-size: 12px; }
+  .nav-toggle { display: inline-flex; min-height: 40px; padding: 8px; border: 0; color: #424242; background: transparent; }
+  .nav-links { display: none; position: absolute; top: 64px; left: 0; right: 0; padding: 16px 24px; gap: 0; background: white; border-bottom: 1px solid #eee; box-shadow: 0 5px 10px #00000008; }
+  .nav-links.is-open { display: flex; flex-direction: column; align-items: stretch; }
+  .nav-links a { padding: 12px 0; }
+  .landing-hero { padding-top: 40px; margin: 0 24px; }
+  .landing-hero h1 { font-size: 26px; margin-top: 30px; }
+  .hero-description { font-size: 17px; line-height: 1.7; }
+  .desktop-break { display: none; }
+  .primary-cta { font-size: 18px; }
+  .landing-section { margin: 0 24px; padding: 56px 0; }
+  .landing-section h2 { font-size: 24px; }
+  .client-grid { grid-template-columns: repeat(2, 1fr); gap: 8px 20px; margin-top: 24px; }
+  .client-grid a { padding: 16px 0; }
+  .capabilities, .setup-grid { grid-template-columns: 1fr; gap: 32px; }
+  .setup-section > h2 { text-align: left; }
+  .setup-grid { margin-top: 30px; }
+  .step-number { margin-bottom: 10px; }
+  .footer-inner { grid-template-columns: repeat(2, 1fr); gap: 32px 24px; }
+}
+
+.mobile-break { display: none; }
+.landing-hero h1 { text-wrap: balance; }
+.client-grid a { border: 1px solid #eee; border-radius: 3px; }
+.client-grid a:hover { border-color: #bdd3ed; background: #fafcff; }
+.security-note { text-align: center; font-size: 15px !important; }
+.security-note a { text-decoration: none; white-space: nowrap; }
+.footer-disclaimer { font-size: 13px; max-width: 900px; }
+.landing-footer img { width: 115px; }
+@media (max-width: 700px) {
+  .mobile-break { display: block; }
+  .security-note { text-align: left; }
+  .security-note a { display: block; margin-top: 8px; white-space: normal; }
+}
+
+@media (max-width: 700px) { .landing-footer img { margin-top: 3px; } }
+
+/* Responsive product illustration, with a compact account strip on phones. */
+.hero-product-visual { display: grid; grid-template-columns: minmax(0,280px) 114px minmax(0,370px); align-items: center; justify-content: center; max-width: 840px; min-height: 290px; margin: 0 auto; text-align: left; color: #424242; }
+.product-window { border: 1px solid #e4e9ee; border-radius: 5px; background: #fff; box-shadow: 0 8px 28px rgb(31 66 100 / .055), 0 1px 4px rgb(31 66 100 / .025); min-width: 0; }
+.product-window-header { height: 48px; padding: 0 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #edf0f3; font-size: 11px; color: #666; }
+.product-window-header img { width: 98px; height: auto; }
+.portfolio-window { transform: translateY(10px); }
+.window-tabs { display: flex; gap: 22px; padding: 0 18px; border-bottom: 1px solid #edf0f3; color: #888; font-size: 11px; }
+.window-tabs span { padding: 12px 0 10px; }
+.window-tabs span:first-child { color: #387ed1; border-bottom: 2px solid #387ed1; }
+.portfolio-body { padding: 16px 18px 18px; }
+.portfolio-label { font-size: 12px; }
+.portfolio-chart { margin: 8px 0 12px; }
+.portfolio-chart svg { display: block; width: 100%; height: 62px; }
+.holding-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 10px; font-size: 10px; color: #666; }
+.holding-row > span, .allocation-legend > span { display: flex; align-items: center; gap: 8px; }
+.allocation-dot { display: inline-block; width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+.equity { background: #387ed1; }.etfs { background: #8db6e2; }.funds { background: #c9dcee; }
+.holding-row > div { width: 122px; height: 4px; border-radius: 2px; background: #f2f5f8; }
+.holding-row > div > i { display: block; height: 100%; border-radius: 2px; background: #b9d2ec; }
+.mcp-bridge { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #387ed1; font-size: 12px; }
+.bridge-line { position: absolute; top: 22px; width: 100%; border-top: 1px dashed #b8cee5; }
+.bridge-icon { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 46px; height: 46px; background: #fff; border: 1px solid #d6e4f2; border-radius: 50%; box-shadow: 0 0 0 7px #fff; }
+.mcp-bridge > span { background: #fff; padding: 0 6px; }
+.assistant-title { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #424242; }
+.assistant-title svg { color: #7592ad; }
+.connection-status { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; }
+.connection-status i { width: 5px; height: 5px; border-radius: 50%; background: #58a58b; }
+.assistant-body { padding: 18px 22px 12px; }
+.portfolio-prompt { margin: 0 0 20px 30px; padding: 11px 14px; background: #f5f7f9; border-radius: 5px 5px 0 5px; font-size: 12px; }
+.allocation-title { font-size: 12px; font-weight: 500; }
+.allocation-view { display: flex; align-items: center; gap: 28px; padding: 10px 0 0; }
+.allocation-donut { position: relative; width: 115px; height: 115px; flex-shrink: 0; }
+.allocation-donut svg { display: block; width: 100%; height: 100%; }
+.allocation-donut > span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #777; }
+.allocation-legend { display: flex; flex-direction: column; gap: 15px; font-size: 11px; color: #666; }
+.illustration-caption { margin-top: 2px; text-align: right; font-size: 9px; color: #888; }
+.landing-hero { padding-top: 48px; }
+.landing-hero h1 { margin-top: 36px; }
+@media (max-width: 700px) {
+  .landing-hero { padding-top: 28px; }
+  .hero-product-visual { max-width: 350px; min-height: 0; grid-template-columns: minmax(0,1fr) 96px; gap: 14px 12px; }
+  .portfolio-window { transform: none; }
+  .portfolio-window .product-window-header { height: 44px; padding: 0 12px; }
+  .portfolio-window .product-window-header img { width: 85px; }
+  .portfolio-window .product-window-header > span { font-size: 10px; }
+  .window-tabs, .portfolio-body { display: none; }
+  .mcp-bridge { flex-direction: row; gap: 6px; font-size: 11px; }
+  .bridge-line { display: none; }
+  .bridge-icon { width: 27px; height: 27px; border: 0; box-shadow: none; }
+  .bridge-icon svg { width: 18px; height: 18px; }
+  .mcp-bridge > span { padding: 0; white-space: nowrap; }
+  .assistant-window { grid-column: 1 / -1; }
+  .product-window-header { height: 43px; padding: 0 16px; }
+  .assistant-body { padding: 15px 18px 12px; }
+  .portfolio-prompt { margin: 0 0 16px 18px; }
+  .allocation-view { gap: 28px; padding-top: 5px; }
+  .allocation-donut { width: 100px; height: 100px; }
+  .landing-hero h1 { margin-top: 28px; }
+}
+@media (max-width: 360px) {
+  .hero-product-visual { gap: 12px 8px; grid-template-columns: minmax(0,1fr) 86px; }
+  .portfolio-window .product-window-header { padding: 0 10px; }
+  .portfolio-window .product-window-header img { width: 77px; }
+  .portfolio-window .product-window-header > span { display: none; }
+  .assistant-title { font-size: 11px; }
+  .allocation-view { gap: 22px; }
+  .connection-status { font-size: 9px; }
+}
+
+.hero-product-visual { align-items: start; }
+.portfolio-window { transform: none; }
+.product-window { min-height: 300px; }
+.mcp-bridge { align-self: center; }
+.allocation-legend { min-width: 120px; }
+.allocation-legend > span { display: grid; grid-template-columns: 7px 1fr auto; }
+.allocation-legend b { color: #424242; font-weight: 500; font-size: 11px; }
+.illustration-caption { font-size: 11px; color: #777; margin-top: 4px; }
+.portfolio-prompt { width: fit-content; margin-left: auto; max-width: 100%; }
+.landing-hero h1 { margin-top: 64px; }
+@media (max-width: 700px) {
+  .hero-product-visual { position: relative; grid-template-columns: minmax(0,1fr); gap: 14px; }
+  .product-window { min-height: 0; }
+  .portfolio-window { grid-column: 1 / -1; }
+  .portfolio-window .product-window-header > span { display: none; }
+  .mcp-bridge { position: absolute; top: 0; right: 12px; height: 44px; color: #666; }
+  .mcp-bridge::after { content: ''; position: absolute; top: 44px; left: 50%; height: 14px; border-left: 1px dashed #cbd9e7; }
+  .mcp-bridge > span { background: transparent; }
+  .bridge-icon { background: transparent; }
+  .allocation-legend { min-width: 108px; }
+  .allocation-view { gap: 22px; }
+  .landing-hero h1 { margin-top: 28px; }
+}
+@media (max-width: 360px) { .landing-hero h1 { font-size: 24px; } }
