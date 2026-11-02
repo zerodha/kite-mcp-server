@@ -29,6 +29,9 @@ jobs:
     
     - name: Run tests
       run: nix develop --command just test
+
+    - name: Check Go vulnerabilities
+      run: nix develop --command just security
     
     - name: Get version from tag
       id: version

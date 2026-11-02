@@ -48,6 +48,9 @@ jobs:
     
     - name: Run tests
       run: nix develop --command just test
+
+    - name: Check Go vulnerabilities
+      run: nix develop --command just security
     
     - name: Run build
       run: nix develop --command just build

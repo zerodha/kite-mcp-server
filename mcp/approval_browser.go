@@ -248,6 +248,7 @@ func (b *BrowserApprovals) permissionStatus(ctx context.Context, req *sdk.CallTo
 type browserOrderPage struct {
 	Title, ClientName, Account, CSRF, Message, ManageURL, Expiry, ApprovalExpiry, SubmitLabel, PermissionNote string
 	Sections                                                                                                  []browserOrderSection
+	Notes                                                                                                     []string
 	Pending, Manage, Allowed                                                                                  bool
 }
 type browserOrderSection struct {
@@ -287,6 +288,7 @@ func approvalHTTPHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 }
 
@@ -344,6 +346,10 @@ func (b *BrowserApprovals) orderPageLocked(p *browserOrder) browserOrderPage {
 		p.status = "expired"
 	}
 	data := browserOrderPage{Title: "Review order", ClientName: p.clientName, Account: p.user, CSRF: p.csrf, Sections: browserOrderSections(p.operation, p.snapshot), ApprovalExpiry: p.expires.In(time.FixedZone("IST", 19800)).Format("15:04:05 IST")}
+	var fields map[string]any
+	if json.Unmarshal(p.snapshot, &fields) == nil {
+		data.Notes = tradeApprovalNotes(p.operation, fields)
+	}
 	if p.status == "approval_required" {
 		data.Pending = true
 		data.SubmitLabel = map[string]string{"orders_place": "Place this order", "orders_modify": "Apply these changes", "orders_cancel": "Cancel this order"}[p.operation]
@@ -415,6 +421,10 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 	b.mu.Unlock()
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
+	// Keep expiry effective during order-history reads, credential renewal, and
+	// the outbound request, rather than checking it only before execution.
+	ctx, expire := context.WithDeadline(ctx, p.expires)
+	defer expire()
 	ctx = context.WithValue(ctx, browserApprovalsKey{}, b)
 	ctx = context.WithValue(ctx, approvedBrowserOrderKey{}, approvedBrowserOrder{session: p.session, user: p.user, operation: p.operation, snapshot: p.snapshot, expires: p.expires})
 	req := &sdk.CallToolRequest{Params: &sdk.CallToolParamsRaw{Name: "orders", Arguments: json.RawMessage(p.arguments)}, Extra: &sdk.RequestExtra{Header: http.Header{"X-Kite-Session-Id": {p.session}}}}

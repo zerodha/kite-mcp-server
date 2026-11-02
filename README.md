@@ -50,7 +50,7 @@ For self-hosting with your own API keys, follow the installation steps below.
 ### Prerequisites
 
 - **For the hosted version**: A Zerodha account and an MCP client with remote OAuth support or a stdio bridge
-- **For self-hosting**: Go 1.25 or later
+- **For self-hosting**: Go 1.26.10 or later
 - **For self-hosting**: Valid Kite Connect API credentials
 
 ### Getting started
@@ -173,6 +173,7 @@ just build      # Build the project
 just run        # Run the server
 just test       # Run tests
 just lint       # Format and lint code
+just security   # Check Go vulnerabilities
 just coverage   # Generate coverage report
 ```
 
@@ -180,7 +181,7 @@ just coverage   # Generate coverage report
 
 **Requirements:**
 
-- Go 1.25+ (includes `testing/synctest` for timing-dependent tests)
+- Go 1.26.10+ (includes `testing/synctest` for timing-dependent tests)
 
 ```bash
 # Run all tests

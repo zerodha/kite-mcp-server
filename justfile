@@ -4,7 +4,7 @@
 # Note: All build and test commands use CGO_ENABLED=0 for static binaries
 # and better cross-platform compatibility
 #
-# Tests require Go 1.25+ (testing/synctest is part of the standard library)
+# Build and test with Go 1.26.10+ (the minimum is enforced by go.mod)
 
 # Configuration variables
 BINARY_NAME := "kite-mcp.bin"
@@ -99,6 +99,10 @@ lint:
     go fmt ./...
     go vet ./...
     @just _run-golangci-lint
+
+# Check reachable Go code against the Go vulnerability database
+security:
+    go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -tags=testing ./...
 
 # Run all quality checks
 check: fmt lint test

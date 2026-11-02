@@ -40,23 +40,8 @@ func tradeApprovalForm(operation string, snapshot []byte) *mcp.ElicitParams {
 	} else {
 		writeApprovalFields(&body, fields, "")
 	}
-	switch operation {
-	case "orders_place":
-		body.WriteString("\nUnspecified fields use Kite defaults.\n")
-	case "orders_modify":
-		body.WriteString("\nOnly the listed changes will be sent. Other fields stay unchanged.\n")
-	case "orders_cancel":
-		body.WriteString("\nCancellation does not reverse any fills.\n")
-	}
-	var params map[string]any
-	if fields != nil {
-		params, _ = fields["parameters"].(map[string]any)
-		if changes, ok := fields["changes"].(map[string]any); ok {
-			params = changes
-		}
-	}
-	if params["order_type"] == "MARKET" || params["order_type"] == "SL-M" {
-		body.WriteString("Execution price is set by the market.\n")
+	for _, note := range tradeApprovalNotes(operation, fields) {
+		body.WriteString("\n" + note + "\n")
 	}
 	body.WriteString("\nApproval allows one submission of this transaction.")
 	schema, _ := json.Marshal(map[string]any{
@@ -65,6 +50,28 @@ func tradeApprovalForm(operation string, snapshot []byte) *mcp.ElicitParams {
 		}}, "required": []string{"confirm"}, "additionalProperties": false,
 	})
 	return &mcp.ElicitParams{Mode: "form", Message: body.String(), RequestedSchema: json.RawMessage(schema)}
+}
+
+// Keep review notes consistent across native forms and browser pages. Only
+// fixed server text belongs here; caller-supplied values remain in the rows.
+func tradeApprovalNotes(operation string, fields map[string]any) []string {
+	var notes []string
+	switch operation {
+	case "orders_place":
+		notes = append(notes, "Unspecified fields use Kite defaults.")
+	case "orders_modify":
+		notes = append(notes, "Only the listed changes will be sent. Other fields stay unchanged.")
+	case "orders_cancel":
+		notes = append(notes, "Cancellation does not reverse any fills.")
+	}
+	params, _ := fields["parameters"].(map[string]any)
+	if changes, ok := fields["changes"].(map[string]any); ok {
+		params = changes
+	}
+	if params["order_type"] == "MARKET" || params["order_type"] == "SL-M" {
+		notes = append(notes, "Execution price is set by the market.")
+	}
+	return notes
 }
 
 func writeApprovalFields(body *strings.Builder, fields map[string]any, indent string) {

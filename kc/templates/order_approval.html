@@ -26,6 +26,7 @@
 {{range .Rows}}<div class="order-row"><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}
 </dl></section>
 {{end}}
+{{range .Notes}}<p class="order-footnote">{{.}}</p>{{end}}
 {{if .Pending}}
 <form method="post" aria-describedby="approval-deadline">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
