@@ -84,6 +84,9 @@ func filterTools(allTools []Tool, excludedSet map[string]bool) ([]Tool, int, int
 
 // RegisterTools registers all MCP tools with the official SDK server
 func RegisterTools(srv *mcp.Server, manager *kc.Manager, excludedTools string, logger *slog.Logger) {
+	if manager != nil {
+		registerOperationMetrics(srv, manager.Metrics())
+	}
 	// Parse excluded tools list
 	excludedSet := parseExcludedTools(excludedTools)
 

@@ -108,6 +108,9 @@ func (b *BrowserApprovals) trusted(ctx context.Context, req *sdk.CallToolRequest
 	defer b.mu.Unlock()
 	p, ok := b.permissions[c.SessionID]
 	if ok && !time.Now().Before(p.expires) {
+		if p.allowed {
+			b.metricEvent("permissions", "permission_expired")
+		}
 		delete(b.permissions, c.SessionID)
 		return false
 	}
@@ -124,12 +127,16 @@ func randomApprovalSecret() string {
 
 func (b *BrowserApprovals) cleanupLocked(now time.Time) {
 	for id, p := range b.pending {
+		b.expireOrderLocked(p, now)
 		if !now.Before(p.retainUntil) && p.status != "submitting" {
 			delete(b.pending, id)
 		}
 	}
 	for id, p := range b.permissions {
 		if !now.Before(p.expires) {
+			if p.allowed {
+				b.metricEvent("permissions", "permission_expired")
+			}
 			delete(b.permissions, id)
 		}
 	}
@@ -185,7 +192,7 @@ func (b *BrowserApprovals) request(ctx context.Context, req *sdk.CallToolRequest
 		var oldest *browserOrder
 		for _, existing := range b.pending {
 			if existing.status == "approval_required" && !now.Before(existing.expires) {
-				existing.status = "expired"
+				b.expireOrderLocked(existing, now)
 			}
 			if existing.status != "approval_required" && existing.status != "submitting" && (oldest == nil || existing.retainUntil.Before(oldest.retainUntil)) {
 				oldest = existing
@@ -200,6 +207,7 @@ func (b *BrowserApprovals) request(ctx context.Context, req *sdk.CallToolRequest
 		p.trace = *trace
 	}
 	b.pending[p.id] = p
+	b.metricEvent(operation, "created")
 	data := map[string]any{"status": "approval_required", "approval_id": p.id, "approval_url": b.approvalURL(p.id), "expires_at": expires.Format(time.RFC3339), "message": "No order was submitted. Open the approval URL in any browser, sign in to the matching Kite account, then review and approve. Do not repeat the order request. After approval, use orders mode=approval_status with this approval_id to retrieve the outcome."}
 	return browserApprovalResult(data), nil
 }
@@ -231,7 +239,7 @@ func (b *BrowserApprovals) status(ctx context.Context, req *sdk.CallToolRequest,
 		return NewToolResultError("Order approval not found for this connection."), nil
 	}
 	if p.status == "approval_required" && !time.Now().Before(p.expires) {
-		p.status = "expired"
+		b.expireOrderLocked(p, time.Now())
 	}
 	data := map[string]any{"approval_id": id, "status": p.status, "result": p.result}
 	trace := p.trace
@@ -324,7 +332,12 @@ func approvalHTTPHeaders(w http.ResponseWriter) {
 
 func (b *BrowserApprovals) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	approvalHTTPHeaders(w)
-	http.NewCrossOriginProtection().Handler(http.HandlerFunc(b.serveHTTP)).ServeHTTP(w, r)
+	purpose := "review"
+	if strings.HasPrefix(r.URL.Path, "/order-approvals/manage/") {
+		purpose = "permissions"
+	}
+	next := http.NewCrossOriginProtection().Handler(http.HandlerFunc(b.serveHTTP))
+	b.manager.Metrics().HTTPMiddleware("approval_http", purpose, next).ServeHTTP(w, r)
 }
 
 func (b *BrowserApprovals) render(w http.ResponseWriter, status int, data browserOrderPage) {
@@ -373,7 +386,7 @@ func (b *BrowserApprovals) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (b *BrowserApprovals) orderPageLocked(p *browserOrder) browserOrderPage {
 	if p.status == "approval_required" && !time.Now().Before(p.expires) {
-		p.status = "expired"
+		b.expireOrderLocked(p, time.Now())
 	}
 	data := browserOrderPage{Title: map[string]string{"orders_place": "Review order", "orders_modify": "Review order changes", "orders_cancel": "Review cancellation"}[p.operation], ClientName: p.clientName, Account: p.user, Sections: browserOrderSections(p.operation, p.snapshot), ApprovalExpiry: p.expires.In(time.FixedZone("IST", 19800)).Format("15:04 IST")}
 	var fields map[string]any
@@ -441,12 +454,14 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 	}
 	if decision == "decline" {
 		p.status = "declined"
+		b.metricEvent(p.operation, "declined")
 		b.mu.Unlock()
 		b.renderOrderOutcome(w, p)
 		return
 	}
 	permissionGeneration := b.permissions[p.session].generation
 	p.rememberRequested = r.PostForm.Get("remember") == "yes"
+	b.metricEvent(p.operation, "submission_started")
 	p.status = "submitting" // Single-use before fresh authentication and any API attempt.
 	b.mu.Unlock()
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -463,13 +478,14 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 		result = NewToolResultError("Order submission could not be confirmed. Inspect orders and fills before requesting another submission.")
 	}
 	b.mu.Lock()
+	// Errors before the guard, such as expired credentials, carry no approval
+	// observation. Do not manufacture authorization success for those failures.
+	p.trace.Outcome = "unavailable"
 	if result != nil {
 		encoded, _ := json.Marshal(result.StructuredContent)
 		var observation approvalTrace
 		if json.Unmarshal(encoded, &observation) == nil && observation.Outcome != "" {
 			p.trace.Outcome = observation.Outcome
-		} else {
-			p.trace.Outcome = "approved"
 		}
 		result = approvalResultWithTrace(result, p.trace)
 	}
@@ -479,10 +495,16 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 		p.status = "submitted"
 		if r.PostForm.Get("remember") == "yes" && b.permissions[p.session].generation == permissionGeneration {
 			if deadline, err := b.manager.SessionExpiry(p.session); err == nil {
+				current := b.permissions[p.session]
+				if !current.allowed || current.client != p.client || current.user != p.user || !time.Now().Before(current.expires) {
+					b.metricEvent("permissions", "permission_granted")
+				}
 				b.permissions[p.session] = clientOrderPermission{client: p.client, user: p.user, clientName: p.clientName, expires: deadline, allowed: true, generation: permissionGeneration}
 			}
 		}
 	}
+	b.metricEvent(p.operation, p.status)
+	observeApproval(b.manager.Metrics(), p.operation, result, p.trace)
 	b.mu.Unlock()
 	b.renderOrderOutcome(w, p)
 }
@@ -505,6 +527,9 @@ func (b *BrowserApprovals) manage(w http.ResponseWriter, r *http.Request, sessio
 		}
 		b.mu.Lock()
 		permission := b.permissions[sessionID]
+		if permission.allowed {
+			b.metricEvent("permissions", "permission_revoked")
+		}
 		permission.allowed = false
 		permission.generation++
 		permission.expires = session.ExpiresAt
@@ -538,4 +563,18 @@ func executeBrowserApproved(ctx context.Context, req *sdk.CallToolRequest, opera
 	}
 	result, err := execute()
 	return result, err, true
+}
+
+// Called under b.mu; repeats and status polling must not count expiry twice.
+func (b *BrowserApprovals) expireOrderLocked(p *browserOrder, now time.Time) {
+	if p.status == "approval_required" && !now.Before(p.expires) {
+		p.status = "expired"
+		b.metricEvent(p.operation, "expired")
+	}
+}
+
+func (b *BrowserApprovals) metricEvent(operation, event string) {
+	if m := b.manager.Metrics(); m != nil {
+		m.RecordBrowserApprovalEvent(operation, event)
+	}
 }

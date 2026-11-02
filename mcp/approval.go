@@ -25,7 +25,9 @@ func withTradeApproval(ctx context.Context, request *mcp.CallToolRequest, operat
 		return execute()
 	}
 	result, err := runTradeApproval(ctx, request, operation, details, trackedExecute)
-	return approvalResultWithTrace(result, *trace), err
+	result = approvalResultWithTrace(result, *trace)
+	observeApproval(metricsFromContext(ctx), operation, result, *trace)
+	return result, err
 }
 
 func runTradeApproval(ctx context.Context, request *mcp.CallToolRequest, operation string, details any, execute func() (*mcp.CallToolResult, error)) (*mcp.CallToolResult, error) {

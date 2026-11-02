@@ -296,7 +296,6 @@ func handleMarketSearch(ctx context.Context, handler *BaseToolHandler, manager *
 	}
 
 	if manager.Metrics() != nil {
-		manager.Metrics().IncrementDailyWithLabels("tool_calls", map[string]string{"tool": "market_search"})
 		manager.Metrics().IncrementDailyWithLabels("instruments_search_mode", map[string]string{"mode": searchMode})
 		manager.Metrics().IncrementDailyWithLabels("instruments_search_verbosity", map[string]string{"verbosity": verbosity})
 	}

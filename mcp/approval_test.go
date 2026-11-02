@@ -15,6 +15,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
+	"github.com/zerodha/kite-mcp-server/app/metrics"
 	"github.com/zerodha/kite-mcp-server/kc"
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
 )
@@ -296,7 +297,7 @@ func TestTradeApprovalNegotiatedInitialize(t *testing.T) {
 	}
 }
 
-func approvalTestManager(t *testing.T, upstream http.HandlerFunc) *kc.Manager {
+func approvalTestManager(t *testing.T, upstream http.HandlerFunc, metricManagers ...*metrics.Manager) *kc.Manager {
 	t.Helper()
 	server := httptest.NewServer(upstream)
 	t.Cleanup(server.Close)
@@ -305,7 +306,11 @@ func approvalTestManager(t *testing.T, upstream http.HandlerFunc) *kc.Manager {
 	config.EnableScheduler = false
 	catalog, err := instruments.New(instruments.Config{Logger: logger, UpdateConfig: config, TestData: map[uint32]*instruments.Instrument{}})
 	require.NoError(t, err)
-	manager, err := kc.New(kc.Config{APIKey: "key", APISecret: "secret", Logger: logger, Instruments: catalog, KiteBaseURI: server.URL})
+	var metricManager *metrics.Manager
+	if len(metricManagers) > 0 {
+		metricManager = metricManagers[0]
+	}
+	manager, err := kc.New(kc.Config{APIKey: "key", APISecret: "secret", Logger: logger, Instruments: catalog, KiteBaseURI: server.URL, Metrics: metricManager})
 	require.NoError(t, err)
 	t.Cleanup(manager.Shutdown)
 	_, _, err = manager.SessionManager().GetOrCreate("approval-test")

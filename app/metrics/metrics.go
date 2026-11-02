@@ -53,6 +53,10 @@ type Manager struct {
 	dailyUsersVec      *prometheus.GaugeVec
 	genericCounters    sync.Map // map[string]prometheus.Counter for dynamic counters
 	dailyCounterDates  sync.Map // map[string]string: dynamic counter key to UTC date
+	operations         *prometheus.CounterVec
+	operationDuration  *prometheus.HistogramVec
+	approvals          *prometheus.CounterVec
+	browserEvents      *prometheus.CounterVec
 
 	cleanupStop chan struct{}
 	cleanupOnce sync.Once
@@ -146,6 +150,7 @@ func New(cfg Config) *Manager {
 		dailyUsersVec:        dailyUsersVec,
 		cleanupStop:          make(chan struct{}),
 	}
+	m.initFeatureMetrics()
 
 	if cfg.AutoCleanup {
 		m.startCleanupRoutine()

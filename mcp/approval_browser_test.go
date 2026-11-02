@@ -19,6 +19,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
+	"github.com/zerodha/kite-mcp-server/app/metrics"
 	"github.com/zerodha/kite-mcp-server/kc"
 	"github.com/zerodha/kite-mcp-server/oauth"
 )
@@ -46,7 +47,7 @@ type browserApprovalFixture struct {
 	release        chan struct{}
 }
 
-func newBrowserApprovalFixture(t *testing.T) *browserApprovalFixture {
+func newBrowserApprovalFixture(t *testing.T, metricManagers ...*metrics.Manager) *browserApprovalFixture {
 	f := &browserApprovalFixture{started: make(chan struct{}), release: make(chan struct{}), historyStarted: make(chan struct{}), historyStopped: make(chan struct{})}
 	f.manager = approvalTestManager(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -75,7 +76,7 @@ func newBrowserApprovalFixture(t *testing.T) *browserApprovalFixture {
 			return
 		}
 		_, _ = w.Write([]byte(`{"status":"success","data":{"order_id":"order-1"}}`))
-	})
+	}, metricManagers...)
 	s := oauth.New(oauth.Config{Issuer: "https://mcp.example", JWTSecret: []byte(strings.Repeat("s", 32)), SessionExpiry: f.manager.SessionExpiry})
 	f.b = NewBrowserApprovals(f.manager, s)
 	return f
@@ -98,6 +99,7 @@ func (f *browserApprovalFixture) connect(t *testing.T, session, name, version st
 	require.NoError(t, err)
 	server := NewServer(&sdk.Implementation{Name: "server", Version: "1"})
 	f.b.Attach(server)
+	registerOperationMetrics(server, f.manager.Metrics())
 	tool := &OrdersTool{}
 	server.AddTool(tool.Definition(), sdk.ToolHandler(tool.Handler(f.manager)))
 	endpoint := httptest.NewServer(f.b.oauth.Middleware(NewHTTPHandler(server, nil)))

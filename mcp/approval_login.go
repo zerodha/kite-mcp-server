@@ -24,6 +24,9 @@ type reviewLogin struct {
 }
 
 func (b *BrowserApprovals) startReviewLogin(w http.ResponseWriter, r *http.Request, target, session, user string, expires time.Time) {
+	operation := b.reviewMetricOperation(target)
+	event := "login_failed"
+	defer func() { b.metricEvent(operation, event) }()
 	if !b.loginLimit.Allow(b.oauth.ClientIP(r)) {
 		b.render(w, http.StatusTooManyRequests, browserOrderPage{Title: "Too many sign-in attempts", Message: "Wait a minute, then open the approval link again."})
 		return
@@ -50,12 +53,16 @@ func (b *BrowserApprovals) startReviewLogin(w http.ResponseWriter, r *http.Reque
 		b.render(w, http.StatusServiceUnavailable, browserOrderPage{Title: "Sign-in unavailable", Message: "Try opening the approval link again shortly."})
 		return
 	}
+	event = "login_started"
 	http.Redirect(w, r, loginURL, http.StatusSeeOther)
 }
 
 // HandleKiteLoginCallback is dispatched by the ordinary signed Kite callback.
 // Login never submits an order: the returned form still needs explicit review.
 func (f *reviewLogin) HandleKiteLoginCallback(w http.ResponseWriter, r *http.Request) {
+	operation := f.broker.reviewMetricOperation(f.target)
+	event := "login_failed"
+	defer func() { f.broker.metricEvent(operation, event) }()
 	approvalHTTPHeaders(w)
 	q := r.URL.Query()
 	f.mu.Lock()
@@ -81,6 +88,7 @@ func (f *reviewLogin) HandleKiteLoginCallback(w http.ResponseWriter, r *http.Req
 	}
 	f.mu.Lock()
 	f.verified = true
+	event = "login_verified"
 	f.mu.Unlock()
 	b := f.broker
 	b.mu.Lock()
@@ -131,4 +139,16 @@ func (b *BrowserApprovals) renderOrderOutcome(w http.ResponseWriter, p *browserO
 	data := b.orderPageLocked(p)
 	b.mu.Unlock()
 	b.render(w, http.StatusOK, data)
+}
+
+func (b *BrowserApprovals) reviewMetricOperation(target string) string {
+	if strings.HasPrefix(target, "manage/") {
+		return "permissions"
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if p := b.pending[target]; p != nil {
+		return p.operation
+	}
+	return "other"
 }

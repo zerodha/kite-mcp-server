@@ -179,6 +179,13 @@ func (m *Manager) authenticatedCredentials(sessionID string) (*KiteCredentials, 
 		if creds.RefreshToken == "" {
 			return nil, errors.New("kite session has expired. Please re-authenticate via the OAuth flow")
 		}
+		start := time.Now()
+		renewalOutcome := "error"
+		defer func() {
+			if m.metrics != nil {
+				m.metrics.ObserveOperation("session", "renewal", renewalOutcome, time.Since(start))
+			}
+		}()
 		renewed, err := m.newKiteClient().RenewAccessToken(creds.RefreshToken, m.apiSecret)
 		if err != nil {
 			var apiErr kiteconnect.Error
@@ -212,6 +219,7 @@ func (m *Manager) authenticatedCredentials(sessionID string) (*KiteCredentials, 
 			return nil, errors.New("session ended during token renewal. Please re-authenticate via the OAuth flow")
 		}
 		creds = updated.Credentials
+		renewalOutcome = "success"
 	}
 	return creds, nil
 }

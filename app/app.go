@@ -301,13 +301,16 @@ func (app *App) setupMux() *http.ServeMux {
 		mux.Handle("/order-approvals/", app.browserApprovals)
 	}
 
-	// OAuth endpoints (JWT-based)
-	mux.HandleFunc("/callback", app.jwtOauthHandlers.HandleCallback)
-	mux.Handle("/authorize", app.rateLimiter.MiddlewareWithRejection(http.HandlerFunc(app.jwtOauthHandlers.HandleAuthorize), app.jwtOauthHandlers.HandleAuthorizeRateLimit))
-	mux.Handle("/token", app.rateLimiter.Middleware(http.HandlerFunc(app.jwtOauthHandlers.HandleToken)))
-	mux.HandleFunc("/.well-known/oauth-authorization-server", app.jwtOauthHandlers.HandleDiscovery)
-	mux.HandleFunc("/.well-known/oauth-protected-resource", app.jwtOauthHandlers.HandleProtectedResourceMetadata)
-	mux.HandleFunc("/register", app.jwtOauthHandlers.HandleRegister)
+	// OAuth endpoints (JWT-based). Keep rate-limit rejections inside observation.
+	observeOAuth := func(mode string, next http.Handler) http.Handler {
+		return app.metrics.HTTPMiddleware("oauth_http", mode, next)
+	}
+	mux.Handle("/callback", observeOAuth("callback", http.HandlerFunc(app.jwtOauthHandlers.HandleCallback)))
+	mux.Handle("/authorize", observeOAuth("authorize", app.rateLimiter.MiddlewareWithRejection(http.HandlerFunc(app.jwtOauthHandlers.HandleAuthorize), app.jwtOauthHandlers.HandleAuthorizeRateLimit)))
+	mux.Handle("/token", observeOAuth("token", app.rateLimiter.Middleware(http.HandlerFunc(app.jwtOauthHandlers.HandleToken))))
+	mux.Handle("/.well-known/oauth-authorization-server", observeOAuth("discovery", http.HandlerFunc(app.jwtOauthHandlers.HandleDiscovery)))
+	mux.Handle("/.well-known/oauth-protected-resource", observeOAuth("protected_resource", http.HandlerFunc(app.jwtOauthHandlers.HandleProtectedResourceMetadata)))
+	mux.Handle("/register", observeOAuth("register", http.HandlerFunc(app.jwtOauthHandlers.HandleRegister)))
 	return mux
 }
 

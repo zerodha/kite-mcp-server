@@ -357,6 +357,11 @@ JWT_SECRET=<generated-secret>
 OAUTH_ISSUER=https://your-domain.com  # Optional, defaults to http://host:port
 ```
 
+## Metrics
+
+See the [operational metrics reference](app/metrics/README.md) for feature coverage,
+approval counting semantics, privacy limits, and Prometheus queries.
+
 ## Contributing
 
 1. Fork the repository
