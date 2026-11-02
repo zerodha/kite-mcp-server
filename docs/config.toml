@@ -1,5 +1,6 @@
 site_name = "Kite MCP"
 logo = "_static/zerodha-logo.svg"
+favicon = "_static/favicon.png"
 
 [highlight]
 light = "github"
