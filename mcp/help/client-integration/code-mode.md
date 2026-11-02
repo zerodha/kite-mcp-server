@@ -28,7 +28,7 @@ description: Integrate code mode tool calls with result parsing, pagination, and
    `approval_id`. Inspect the returned status and nested result; a successful status lookup is not
    itself a successful order. Do not repeat the
    original order call or poll in an unbounded loop.
-7. Browser links expire after two minutes. Honour a decline or cancellation.
+7. Browser links expire after five minutes. Honour a decline or cancellation.
    The user may explicitly allow future orders from this connection in the browser.
    Never enable this permission for them. To view or revoke it, call `orders`
    with `mode=permissions`. If future_orders_allowed is true, share the returned
@@ -43,10 +43,30 @@ In Pi's built-in integration, MCP tools default to `codemode` exposure. Use
 `searchTools`, `describeTool`, and `describeNamespace` to discover them. Scripts
 receive the complete MCP result including `isError` and `structuredContent`.
 Pi can use the browser approval link without native form support. The user must
-open it in their sign-in browser; the agent must not approve it. Pi does not
+sign in to Kite and review it in any browser; the agent must not approve it. Pi does not
 render MCP Apps.
 
 Reference: https://mcp.kite.trade/reference/code-mode/
 Order approvals: https://mcp.kite.trade/reference/order-approvals/
 Pi setup: https://mcp.kite.trade/clients/pi/
 Official Pi references: https://pi.dev/docs/latest/mcp and https://pi.dev/docs/latest/codemode
+
+## Approval observations
+
+Results that reach the approval step report `approval_method_used`, `approval_outcome`,
+`fallback_reason`, `native_elicitation_attempted`, and `native_elicitation_completed`.
+`native` means a native form, `browser` means browser review, and
+`remembered_permission` means the user previously allowed orders for this grant.
+A completed form may still be declined or cancelled. `approved` describes
+permission, not exchange execution. Inspect the submission result and fills.
+Browser `approval_status` retains the original fallback reason and native flags.
+An MRTR client that stops locally may produce no final result to inspect.
+
+## Read-only code recipes
+
+- [Compare quote batches](compare-quotes.md)
+- [Calculate holdings weights](holdings-weights.md)
+- [Check approval status and permission](approval-status.md)
+
+These Pi scripts use the `kite` server name. Discover names again if the connection
+has another name. They check both promise failures and resolved `isError` results.

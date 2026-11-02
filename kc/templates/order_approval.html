@@ -4,44 +4,50 @@
 .card-order { width: 620px; --primary: #cf3e12; }
 .card-order .button:not(.button-secondary):hover { background: #b93810; border-color: #b93810; }
 .card-order ~ .footer { color: #666; }
-.order-context { color: #666; margin-bottom: 24px; overflow-wrap: anywhere; }
+.order-context { color: #666; margin-bottom: 16px; overflow-wrap: anywhere; }
 .order-context strong { color: #444; }
-.order-section { margin: 24px 0; border-top: 1px solid #eee; padding-top: 16px; }
-.order-section dl { margin: 0; }
-.order-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 1.5fr); gap: 16px; padding: 7px 0; }
-.order-row dt { color: #666; }
-.order-row dd { margin: 0; overflow-wrap: anywhere; }
-.remember-order { min-height: 32px; display: flex; align-items: flex-start; gap: 10px; margin: 24px 0 8px; }
+.order-section { margin: 20px 0; border-top: 1px solid #eee; padding-top: 16px; }
+.order-section dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 20px; margin: 12px 0 0; }
+.order-row { min-width: 0; }
+.order-key dd { font-weight: 600; }
+.order-row dt { color: #666; font-size: 12px; }
+.order-row dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.future-permission { margin: 20px 0; padding: 14px; background: #fafafa; border: 1px solid #eee; border-radius: 3px; }
+.card-order .actions { flex-direction: row; }
+.card-order .actions .button { flex: 1; min-width: 0; }
+.remember-order { min-height: 24px; display: flex; align-items: flex-start; gap: 10px; margin: 0; }
 .remember-order input { width: 18px; height: 18px; flex-shrink: 0; margin-top: 3px; accent-color: #ff5722; }
-.permission-note { margin: 0 0 24px 28px; font-size: 12px; color: #666; }
+.permission-note { margin: 8px 0 0 28px; font-size: 12px; color: #666; }
 .order-footnote { margin: 24px 0 0; font-size: 12px; color: #666; }
-.order-footnote a { color: #2567ad; }
-@media (max-width:550px) { .order-row { gap: 12px; } }
+.order-footnote a, .future-permission a { color: #2567ad; }
+@media (max-width:550px) { .order-section dl { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; } .card-order .actions { flex-direction: column; } }
 </style>
 <h1>{{.Title}}</h1>
-{{if .Account}}<div class="order-context">Kite account <strong>{{.Account}}</strong>{{if .ClientName}}<br>{{if .Manage}}Connected client{{else}}Requested by{{end}} <strong>{{.ClientName}}</strong>{{end}}</div>{{end}}
-<p>{{.Message}}</p>
-{{range .Sections}}
+{{if .Account}}<div class="order-context">Kite account <strong>{{.Account}}</strong>{{if .ClientName}}<br>{{if .Manage}}Assistant{{else}}Requested by{{end}} <strong>{{.ClientName}}</strong>{{end}}</div>{{end}}
+{{if .Message}}<p>{{.Message}}</p>{{end}}
+{{if .RetryURL}}<a class="button" href="{{.RetryURL}}">Sign in again</a>{{end}}
+{{$notes := .Notes}}
+{{range $i, $section := .Sections}}
 <section class="order-section"><h2>{{.Title}}</h2><dl>
-{{range .Rows}}<div class="order-row"><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}
-</dl></section>
+{{range .Rows}}<div class="order-row{{if or (eq .Label "Symbol") (eq .Label "Side") (eq .Label "Quantity") (eq .Label "Price") (eq .Label "Trigger price")}} order-key{{end}}"><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}
+</dl>{{if eq $i 0}}{{range $notes}}<p class="order-footnote">{{.}}</p>{{end}}{{end}}</section>
 {{end}}
-{{range .Notes}}<p class="order-footnote">{{.}}</p>{{end}}
 {{if .Pending}}
-<form method="post" aria-describedby="approval-deadline">
+<form action="{{.FormAction}}" method="post" aria-describedby="approval-deadline">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
-<label class="remember-order"><input type="checkbox" name="remember" value="yes" aria-describedby="future-order-scope"><span>Allow future orders from {{.ClientName}} without asking again</span></label>
-<p class="permission-note" id="future-order-scope">If Kite accepts this request, the client can place, modify, and cancel orders for this account until {{.Expiry}}, or until you log out or revoke access. Orders may execute even if the client follows unintended instructions. Leave this unchecked to review each request.</p>
+{{if not .ManageURL}}<div class="future-permission"><label class="remember-order"><input type="checkbox" name="remember" value="yes" aria-describedby="future-order-scope"><span>Let {{.ClientName}} place, change and cancel orders without asking until {{.Expiry}}</span></label>
+<p class="permission-note" id="future-order-scope">Starts only if Kite accepts this request. {{.ClientName}} could place orders you did not intend, for example if it misreads an instruction. You can turn this off at any time. Logging out also ends this permission.</p></div>{{end}}
 <div class="actions"><button class="button" type="submit" name="decision" value="approve">{{.SubmitLabel}}</button><button class="button button-secondary" type="submit" name="decision" value="decline">Decline this request</button></div>
 </form>
-<p class="order-footnote" id="approval-deadline">Review by {{.ApprovalExpiry}}. This approval expires two minutes after the request. Closing this page does not submit the order.</p>
+<p class="order-footnote" id="approval-deadline">This review expires at {{.ApprovalExpiry}}. Closing this page submits nothing.</p>
 {{end}}
 {{if .Manage}}
 {{if .Allowed}}
-<p>{{.ClientName}} can place, modify, and cancel orders without individual approval until {{.Expiry}}.</p>
-<form method="post"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button button-secondary" type="submit" name="decision" value="revoke">Require approval again</button></form>
+<p>{{.ClientName}} can place, change and cancel orders in this account without asking until {{.Expiry}}.</p>
+<p>Turn this off to review each order. Orders already placed are not cancelled.</p>
+<form action="{{.FormAction}}" method="post"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button" type="submit" name="decision" value="revoke">Ask me before every order</button></form>
 {{else}}<p>Each order request requires approval.</p>{{end}}
 {{end}}
 {{if .PermissionNote}}<p class="order-footnote">{{.PermissionNote}}</p>{{end}}
-{{if .ManageURL}}<p class="order-footnote">Future orders from {{.ClientName}} are allowed without individual approval until {{.Expiry}}. <a href="{{.ManageURL}}">Require approval again</a></p>{{end}}
+{{if .ManageURL}}<aside class="future-permission">{{.ClientName}} can place, change and cancel orders without asking until {{.Expiry}}. <a href="{{.ManageURL}}">Ask me before every order</a></aside>{{end}}
 {{end}}

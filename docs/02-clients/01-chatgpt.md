@@ -29,7 +29,7 @@ or cancellation. On the mobile app, the assistant should select browser review
 automatically and share the approval link. You do not need to ask for a link
 separately.
 
-Open the link in the browser used to connect Kite MCP and review the order there.
+Open the link in any browser, sign in to your Kite account, and review the order.
 See [[Order Approvals]] for browser review and optional future order permission.
 
 ## Notes

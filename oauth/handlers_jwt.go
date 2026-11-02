@@ -312,6 +312,19 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Approval logins have their own single-use, exact-review state. They never
+	// issue an MCP grant or reuse the OAuth client's browser binding.
+	if login, ok := session.OAuthData.(interface {
+		HandleKiteLoginCallback(http.ResponseWriter, *http.Request)
+	}); ok {
+		if session.Terminated || !time.Now().Before(session.ExpiresAt) {
+			h.browserError(w, r, "authorization expired", http.StatusBadRequest)
+			return
+		}
+		login.HandleKiteLoginCallback(w, r)
+		return
+	}
+
 	// Verify explicit consent and the browser binding before exchanging any Kite
 	// credential. Claim the callback once, including when upstream login fails.
 	pending, isOAuth := session.OAuthData.(*pendingAuth)
@@ -393,13 +406,6 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		_, _ = h.kcManager.SessionManager().Terminate(userSessionID)
 		h.logger.Error("failed to create auth code", "error", err)
 		h.browserError(w, r, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	// Keep browser proof separate from the bearer token returned to the client.
-	if err := h.server.SetOrderBrowserSession(w, userSessionID, creds.UserID); err != nil {
-		_, _ = h.kcManager.SessionManager().Terminate(userSessionID)
-		h.browserError(w, r, "session error", http.StatusInternalServerError)
 		return
 	}
 

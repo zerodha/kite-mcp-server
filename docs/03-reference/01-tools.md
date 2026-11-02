@@ -87,7 +87,7 @@ GTT and Alerts/ATO mutations use separate tools and are outside this approval ga
 | `modify` | Modify an existing open order |
 | `cancel` | Cancel an open order |
 | `approval_status` | Check the outcome of a browser approval without repeating the order request |
-| `permissions` | Get a link to view or revoke future order permission for this connection |
+| `permissions` | Check whether future orders are allowed; returns a revocation link when permission is active |
 
 ### Parameters
 
@@ -99,13 +99,13 @@ GTT and Alerts/ATO mutations use separate tools and are outside this approval ga
 | `order_id` | string | history, trades, modify, cancel | Order ID |
 | `variety` | string | place, modify, cancel | Order variety: `regular` (default), `co`, `amo`, `iceberg`, `auction` |
 | `exchange` | string | place | **Required.** Exchange: `NSE`, `BSE`, `MCX`, `NFO`, `BFO` |
-| `tradingsymbol` | string | place | Trading symbol (e.g. `INFY`, `NIFTY2560118000CE`) |
-| `transaction_type` | string | place | `BUY` or `SELL` |
+| `tradingsymbol` | string | place | **Required.** Trading symbol (e.g. `INFY`, `NIFTY2560118000CE`) |
+| `transaction_type` | string | place | **Required.** `BUY` or `SELL` |
 | `quantity` | integer | place, modify | Order quantity in units. Required for place; optional for modify |
-| `product` | string | place | `CNC` (delivery), `MIS` (intraday), `NRML` (F&O overnight), `MTF` (margin funding) |
+| `product` | string | place | **Required.** `CNC` (delivery), `MIS` (intraday), `NRML` (F&O overnight), `MTF` (margin funding) |
 | `order_type` | string | place, modify | **Required in both modes.** `MARKET`, `LIMIT`, `SL` (stop-loss limit), `SL-M` (stop-loss market) |
-| `price` | number | place, modify | Limit price. Required for `LIMIT` and `SL` orders |
-| `trigger_price` | number | place, modify | Trigger price. Required for `SL` and `SL-M` orders |
+| `price` | number | place, modify | Limit price for `LIMIT`/`SL` placement; supply it to change the price during modification |
+| `trigger_price` | number | place, modify | Trigger price for `SL`/`SL-M` placement; supply it to change the trigger during modification |
 | `validity` | string | place, modify | `DAY`, `IOC` (immediate or cancel), `TTL` (time-to-live) |
 | `validity_ttl` | integer | place, modify | Life span in minutes. Required when the request sets validity to `TTL` |
 | `disclosed_quantity` | integer | place, modify | Quantity disclosed to the market |
@@ -123,7 +123,19 @@ A browser review returns `status=approval_required`, `approval_url`,
 `approval_id`, and `expires_at`. No order has been submitted at that point.
 Share the link with the user, then check `approval_status` after they review it.
 That response contains the status and the submission result, if available.
-Approval outcomes are available for up to 15 minutes after the request.
+Approval outcomes are retained for up to 15 minutes after the request and may be
+removed earlier after a restart or when the server reaches capacity. If a result
+is unavailable, inspect orders and trades before requesting another submission.
+
+`permissions` returns `future_orders_allowed`. When true, `permissions_url` lets
+the user sign in and require approval again. Looking up permission does not
+change it.
+
+Results that reach the approval step report `approval_method_used`,
+`approval_outcome`, `fallback_reason`, `native_elicitation_attempted`, and
+`native_elicitation_completed`. Browser status checks retain these observations.
+Validation or authentication errors before approval may have no approval fields.
+An `approved` outcome describes authorization, not a successful order or fill.
 
 Modification requires `order_id` and `order_type`. Supply the current order type
 when changing another field. Other omitted fields remain unchanged. Setting `validity` to `TTL` requires a positive `validity_ttl` in the same request; the duration is included in the approval details and sent to Kite.
@@ -152,7 +164,7 @@ Manage GTT (Good Till Triggered) orders. GTT orders persist across trading sessi
 | `tradingsymbol` | string | place, modify | Trading symbol |
 | `last_price` | number | place, modify | Current price of the instrument |
 | `transaction_type` | string | place, modify | `BUY` or `SELL` |
-| `product` | string | place | `CNC`, `NRML`, `MIS`, `MTF` |
+| `product` | string | place | **Required.** `CNC`, `NRML`, `MIS`, `MTF` |
 | `trigger_type` | string | place, modify | `single` or `two-leg` |
 
 ### Single-leg parameters

@@ -23,9 +23,11 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -271,13 +273,18 @@ func (s *Server) parseClientRegistration(clientID string) (*clientRegistration, 
 	return &registration, nil
 }
 
-// ClientName returns the signed, self-declared name of a registered client.
+// ClientName returns a display-safe representation of the signed, self-declared
+// name. Formatting controls must not reorder consent or permission text.
 func (s *Server) ClientName(clientID string) (string, error) {
 	registration, err := s.parseClientRegistration(clientID)
 	if err != nil {
 		return "", err
 	}
-	return registration.ClientName, nil
+	name := registration.ClientName
+	if strings.ContainsFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) }) {
+		name = strconv.Quote(name)
+	}
+	return name, nil
 }
 
 // ValidateClientRedirect verifies a server-issued client ID and exact callback binding.
@@ -766,3 +773,5 @@ func WriteJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
 }
+
+func (s *Server) IssuerURL() string { return s.config.Issuer }

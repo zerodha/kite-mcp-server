@@ -80,7 +80,7 @@ func tradeApprovalNotes(operation string, fields map[string]any) []string {
 	var notes []string
 	switch operation {
 	case "orders_place":
-		notes = append(notes, "Unspecified fields use Kite defaults.")
+		notes = append(notes, "Other order settings use Kite's defaults.")
 	case "orders_modify":
 		notes = append(notes, "Only the listed changes will be sent. Other fields stay unchanged.")
 	case "orders_cancel":

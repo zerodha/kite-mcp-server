@@ -255,6 +255,15 @@ func (sm *SessionManager) UpdateCredentials(sessionID string, creds *KiteCredent
 	return sm.updateCredentialsLocked(sessionID, creds)
 }
 
+// ReplaceApprovalCredentials installs fresh credentials only if the original
+// account credentials remain current. It never revives or extends a grant.
+func (sm *SessionManager) ReplaceApprovalCredentials(sessionID string, previous, fresh *KiteCredentials) error {
+	if previous == nil || fresh == nil || previous.UserID != fresh.UserID {
+		return errors.New("approval account mismatch")
+	}
+	return sm.updateRenewedCredentials(sessionID, previous.generation, fresh)
+}
+
 // updateRenewedCredentials cannot replace credentials installed while renewal
 // was in flight. The original refresh token belongs to one credential version.
 func (sm *SessionManager) updateRenewedCredentials(sessionID string, generation uint64, creds *KiteCredentials) error {

@@ -58,8 +58,8 @@ make the connector available first.
 
 Reading data does not require an order approval. When you request order placement,
 modification, or cancellation, review the form in your client or follow the
-browser approval link. The browser page optionally lets you allow future orders
-from this client. See [[Order Approvals]] before enabling that permission.
+browser approval link, unless you have already allowed future orders for this
+connection. The browser page optionally lets you enable that permission. See [[Order Approvals]] before enabling that permission.
 
 Supported clients can also show portfolio charts, instrument details, and other
 [MCP Apps](../../reference/mcp-apps/). Other clients receive text data.
@@ -72,6 +72,6 @@ Supported clients can also show portfolio charts, instrument details, and other
 - **No tools appear:** enable the connection in the current conversation and
   check your organisation's connector settings.
 - **Order form unavailable:** your assistant should select browser review
-  automatically. Open its link in the browser used to sign in to Kite MCP.
+  automatically. Open its link in any browser and sign in to your Kite account to review it.
 
 See the [FAQ](../../reference/faq/) for more troubleshooting.

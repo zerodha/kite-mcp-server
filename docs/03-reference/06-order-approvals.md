@@ -6,8 +6,9 @@ description: Review orders in your client or browser and manage future order per
 # Order Approvals
 
 When you ask Kite MCP to place, modify, or cancel an order, it asks you to review
-the action. Clients with approval forms show the details in your conversation.
-Other clients return a link so you can approve in your browser.
+the action unless you have already allowed future orders for this connection.
+Clients with approval forms show the details in your conversation. Other clients
+return a link so you can approve in your browser.
 
 No order is submitted while the request is waiting for approval. Saying “yes”
 in chat does not replace the approval form or browser review.
@@ -16,7 +17,7 @@ in chat does not replace the approval form or browser review.
 
 1. Ask your assistant to prepare the order and resolve any missing details.
 2. When you want to submit it, request the placement, modification, or cancellation.
-3. Open the approval link in the browser you used to sign in to Kite MCP.
+3. Open the approval link in any browser and sign in to the matching Kite account.
 4. Check the account, requesting client, instrument, exchange, direction,
    quantity, product, order type, price, and validity.
 5. Select **Place this order**, **Apply these changes**, or **Cancel this order**
@@ -26,40 +27,43 @@ in chat does not replace the approval form or browser review.
 
 Your assistant selects the approval method from the client's capabilities.
 On ChatGPT mobile, it should choose browser review automatically and share the
-link. If a native form failure reaches the server, it returns browser review when
-available. A client that fails locally before replying cannot trigger that
-fallback, so known mobile clients should choose browser review up front.
-You do not need to request a link separately.
+link. If the approval form cannot be shown, your assistant should use browser
+review. You do not need to request a link separately.
 
 An explicit decline, cancellation, or negative confirmation stops the request.
 The assistant must not start another review unless you ask it to.
 
-Links expire after two minutes. Approval permits one submission; it does not
+Links expire after five minutes. Approval permits one submission; it does not
 guarantee exchange execution. Cancelling an order does not reverse existing fills.
 
 ## Allow future orders from this client
 
-The browser page has an optional **Allow future orders from this client without
-asking again** checkbox. It is unchecked by default.
+The browser page has an optional **Let this client place, change and cancel
+orders without asking** checkbox, with its expiry shown in the label. It is
+unchecked by default. If permission is already active, the page shows its scope
+and revocation link instead of another checkbox.
 
 Leaving it unchecked approves only the displayed action. If the submission
-succeeds, checking it also lets that client place, modify, and cancel orders for this account without individual
-approval, until the displayed expiry, logout, or revocation. If the request fails, the
-result page confirms that future orders still require approval. Instructions the
+succeeds, checking it also lets that client place, change, and cancel orders for
+this account without individual approval, until the displayed expiry, logout,
+or revocation. If the request fails, the result page confirms that future orders still require approval. Instructions the
 client follows unintentionally can also lead to orders while this is enabled.
 
 This permission applies to this client's current Kite MCP login session. It does
 not transfer to another client or a new login. It does not grant GTT or Alerts/ATO
 permission; those tools have their own behaviour described below.
 
-## Require approval again
+## Check or turn off future-order permission
 
-After allowing future orders, select **Require approval again** on the result
-page. You can also ask your assistant:
+Ask your assistant whether future orders are currently allowed. It can check
+without placing an order or changing your permission.
+
+If permission is active, select **Ask me before every order** on the result page,
+or ask your assistant:
 
 > Show me the link to require approval again for future orders from this client.
 
-Open the link it returns and select **Require approval again**. Future requests
+Open the link, sign in to Kite, and select **Ask me before every order**. Future requests
 will need approval. Revoking permission does not cancel orders already submitted.
 
 ## Choose a client
@@ -72,9 +76,10 @@ will need approval. Revoking permission does not cancel orders already submitted
 | Other clients with form support | Review the native form, or request browser approval. |
 
 Browser approval does not require your client to display MCP forms or interactive
-charts. Keep the link private and open it in the browser used for this connection.
-If the page asks you to sign in, reconnect your client in that browser and start
-a new order review.
+charts. You can open the link on another device or in another browser. Each
+browser review requires a fresh Kite sign-in to the account that requested the
+order. Sign-in does not submit the order; you still need to confirm the details.
+Kite MCP does not save an approval cookie or bind reviews to a browser.
 
 ## If something goes wrong
 

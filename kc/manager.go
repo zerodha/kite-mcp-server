@@ -249,8 +249,13 @@ func kiteAccessTokenExpiry(now time.Time) time.Time {
 
 // CompleteLogin exchanges a request token for a new set of Kite credentials.
 func (m *Manager) CompleteLogin(requestToken string) (*KiteCredentials, error) {
+	return m.CompleteLoginContext(context.Background(), requestToken)
+}
+
+// CompleteLoginContext exchanges credentials within the caller's deadline.
+func (m *Manager) CompleteLoginContext(ctx context.Context, requestToken string) (*KiteCredentials, error) {
 	kc := m.newKiteClient()
-	response := &loginResponseTransport{base: http.DefaultTransport}
+	response := &loginResponseTransport{base: http.DefaultTransport, ctx: ctx}
 	kc.SetHTTPClient(newKiteHTTPClient(response))
 	started := time.Now()
 	m.Logger.Debug("Starting Kite token exchange", "stage", "kite_token_exchange")

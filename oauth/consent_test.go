@@ -196,13 +196,12 @@ func TestConsentCallbackBrowserBindingAndReplay(t *testing.T) {
 	wg.Wait()
 	close(responses)
 	var location string
-	var browserProof *http.Cookie
 	for w := range responses {
 		if w.Code == 302 {
 			location = w.Header().Get("Location")
 			for _, cookie := range w.Result().Cookies() {
 				if strings.Contains(cookie.Name, "kite-order-browser-") {
-					browserProof = cookie
+					t.Fatal("OAuth login must not establish browser approval authority")
 				}
 			}
 		}
@@ -219,13 +218,8 @@ func TestConsentCallbackBrowserBindingAndReplay(t *testing.T) {
 		t.Fatalf("approved exchange failed: %v", err)
 	}
 	claims, err := h.server.ValidateToken(token)
-	if err != nil || claims.ClientID != id || browserProof == nil {
-		t.Fatal("client identity or browser proof missing after OAuth sign-in")
-	}
-	proofRequest := httptest.NewRequest("GET", "https://mcp.example/order-approvals/example", nil)
-	proofRequest.AddCookie(browserProof)
-	if err := h.server.VerifyOrderBrowserSession(proofRequest, claims.SessionID, claims.KiteUserID); err != nil {
-		t.Fatalf("callback browser proof unusable: %v", err)
+	if err != nil || claims.ClientID != id {
+		t.Fatal("client identity missing after OAuth sign-in")
 	}
 	if retry := postConsent(h, form, c); retry.Code < 400 {
 		t.Fatal("consent replay accepted")

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -39,7 +40,13 @@ func TestHTTPTradeApproval(t *testing.T) {
 			result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "approval"})
 			require.NoError(t, err)
 			require.False(t, result.IsError, "%v", result.Content)
-			require.Equal(t, "executed", result.Content[0].(*sdk.TextContent).Text)
+			var data map[string]any
+			require.NoError(t, json.Unmarshal([]byte(result.Content[0].(*sdk.TextContent).Text), &data))
+			require.Equal(t, "executed", data["message"])
+			require.Equal(t, "native", data["approval_method_used"])
+			require.Equal(t, "approved", data["approval_outcome"])
+			require.Equal(t, true, data["native_elicitation_attempted"])
+			require.Equal(t, true, data["native_elicitation_completed"])
 			require.Equal(t, 1, elicited)
 		})
 	}

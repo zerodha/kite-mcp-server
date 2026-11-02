@@ -65,6 +65,15 @@ After the user completes the browser review, use `orders` with
 `mode=approval_status` and the returned `approval_id` to check the outcome.
 Inspect both the status and any error in the returned result.
 
+Results that reach the approval step include `approval_method_used` (`native`, `browser`,
+`remembered_permission`, or `none`), `approval_outcome`, and `fallback_reason`.
+`native_elicitation_attempted` and `native_elicitation_completed` distinguish an
+attempted form from a valid response. A decline or cancellation completes the
+form without approving the order. `approved` means the authorization passed;
+check the submission result and order status separately. An empty fallback reason
+means no fallback was selected. A client that fails locally before replying may
+return no final tool result.
+
 The user may explicitly allow future orders from this client on the browser
 page. Do not check or grant this permission for them. Use `orders` with
 `mode=permissions` when the user asks to view or revoke it. If future orders
@@ -75,6 +84,8 @@ already requires approval. See [[Order Approvals]] for expiry and scope.
 
 > Read Kite MCP's code mode help before starting this analysis.
 
-Your assistant can read `help({"key":"/client-integration/code-mode"})`. Clients
+Your assistant can read `help({"key":"/client-integration/code-mode"})`.
+Ready-to-use recipes cover quote comparisons, holdings weights across pages,
+and approval-status checks. See [[Pi]] for example requests. Clients
 with native Skills support can use the same guidance through their skill list.
 See [[Help and Skills]] for other workflows.

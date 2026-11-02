@@ -95,11 +95,13 @@ func approvalFromContext(ctx context.Context, req *mcp.CallToolRequest, operatio
 			return approvalFailure("parameters_changed", "Transaction parameters changed during approval; no transaction was executed."), nil
 		}
 		response, _ := req.Params.InputResponses["trade_approval"].(*mcp.ElicitResult)
+		traceNativeResponse(ctx, response, nil)
 		if failure := validateTradeApproval(response); failure != nil {
 			if nativeApprovalUnavailable(response, nil) && ctx.Err() == nil {
 				if browser := browserApprovalsFrom(ctx); browser != nil {
 					locked = false
 					store.Unlock()
+					traceMethod(ctx, "browser", "required", "malformed_native_response")
 					return browser.request(ctx, req, operation, details)
 				}
 			}

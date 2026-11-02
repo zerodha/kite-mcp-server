@@ -131,7 +131,7 @@ approval forms depend on the host's capabilities.
 Kite MCP exposes 7 grouped account/market tools and a workflow help tool:
 
 - `portfolio` - Profile, margins, holdings, and positions
-- `orders` - Order listing, history, trades, place, modify, cancel
+- `orders` - Order listing, history, trades, place, modify, cancel, approval status, and client permission status
 - `gtt` - GTT listing, create, modify, delete
 - `market` - Quote, LTP, OHLC, historical data, instrument search
 - `alerts` - Alert listing, create, modify, delete
@@ -141,7 +141,7 @@ Kite MCP exposes 7 grouped account/market tools and a workflow help tool:
 
 See [Tools](docs/03-reference/01-tools.md) for the full mode and parameter reference, and
 [Help and Skills](docs/03-reference/04-help-and-skills.md) for recipes, negotiation, and authoring.
-[Code Mode](docs/03-reference/07-code-mode.md) covers generated tool calls, result parsing, and approval handling.
+[Code Mode](docs/03-reference/07-code-mode.md) covers generated tool calls, result parsing, and approval handling. Read-only recipes for quote comparisons, holdings weights, and approval status are bundled under `/client-integration`.
 
 ## API Coverage
 

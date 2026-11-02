@@ -23,6 +23,8 @@ import (
 	"github.com/zerodha/kite-mcp-server/oauth"
 )
 
+type reviewTestIdentity struct{ user string }
+
 type browserBearerTransport struct{ token string }
 
 func (t browserBearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -48,6 +50,11 @@ func newBrowserApprovalFixture(t *testing.T) *browserApprovalFixture {
 	f := &browserApprovalFixture{started: make(chan struct{}), release: make(chan struct{}), historyStarted: make(chan struct{}), historyStopped: make(chan struct{})}
 	f.manager = approvalTestManager(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/session/token" {
+			_ = r.ParseForm()
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]string{"user_id": r.PostForm.Get("request_token"), "access_token": "fresh-access"}})
+			return
+		}
 		if r.Method == http.MethodGet {
 			if f.blockHistory.Load() {
 				close(f.historyStarted)
@@ -74,7 +81,7 @@ func newBrowserApprovalFixture(t *testing.T) *browserApprovalFixture {
 	return f
 }
 
-func (f *browserApprovalFixture) connect(t *testing.T, session, name, version string, options ...*sdk.ClientOptions) (*sdk.ClientSession, *http.Cookie) {
+func (f *browserApprovalFixture) connect(t *testing.T, session, name, version string, options ...*sdk.ClientOptions) (*sdk.ClientSession, *reviewTestIdentity) {
 	t.Helper()
 	if session != "approval-test" {
 		_, _, err := f.manager.SessionManager().GetOrCreate(session)
@@ -103,11 +110,7 @@ func (f *browserApprovalFixture) connect(t *testing.T, session, name, version st
 	cs, err := client.Connect(context.Background(), &sdk.StreamableClientTransport{Endpoint: endpoint.URL, HTTPClient: &http.Client{Transport: browserBearerTransport{token}}}, &sdk.ClientSessionOptions{ProtocolVersion: version})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = cs.Close() })
-	w := httptest.NewRecorder()
-	require.NoError(t, f.b.oauth.SetOrderBrowserSession(w, session, "user"))
-	cookies := w.Result().Cookies()
-	require.Len(t, cookies, 1)
-	return cs, cookies[0]
+	return cs, &reviewTestIdentity{user: "user"}
 }
 
 func browserOrderArgs() map[string]any {
@@ -130,16 +133,30 @@ func browserApprovalID(t *testing.T, result *sdk.CallToolResult) string {
 	require.Equal(t, "approval_required", data["status"])
 	return data["approval_id"].(string)
 }
-func browserPage(t *testing.T, b *BrowserApprovals, id string, cookie *http.Cookie) *httptest.ResponseRecorder {
+func browserPage(t *testing.T, b *BrowserApprovals, id string, identity *reviewTestIdentity) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest("GET", b.approvalURL(id), nil)
-	if cookie != nil {
-		r.AddCookie(cookie)
-	}
 	w := httptest.NewRecorder()
 	b.ServeHTTP(w, r)
+	require.Empty(t, w.Result().Cookies(), "approval flow must not set cookies")
+	if identity == nil || w.Code != http.StatusSeeOther {
+		return w
+	}
+	login, err := url.Parse(w.Header().Get("Location"))
+	require.NoError(t, err)
+	query, err := url.ParseQuery(login.Query().Get("redirect_params"))
+	require.NoError(t, err)
+	query.Set("request_token", identity.user)
+	r = httptest.NewRequest("GET", "https://mcp.example/callback?"+query.Encode(), nil)
+	// Independent test browser peers avoid sharing the global callback limiter.
+	digest := sha256.Sum256([]byte(query.Get("session_id")))
+	r.RemoteAddr = fmt.Sprintf("[2001:db8:%x:%x::1]:1234", digest[:2], digest[2:4])
+	w = httptest.NewRecorder()
+	oauth.NewHandlers(b.oauth, b.manager, b.manager.Logger).HandleCallback(w, r)
+	require.Empty(t, w.Result().Cookies(), "review sign-in must not set cookies")
 	return w
 }
+
 func pageCSRF(t *testing.T, w *httptest.ResponseRecorder) string {
 	t.Helper()
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -147,12 +164,9 @@ func pageCSRF(t *testing.T, w *httptest.ResponseRecorder) string {
 	require.Len(t, m, 2)
 	return m[1]
 }
-func postBrowserDecision(b *BrowserApprovals, id string, cookie *http.Cookie, form url.Values, origin string) *httptest.ResponseRecorder {
+func postBrowserDecision(b *BrowserApprovals, id string, _ *reviewTestIdentity, form url.Values, origin string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest("POST", b.approvalURL(id), strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if cookie != nil {
-		r.AddCookie(cookie)
-	}
 	if origin != "" {
 		r.Header.Set("Origin", origin)
 	}
@@ -165,28 +179,31 @@ func TestBrowserApprovalWithoutElicitation(t *testing.T) {
 	for _, version := range []string{"2025-11-25", "2026-07-28"} {
 		t.Run(version, func(t *testing.T) {
 			f := newBrowserApprovalFixture(t)
-			cs, cookie := f.connect(t, "approval-test", "Pi <client>", version)
+			cs, identity := f.connect(t, "approval-test", "Pi <client>", version)
 			require.Contains(t, cs.InitializeResult().Instructions, "status=approval_required")
-			require.Contains(t, cs.InitializeResult().Instructions, "do not open or approve it for the user")
+			require.Contains(t, cs.InitializeResult().Instructions, "Do not open or approve it for the user")
 			pending := callBrowserOrder(t, cs, browserOrderArgs())
+			expiry, err := time.Parse(time.RFC3339, approvalObservation(t, pending)["expires_at"].(string))
+			require.NoError(t, err)
+			require.WithinDuration(t, time.Now().Add(5*time.Minute), expiry, 2*time.Second)
 			id := browserApprovalID(t, pending)
 			require.Zero(t, f.calls.Load())
-			require.Equal(t, http.StatusForbidden, browserPage(t, f.b, id, nil).Code, "link alone cannot approve or reveal order details")
-			page := browserPage(t, f.b, id, cookie)
+			require.Equal(t, http.StatusSeeOther, browserPage(t, f.b, id, nil).Code, "link alone cannot approve or reveal order details")
+			page := browserPage(t, f.b, id, identity)
 			csrf := pageCSRF(t, page)
 			require.Contains(t, page.Body.String(), "Pi &lt;client&gt;")
 			require.NotContains(t, page.Body.String(), "Spoofed client name")
 			require.NotRegexp(t, `<input[^>]*\bchecked(?:\s|=|>)`, page.Body.String())
 			require.Contains(t, page.Body.String(), "INFY")
-			require.NotContains(t, page.Body.String(), "Require approval again", "revocation link appears only after permission is enabled")
+			require.NotContains(t, page.Body.String(), "Ask me before every order", "revocation link appears only after permission is enabled")
 			require.Equal(t, "no-store", page.Header().Get("Cache-Control"))
 			if path := os.Getenv("KITE_APPROVAL_PREVIEW_PATH"); path != "" {
 				require.NoError(t, os.WriteFile(path, page.Body.Bytes(), 0600))
 			}
 			form := url.Values{"csrf": {csrf}, "decision": {"approve"}}
-			require.Equal(t, http.StatusSeeOther, postBrowserDecision(f.b, id, cookie, form, "").Code)
+			require.Equal(t, http.StatusOK, postBrowserDecision(f.b, id, identity, form, "").Code)
 			require.EqualValues(t, 1, f.calls.Load())
-			require.Equal(t, http.StatusOK, postBrowserDecision(f.b, id, cookie, form, "").Code)
+			require.Equal(t, http.StatusOK, postBrowserDecision(f.b, id, identity, form, "").Code)
 			require.EqualValues(t, 1, f.calls.Load(), "browser refresh must not replay")
 			status := callBrowserOrder(t, cs, map[string]any{"mode": "approval_status", "approval_id": id})
 			require.Contains(t, status.Content[0].(*sdk.TextContent).Text, `"status":"submitted"`)
@@ -201,7 +218,7 @@ func TestUnavailableNativeApprovalFallsBackWithoutAnotherOrderCall(t *testing.T)
 		for _, scenario := range []string{"transport-error", "malformed-response", "decline", "cancel", "negative"} {
 			t.Run(version+"/"+scenario, func(t *testing.T) {
 				f := newBrowserApprovalFixture(t)
-				cs, cookie := f.connect(t, "approval-test", "Approval-capable client", version, &sdk.ClientOptions{ElicitationHandler: func(context.Context, *sdk.ElicitRequest) (*sdk.ElicitResult, error) {
+				cs, identity := f.connect(t, "approval-test", "Approval-capable client", version, &sdk.ClientOptions{ElicitationHandler: func(context.Context, *sdk.ElicitRequest) (*sdk.ElicitResult, error) {
 					switch scenario {
 					case "transport-error":
 						return nil, fmt.Errorf("native form unavailable")
@@ -224,15 +241,41 @@ func TestUnavailableNativeApprovalFallsBackWithoutAnotherOrderCall(t *testing.T)
 				}
 				result := callBrowserOrder(t, cs, browserOrderArgs())
 				require.Zero(t, f.calls.Load(), "native failure and fallback must not submit an order")
+				data := approvalObservation(t, result)
+				require.Equal(t, true, data["native_elicitation_attempted"])
+				fallback := scenario == "transport-error" || scenario == "malformed-response"
+				require.Equal(t, !fallback, data["native_elicitation_completed"])
+				if fallback {
+					require.Equal(t, "browser", data["approval_method_used"])
+					require.Equal(t, "required", data["approval_outcome"])
+					reason := "malformed_native_response"
+					if scenario == "transport-error" {
+						reason = "native_transport_error"
+					}
+					require.Equal(t, reason, data["fallback_reason"])
+				} else {
+					require.Equal(t, "native", data["approval_method_used"])
+					outcome := "declined"
+					if scenario == "cancel" {
+						outcome = "cancelled"
+					}
+					require.Equal(t, outcome, data["approval_outcome"])
+					require.Empty(t, data["fallback_reason"])
+				}
 				if scenario != "transport-error" && scenario != "malformed-response" {
 					require.True(t, result.IsError)
 					require.Empty(t, f.b.pending, "explicit user decisions must not create another review")
 					return
 				}
 				id := browserApprovalID(t, result)
-				csrf := pageCSRF(t, browserPage(t, f.b, id, cookie))
-				require.Equal(t, http.StatusSeeOther, postBrowserDecision(f.b, id, cookie, url.Values{"csrf": {csrf}, "decision": {"approve"}}, "").Code)
+				csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
+				require.Equal(t, http.StatusOK, postBrowserDecision(f.b, id, identity, url.Values{"csrf": {csrf}, "decision": {"approve"}}, "").Code)
 				require.EqualValues(t, 1, f.calls.Load())
+				observed := approvalObservation(t, callBrowserOrder(t, cs, map[string]any{"mode": "approval_status", "approval_id": id}))
+				require.Equal(t, "approved", observed["approval_outcome"])
+				require.Equal(t, data["fallback_reason"], observed["fallback_reason"])
+				require.Equal(t, true, observed["native_elicitation_attempted"])
+				require.Equal(t, false, observed["native_elicitation_completed"])
 			})
 		}
 	}
@@ -249,7 +292,13 @@ func TestGenericElicitationUsesBrowserAutomatically(t *testing.T) {
 					return &sdk.ElicitResult{Action: "decline"}, nil
 				},
 			})
-			browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
+			result := callBrowserOrder(t, cs, browserOrderArgs())
+			browserApprovalID(t, result)
+			observation := approvalObservation(t, result)
+			require.Equal(t, "browser", observation["approval_method_used"])
+			require.Equal(t, "form_support_unspecified", observation["fallback_reason"])
+			require.Equal(t, false, observation["native_elicitation_attempted"])
+			require.Equal(t, false, observation["native_elicitation_completed"])
 			require.Zero(t, f.calls.Load())
 		})
 	}
@@ -257,42 +306,48 @@ func TestGenericElicitationUsesBrowserAutomatically(t *testing.T) {
 
 func TestBrowserApprovalTrustAndRevocation(t *testing.T) {
 	f := newBrowserApprovalFixture(t)
-	cs, cookie := f.connect(t, "approval-test", "Pi", "2025-11-25")
+	cs, identity := f.connect(t, "approval-test", "Pi", "2025-11-25")
 	id := browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
-	csrf := pageCSRF(t, browserPage(t, f.b, id, cookie))
+	csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
 	form := url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}
-	require.Equal(t, http.StatusSeeOther, postBrowserDecision(f.b, id, cookie, form, "").Code)
-	require.False(t, callBrowserOrder(t, cs, browserOrderArgs()).IsError)
+	require.Equal(t, http.StatusOK, postBrowserDecision(f.b, id, identity, form, "").Code)
+	auto := callBrowserOrder(t, cs, browserOrderArgs())
+	require.False(t, auto.IsError)
+	observation := approvalObservation(t, auto)
+	require.Equal(t, "remembered_permission", observation["approval_method_used"])
+	require.Equal(t, "approved", observation["approval_outcome"])
+	require.Equal(t, false, observation["native_elicitation_attempted"])
+	require.Equal(t, false, observation["native_elicitation_completed"])
 	require.EqualValues(t, 2, f.calls.Load())
 	permissions := callBrowserOrder(t, cs, map[string]any{"mode": "permissions"})
 	require.Contains(t, permissions.Content[0].(*sdk.TextContent).Text, `"future_orders_allowed":true`)
 	other, _ := f.connect(t, "other-grant", "Pi", "2025-11-25")
 	browserApprovalID(t, callBrowserOrder(t, other, browserOrderArgs()))
 	require.EqualValues(t, 2, f.calls.Load(), "same display name cannot inherit permission")
-	page := browserPage(t, f.b, "manage/approval-test", cookie)
+	page := browserPage(t, f.b, "manage/approval-test", identity)
 	if path := os.Getenv("KITE_APPROVAL_PREVIEW_PATH"); path != "" {
 		require.NoError(t, os.WriteFile(path+".manage.html", page.Body.Bytes(), 0600))
-		require.NoError(t, os.WriteFile(path+".confirmed.html", browserPage(t, f.b, id, cookie).Body.Bytes(), 0600))
+		require.NoError(t, os.WriteFile(path+".confirmed.html", browserPage(t, f.b, id, identity).Body.Bytes(), 0600))
 	}
 	revoke := url.Values{"csrf": {pageCSRF(t, page)}, "decision": {"revoke"}}
-	require.Equal(t, http.StatusSeeOther, postBrowserDecision(f.b, "manage/approval-test", cookie, revoke, "").Code)
+	require.Equal(t, http.StatusOK, postBrowserDecision(f.b, "manage/approval-test", identity, revoke, "").Code)
 	browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
 	require.EqualValues(t, 2, f.calls.Load())
 	// A replayed management form can revoke but can never enable a permission.
-	require.Equal(t, http.StatusSeeOther, postBrowserDecision(f.b, "manage/approval-test", cookie, revoke, "").Code)
+	require.Equal(t, http.StatusOK, postBrowserDecision(f.b, "manage/approval-test", identity, revoke, "").Code)
 }
 
 func TestBrowserApprovalRejectsUntrustedRequests(t *testing.T) {
-	for _, scenario := range []string{"csrf", "origin", "other-browser", "decline", "expired", "logged-out", "changed-arguments", "changed-history", "changed-account"} {
+	for _, scenario := range []string{"csrf", "origin", "wrong-review", "decline", "expired", "logged-out", "changed-arguments", "changed-history", "changed-account"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := newBrowserApprovalFixture(t)
-			cs, cookie := f.connect(t, "approval-test", "Pi", "2025-11-25")
+			cs, identity := f.connect(t, "approval-test", "Pi", "2025-11-25")
 			args := browserOrderArgs()
 			if scenario == "changed-history" {
 				args = map[string]any{"mode": "modify", "order_id": "order-1", "order_type": "LIMIT", "price": 1400}
 			}
 			id := browserApprovalID(t, callBrowserOrder(t, cs, args))
-			csrf := pageCSRF(t, browserPage(t, f.b, id, cookie))
+			csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
 			form := url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}
 			origin := ""
 			switch scenario {
@@ -300,8 +355,9 @@ func TestBrowserApprovalRejectsUntrustedRequests(t *testing.T) {
 				form.Set("csrf", "forged")
 			case "origin":
 				origin = "https://evil.example"
-			case "other-browser":
-				_, cookie = f.connect(t, "other-grant", "Pi", "2025-11-25")
+			case "wrong-review":
+				otherID := browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
+				form.Set("csrf", pageCSRF(t, browserPage(t, f.b, otherID, identity)))
 			case "decline":
 				form.Set("decision", "decline")
 			case "expired":
@@ -311,13 +367,13 @@ func TestBrowserApprovalRejectsUntrustedRequests(t *testing.T) {
 				require.NoError(t, err)
 			case "changed-account":
 				require.NoError(t, f.manager.SessionManager().UpdateCredentials("approval-test", &kc.KiteCredentials{UserID: "other-account", AccessToken: "test-access", ExpiresAt: time.Now().Add(time.Hour)}))
-				require.Equal(t, http.StatusForbidden, browserPage(t, f.b, id, cookie).Code)
+				require.Equal(t, http.StatusForbidden, browserPage(t, f.b, id, identity).Code)
 			case "changed-arguments":
 				f.b.pending[id].arguments = json.RawMessage(`{"mode":"place","exchange":"NSE","tradingsymbol":"INFY","transaction_type":"BUY","quantity":2,"product":"CNC","order_type":"LIMIT","price":1500}`)
 			case "changed-history":
 				f.b.pending[id].snapshot = []byte(`{"order_id":"different"}`)
 			}
-			postBrowserDecision(f.b, id, cookie, form, origin)
+			postBrowserDecision(f.b, id, identity, form, origin)
 			require.Zero(t, f.calls.Load())
 			require.Empty(t, f.b.permissions)
 		})
@@ -326,15 +382,15 @@ func TestBrowserApprovalRejectsUntrustedRequests(t *testing.T) {
 
 func TestBrowserApprovalConcurrentPosts(t *testing.T) {
 	f := newBrowserApprovalFixture(t)
-	cs, cookie := f.connect(t, "approval-test", "Pi", "2025-11-25")
+	cs, identity := f.connect(t, "approval-test", "Pi", "2025-11-25")
 	id := browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
-	csrf := pageCSRF(t, browserPage(t, f.b, id, cookie))
+	csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
 	var wg sync.WaitGroup
 	for i := 0; i < 6; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			postBrowserDecision(f.b, id, cookie, url.Values{"csrf": {csrf}, "decision": {"approve"}}, "")
+			postBrowserDecision(f.b, id, identity, url.Values{"csrf": {csrf}, "decision": {"approve"}}, "")
 		}()
 	}
 	wg.Wait()
@@ -352,15 +408,15 @@ func TestBrowserApprovalStatusIsConnectionBound(t *testing.T) {
 func TestExplicitBrowserApprovalAndExpiredPermission(t *testing.T) {
 	f := newBrowserApprovalFixture(t)
 	nativeCalls := 0
-	cs, cookie := f.connect(t, "approval-test", "Pi", "2025-11-25", &sdk.ClientOptions{ElicitationHandler: func(context.Context, *sdk.ElicitRequest) (*sdk.ElicitResult, error) {
+	cs, identity := f.connect(t, "approval-test", "Pi", "2025-11-25", &sdk.ClientOptions{ElicitationHandler: func(context.Context, *sdk.ElicitRequest) (*sdk.ElicitResult, error) {
 		nativeCalls++
 		return &sdk.ElicitResult{Action: "decline"}, nil
 	}})
 	args := browserOrderArgs()
 	args["approval_method"] = "browser"
 	id := browserApprovalID(t, callBrowserOrder(t, cs, args))
-	csrf := pageCSRF(t, browserPage(t, f.b, id, cookie))
-	require.Equal(t, http.StatusSeeOther, postBrowserDecision(f.b, id, cookie, url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}, "").Code)
+	csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
+	require.Equal(t, http.StatusOK, postBrowserDecision(f.b, id, identity, url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}, "").Code)
 	require.Zero(t, nativeCalls)
 	require.EqualValues(t, 1, f.calls.Load())
 	// A user explicitly asking for another browser review must receive it even
@@ -382,12 +438,12 @@ func TestExplicitBrowserApprovalAndExpiredPermission(t *testing.T) {
 func TestBrowserApprovalFailedSubmissionNeverRetriesOrRemembers(t *testing.T) {
 	f := newBrowserApprovalFixture(t)
 	f.failMutations.Store(true)
-	cs, cookie := f.connect(t, "approval-test", "Pi", "2025-11-25")
+	cs, identity := f.connect(t, "approval-test", "Pi", "2025-11-25")
 	id := browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
-	csrf := pageCSRF(t, browserPage(t, f.b, id, cookie))
+	csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
 	form := url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}
-	postBrowserDecision(f.b, id, cookie, form, "")
-	postBrowserDecision(f.b, id, cookie, form, "")
+	postBrowserDecision(f.b, id, identity, form, "")
+	postBrowserDecision(f.b, id, identity, form, "")
 	require.EqualValues(t, 1, f.calls.Load())
 	require.Empty(t, f.b.permissions)
 	result := callBrowserOrder(t, cs, map[string]any{"mode": "approval_status", "approval_id": id})
@@ -396,27 +452,27 @@ func TestBrowserApprovalFailedSubmissionNeverRetriesOrRemembers(t *testing.T) {
 
 func TestRevocationDuringSubmissionCannotBeUndone(t *testing.T) {
 	f := newBrowserApprovalFixture(t)
-	cs, cookie := f.connect(t, "approval-test", "Pi", "2025-11-25")
+	cs, identity := f.connect(t, "approval-test", "Pi", "2025-11-25")
 	id := browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
-	csrf := pageCSRF(t, browserPage(t, f.b, id, cookie))
-	postBrowserDecision(f.b, id, cookie, url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}, "")
+	csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
+	postBrowserDecision(f.b, id, identity, url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}, "")
 	args := browserOrderArgs()
 	args["approval_method"] = "browser"
 	id = browserApprovalID(t, callBrowserOrder(t, cs, args))
-	csrf = pageCSRF(t, browserPage(t, f.b, id, cookie))
+	csrf = pageCSRF(t, browserPage(t, f.b, id, identity))
 	f.blockMutations.Store(true)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		postBrowserDecision(f.b, id, cookie, url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}, "")
+		postBrowserDecision(f.b, id, identity, url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}, "")
 	}()
 	select {
 	case <-f.started:
 	case <-time.After(3 * time.Second):
 		t.Fatal("mutation did not start")
 	}
-	page := browserPage(t, f.b, "manage/approval-test", cookie)
-	postBrowserDecision(f.b, "manage/approval-test", cookie, url.Values{"csrf": {pageCSRF(t, page)}, "decision": {"revoke"}}, "")
+	page := browserPage(t, f.b, "manage/approval-test", identity)
+	postBrowserDecision(f.b, "manage/approval-test", identity, url.Values{"csrf": {pageCSRF(t, page)}, "decision": {"revoke"}}, "")
 	close(f.release)
 	<-done
 	result := callBrowserOrder(t, cs, map[string]any{"mode": "permissions"})
@@ -456,18 +512,18 @@ func TestBrowserApprovalResultMakesPermissionOutcomeExplicit(t *testing.T) {
 		t.Run(map[bool]string{false: "submitted", true: "failed"}[fail], func(t *testing.T) {
 			f := newBrowserApprovalFixture(t)
 			f.failMutations.Store(fail)
-			cs, cookie := f.connect(t, "approval-test", "Pi", "2025-11-25")
+			cs, identity := f.connect(t, "approval-test", "Pi", "2025-11-25")
 			id := browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
-			csrf := pageCSRF(t, browserPage(t, f.b, id, cookie))
-			postBrowserDecision(f.b, id, cookie, url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}, "")
-			page := browserPage(t, f.b, id, cookie)
+			csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
+			postBrowserDecision(f.b, id, identity, url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}, "")
+			page := browserPage(t, f.b, id, identity)
 			require.Equal(t, http.StatusOK, page.Code)
 			if fail {
 				require.Contains(t, page.Body.String(), "Future orders still require approval")
-				require.NotContains(t, page.Body.String(), "Require approval again")
+				require.NotContains(t, page.Body.String(), "Ask me before every order")
 			} else {
-				require.Contains(t, page.Body.String(), "Future orders from Pi are allowed")
-				require.Contains(t, page.Body.String(), "Require approval again")
+				require.Contains(t, page.Body.String(), "Pi can place, change and cancel orders without asking")
+				require.Contains(t, page.Body.String(), "Ask me before every order")
 			}
 		})
 	}
@@ -477,9 +533,9 @@ func TestBrowserApprovalRejectsMalformedForms(t *testing.T) {
 	for _, scenario := range []string{"missing-csrf", "duplicate-csrf", "duplicate-decision", "duplicate-remember", "invalid-remember", "oversized"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := newBrowserApprovalFixture(t)
-			cs, cookie := f.connect(t, "approval-test", "Pi", "2025-11-25")
+			cs, identity := f.connect(t, "approval-test", "Pi", "2025-11-25")
 			id := browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
-			csrf := pageCSRF(t, browserPage(t, f.b, id, cookie))
+			csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
 			form := url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}
 			switch scenario {
 			case "missing-csrf":
@@ -495,7 +551,7 @@ func TestBrowserApprovalRejectsMalformedForms(t *testing.T) {
 			case "oversized":
 				form.Set("padding", strings.Repeat("x", 8192))
 			}
-			response := postBrowserDecision(f.b, id, cookie, form, "")
+			response := postBrowserDecision(f.b, id, identity, form, "")
 			require.GreaterOrEqual(t, response.Code, 400)
 			require.Zero(t, f.calls.Load())
 			require.Empty(t, f.b.permissions)
@@ -517,10 +573,10 @@ func TestBrowserApprovalArgumentsCannotGrantPermission(t *testing.T) {
 
 func TestBrowserApprovalPermissionAndStatusRequireSameClient(t *testing.T) {
 	f := newBrowserApprovalFixture(t)
-	owner, cookie := f.connect(t, "approval-test", "Pi", "2025-11-25")
+	owner, identity := f.connect(t, "approval-test", "Pi", "2025-11-25")
 	id := browserApprovalID(t, callBrowserOrder(t, owner, browserOrderArgs()))
-	csrf := pageCSRF(t, browserPage(t, f.b, id, cookie))
-	postBrowserDecision(f.b, id, cookie, url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}, "")
+	csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
+	postBrowserDecision(f.b, id, identity, url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}, "")
 	other, _ := f.connect(t, "approval-test", "Pi", "2025-11-25")
 	require.True(t, callBrowserOrder(t, other, map[string]any{"mode": "approval_status", "approval_id": id}).IsError)
 	browserApprovalID(t, callBrowserOrder(t, other, browserOrderArgs()))
@@ -531,9 +587,9 @@ func TestBrowserApprovalPermissionAndStatusRequireSameClient(t *testing.T) {
 
 func TestBrowserApprovalDeadlineCancelsUpstreamWork(t *testing.T) {
 	f := newBrowserApprovalFixture(t)
-	cs, cookie := f.connect(t, "approval-test", "Pi", "2025-11-25")
+	cs, identity := f.connect(t, "approval-test", "Pi", "2025-11-25")
 	id := browserApprovalID(t, callBrowserOrder(t, cs, map[string]any{"mode": "cancel", "order_id": "order-1"}))
-	csrf := pageCSRF(t, browserPage(t, f.b, id, cookie))
+	csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
 	f.b.mu.Lock()
 	f.b.pending[id].expires = time.Now().Add(500 * time.Millisecond)
 	f.b.mu.Unlock()
@@ -541,7 +597,7 @@ func TestBrowserApprovalDeadlineCancelsUpstreamWork(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		postBrowserDecision(f.b, id, cookie, url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}, "")
+		postBrowserDecision(f.b, id, identity, url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}, "")
 	}()
 	for _, signal := range []<-chan struct{}{f.historyStarted, done, f.historyStopped} {
 		select {
@@ -558,14 +614,14 @@ func TestBrowserApprovalRetainsNotesAndEscapesUntrustedText(t *testing.T) {
 	for _, orderType := range []string{"MARKET", "SL-M", "LIMIT"} {
 		t.Run(orderType, func(t *testing.T) {
 			f := newBrowserApprovalFixture(t)
-			cs, cookie := f.connect(t, "approval-test", `<script>alert(1)</script>`, "2025-11-25")
+			cs, identity := f.connect(t, "approval-test", `<script>alert(1)</script>`, "2025-11-25")
 			args := browserOrderArgs()
 			args["order_type"] = orderType
 			args["tradingsymbol"] = "INFY\nQuantity: 500\u202e"
 			id := browserApprovalID(t, callBrowserOrder(t, cs, args))
-			page := browserPage(t, f.b, id, cookie)
+			page := browserPage(t, f.b, id, identity)
 			body := page.Body.String()
-			require.Contains(t, body, "Unspecified fields use Kite defaults.")
+			require.Contains(t, body, "Other order settings use Kite&#39;s defaults.")
 			require.Equal(t, orderType != "LIMIT", strings.Contains(body, "Execution price is set by the market."))
 			require.NotContains(t, body, "<script>")
 			require.Contains(t, body, "&lt;script&gt;")
@@ -576,4 +632,16 @@ func TestBrowserApprovalRetainsNotesAndEscapesUntrustedText(t *testing.T) {
 			require.Zero(t, f.calls.Load())
 		})
 	}
+}
+
+func approvalObservation(t *testing.T, result *sdk.CallToolResult) map[string]any {
+	t.Helper()
+	var data map[string]any
+	require.NoError(t, json.Unmarshal([]byte(result.Content[0].(*sdk.TextContent).Text), &data))
+	encoded, err := json.Marshal(result.StructuredContent)
+	require.NoError(t, err)
+	var structured map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &structured))
+	require.Equal(t, data, structured, "text and structured observations must agree")
+	return data
 }

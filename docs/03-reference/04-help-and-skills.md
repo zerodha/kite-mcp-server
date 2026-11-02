@@ -33,7 +33,7 @@ separately.
 | Triggers and alerts | Reviewing GTTs and alerts for gaps or duplicates |
 | Daily review | A snapshot of funds, exposure, orders, and missing data |
 | Troubleshooting | Sign-in, incomplete data, and uncertain execution |
-| Code mode | Reading tool results and combining data without losing errors |
+| Code mode | Quote comparisons, holdings weights across pages, and approval-status checks |
 
 Technical indicators require a client with a computation tool. A workflow can
 use only the tools available on your connection. Reading one does not authorise
@@ -49,7 +49,9 @@ If you or your assistant need a specific recipe, start with the root:
 
 Pass that argument to `help`, then follow the returned topic and recipe keys.
 For example, `/orders/reconcile` opens the order reconciliation workflow, and
-`/client-integration/code-mode` opens the code mode guidance.
+`/client-integration/code-mode` opens the code mode guidance. Related recipes
+include `/client-integration/compare-quotes`, `/client-integration/holdings-weights`,
+and `/client-integration/approval-status`.
 
 ## Contribute a workflow
 

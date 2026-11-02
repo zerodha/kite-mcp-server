@@ -11,6 +11,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,12 +31,13 @@ type approvedBrowserOrder struct {
 }
 
 type browserOrder struct {
-	id, session, user, client, clientName, operation, csrf string
-	snapshot, arguments                                    []byte
-	expires, retainUntil                                   time.Time
-	status                                                 string
-	result                                                 *sdk.CallToolResult
-	rememberRequested                                      bool
+	trace                                            approvalTrace
+	id, session, user, client, clientName, operation string
+	snapshot, arguments                              []byte
+	expires, retainUntil                             time.Time
+	status                                           string
+	result                                           *sdk.CallToolResult
+	rememberRequested                                bool
 }
 
 type clientOrderPermission struct {
@@ -54,11 +56,12 @@ type BrowserApprovals struct {
 	manager     *kc.Manager
 	oauth       *oauth.Server
 	page        *template.Template
+	loginLimit  *oauth.RateLimiter
 }
 
 func NewBrowserApprovals(manager *kc.Manager, server *oauth.Server) *BrowserApprovals {
 	page := template.Must(template.New("order_approval.html").ParseFS(templates.FS, "base.html", "brand_assets.html", "order_approval.html"))
-	return &BrowserApprovals{pending: make(map[string]*browserOrder), permissions: make(map[string]clientOrderPermission), manager: manager, oauth: server, page: page}
+	return &BrowserApprovals{pending: make(map[string]*browserOrder), permissions: make(map[string]clientOrderPermission), manager: manager, oauth: server, page: page, loginLimit: oauth.NewRateLimiter(30, time.Minute)}
 }
 
 func (b *BrowserApprovals) Attach(server *sdk.Server) {
@@ -135,6 +138,12 @@ func (b *BrowserApprovals) cleanupLocked(now time.Time) {
 func (b *BrowserApprovals) request(ctx context.Context, req *sdk.CallToolRequest, operation string, details any) (*sdk.CallToolResult, error) {
 	c, name, err := b.identity(ctx, req)
 	if err != nil {
+		if trace := traceFrom(ctx); trace != nil {
+			trace.Method, trace.Outcome = "none", "unavailable"
+			if trace.NativeAttempted {
+				trace.Method = "native"
+			}
+		}
 		return approvalFailure("unsupported_client", "Browser approval requires a verified client connection. Reconnect and sign in through Kite. No transaction was executed."), nil
 	}
 	snapshot, err := json.MarshalIndent(details, "", "  ")
@@ -157,7 +166,7 @@ func (b *BrowserApprovals) request(ctx context.Context, req *sdk.CallToolRequest
 	if deadline.Before(expires) {
 		expires = deadline
 	}
-	p := &browserOrder{id: randomApprovalSecret(), csrf: randomApprovalSecret(), session: c.SessionID, user: c.KiteUserID, client: c.ClientID, clientName: name, operation: operation, snapshot: snapshot, arguments: arguments, expires: expires, retainUntil: now.Add(15 * time.Minute), status: "approval_required"}
+	p := &browserOrder{id: randomApprovalSecret(), session: c.SessionID, user: c.KiteUserID, client: c.ClientID, clientName: name, operation: operation, snapshot: snapshot, arguments: arguments, expires: expires, retainUntil: now.Add(15 * time.Minute), status: "approval_required"}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.cleanupLocked(now)
@@ -187,8 +196,11 @@ func (b *BrowserApprovals) request(ctx context.Context, req *sdk.CallToolRequest
 		}
 		delete(b.pending, oldest.id)
 	}
+	if trace := traceFrom(ctx); trace != nil {
+		p.trace = *trace
+	}
 	b.pending[p.id] = p
-	data := map[string]any{"status": "approval_required", "approval_id": p.id, "approval_url": b.approvalURL(p.id), "expires_at": expires.Format(time.RFC3339), "message": "No order was submitted. Open the approval URL in the browser used to sign in to Kite MCP. Review and approve there. Do not repeat the order request. After approval, use orders mode=approval_status with this approval_id to retrieve the outcome."}
+	data := map[string]any{"status": "approval_required", "approval_id": p.id, "approval_url": b.approvalURL(p.id), "expires_at": expires.Format(time.RFC3339), "message": "No order was submitted. Open the approval URL in any browser, sign in to the matching Kite account, then review and approve. Do not repeat the order request. After approval, use orders mode=approval_status with this approval_id to retrieve the outcome."}
 	return browserApprovalResult(data), nil
 }
 
@@ -222,6 +234,11 @@ func (b *BrowserApprovals) status(ctx context.Context, req *sdk.CallToolRequest,
 		p.status = "expired"
 	}
 	data := map[string]any{"approval_id": id, "status": p.status, "result": p.result}
+	trace := p.trace
+	if outcome, ok := map[string]string{"approval_required": "required", "submitting": "approved", "declined": "declined", "expired": "expired"}[p.status]; ok {
+		trace.Outcome = outcome
+	}
+	trace.add(data)
 	permission, allowed := b.permissions[c.SessionID]
 	allowed = allowed && permission.allowed && permission.client == c.ClientID && permission.user == c.KiteUserID && time.Now().Before(permission.expires)
 	data["future_orders_allowed"] = allowed
@@ -240,16 +257,16 @@ func (b *BrowserApprovals) permissionStatus(ctx context.Context, req *sdk.CallTo
 	data := map[string]any{"future_orders_allowed": allowed, "message": "This connection already requires approval for order requests. No permission change is needed."}
 	if allowed {
 		data["permissions_url"] = b.manageURL(c.SessionID)
-		data["message"] = "Share permissions_url as a clickable link labelled Require approval again. The user can revoke future order permission in their sign-in browser. Do not open or submit the page on their behalf."
+		data["message"] = "Share permissions_url as a clickable link labelled Ask me before every order. The user can revoke future order permission after signing in to Kite. Do not open or submit the page on their behalf."
 	}
 	return browserApprovalResult(data), nil
 }
 
 type browserOrderPage struct {
-	Title, ClientName, Account, CSRF, Message, ManageURL, Expiry, ApprovalExpiry, SubmitLabel, PermissionNote string
-	Sections                                                                                                  []browserOrderSection
-	Notes                                                                                                     []string
-	Pending, Manage, Allowed                                                                                  bool
+	Title, ClientName, Account, CSRF, FormAction, RetryURL, Message, ManageURL, Expiry, ApprovalExpiry, SubmitLabel, PermissionNote string
+	Sections                                                                                                                        []browserOrderSection
+	Notes                                                                                                                           []string
+	Pending, Manage, Allowed                                                                                                        bool
 }
 type browserOrderSection struct {
 	Title string
@@ -280,6 +297,19 @@ func browserOrderSections(operation string, snapshot []byte) []browserOrderSecti
 		if ok {
 			sections[len(sections)-1].Rows = append(sections[len(sections)-1].Rows, browserOrderRow{Label: label, Value: value})
 		}
+	}
+	priority := map[string]int{"Symbol": 1, "Exchange": 2, "Side": 3, "Quantity": 4, "Order type": 5, "Price": 6, "Trigger price": 7, "Product": 8, "Validity": 9, "Variety": 10}
+	for _, section := range sections {
+		sort.SliceStable(section.Rows, func(i, j int) bool {
+			left, right := priority[section.Rows[i].Label], priority[section.Rows[j].Label]
+			if left == 0 {
+				left = 100
+			}
+			if right == 0 {
+				right = 100
+			}
+			return left < right
+		})
 	}
 	return sections
 }
@@ -323,29 +353,29 @@ func (b *BrowserApprovals) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	p := b.pending[id]
 	b.mu.Unlock()
 	if p == nil {
-		b.render(w, http.StatusNotFound, browserOrderPage{Title: "Approval unavailable", Message: "This order approval has expired or is no longer available. Return to your client and check the order status before starting another request."})
+		b.render(w, http.StatusNotFound, browserOrderPage{Title: "Approval unavailable", Message: "This order approval has expired or is no longer available. Return to your assistant and check the order status before starting another request."})
 		return
 	}
 	session, sessionErr := b.manager.SessionManager().Get(p.session)
-	if sessionErr != nil || session.Credentials == nil || session.Credentials.UserID != p.user || b.oauth.VerifyOrderBrowserSession(r, p.session, p.user) != nil {
-		b.render(w, http.StatusForbidden, browserOrderPage{Title: "Sign-in required", Message: "Open this link in the browser you used to connect this client to Kite MCP. If you signed in elsewhere, reconnect the client using this browser. No order was submitted by opening this link."})
+	if sessionErr != nil || session.Credentials == nil || session.Credentials.UserID != p.user {
+		b.render(w, http.StatusForbidden, browserOrderPage{Title: "Approval unavailable", Message: "This Kite connection has ended or changed account. No order was submitted."})
 		return
 	}
 	if r.Method == http.MethodPost {
+		if !b.verifyReviewForm(w, r, id, p.session, p.user) {
+			return
+		}
 		b.decide(w, r, p)
 		return
 	}
-	b.mu.Lock()
-	data := b.orderPageLocked(p)
-	b.mu.Unlock()
-	b.render(w, http.StatusOK, data)
+	b.startReviewLogin(w, r, id, p.session, p.user, p.expires)
 }
 
 func (b *BrowserApprovals) orderPageLocked(p *browserOrder) browserOrderPage {
 	if p.status == "approval_required" && !time.Now().Before(p.expires) {
 		p.status = "expired"
 	}
-	data := browserOrderPage{Title: "Review order", ClientName: p.clientName, Account: p.user, CSRF: p.csrf, Sections: browserOrderSections(p.operation, p.snapshot), ApprovalExpiry: p.expires.In(time.FixedZone("IST", 19800)).Format("15:04:05 IST")}
+	data := browserOrderPage{Title: map[string]string{"orders_place": "Review order", "orders_modify": "Review order changes", "orders_cancel": "Review cancellation"}[p.operation], ClientName: p.clientName, Account: p.user, Sections: browserOrderSections(p.operation, p.snapshot), ApprovalExpiry: p.expires.In(time.FixedZone("IST", 19800)).Format("15:04 IST")}
 	var fields map[string]any
 	if json.Unmarshal(p.snapshot, &fields) == nil {
 		data.Notes = tradeApprovalNotes(p.operation, fields)
@@ -358,13 +388,13 @@ func (b *BrowserApprovals) orderPageLocked(p *browserOrder) browserOrderPage {
 			data.Expiry = session.ExpiresAt.In(time.FixedZone("IST", 19800)).Format("02 Jan 2006, 15:04 IST")
 		}
 		data.Message = map[string]string{
-			"orders_place":  "Confirming submits this order to Kite once.",
-			"orders_modify": "Only the requested changes will be submitted. Other fields stay unchanged.",
+			"orders_place":  "Check the details before placing this order.",
+			"orders_modify": "Check the current order and the changes below.",
 			"orders_cancel": "Cancelling this order does not reverse existing fills.",
 		}[p.operation]
 	} else {
-		data.Title = map[string]string{"submitted": "Order request submitted", "failed": "Order request needs attention", "declined": "Order not submitted", "expired": "Approval expired", "submitting": "Order request in progress"}[p.status]
-		data.Message = map[string]string{"submitted": "Kite accepted the request. Check order status and fills in your client; exchange execution is not guaranteed.", "failed": "The request could not be confirmed. Check the result in your client and inspect orders and fills before requesting another submission.", "declined": "You declined this request. No transaction was submitted.", "expired": "This approval expired without submitting the order.", "submitting": "This request is already being processed. Do not submit it again. Check its status in your client."}[p.status]
+		data.Title = map[string]string{"submitted": "Request sent to Kite", "failed": "Check the order status", "declined": "Order not submitted", "expired": "Approval expired", "submitting": "Sending request to Kite"}[p.status]
+		data.Message = map[string]string{"submitted": "Kite accepted your request. Return to your assistant to check the order status and any executed trades. Acceptance does not guarantee execution. You can close this page.", "failed": "We could not confirm the request. Ask your assistant to check orders and executed trades before trying again.", "declined": "You declined this request. Nothing was submitted.", "expired": "This approval expired without submitting the order.", "submitting": "Return to your assistant to check the result. Do not submit this request again."}[p.status]
 	}
 	if p.status == "submitted" && p.result != nil {
 		for _, content := range p.result.Content {
@@ -382,7 +412,7 @@ func (b *BrowserApprovals) orderPageLocked(p *browserOrder) browserOrderPage {
 		data.ManageURL = b.manageURL(p.session)
 		data.Expiry = permission.expires.In(time.FixedZone("IST", 19800)).Format("02 Jan 2006, 15:04 IST")
 	} else if p.rememberRequested && (p.status == "failed" || p.status == "submitted") {
-		data.PermissionNote = "Future orders still require approval. No future-order permission was enabled by this request."
+		data.PermissionNote = "Future orders still require approval. This request did not enable permission to act without asking."
 	}
 	return data
 }
@@ -393,7 +423,7 @@ func validApprovalCSRF(r *http.Request, csrf string) bool {
 
 func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *browserOrder) {
 	r.Body = http.MaxBytesReader(w, r.Body, 8192)
-	if r.ParseForm() != nil || !validApprovalCSRF(r, p.csrf) {
+	if r.ParseForm() != nil {
 		http.Error(w, "Invalid approval form", http.StatusForbidden)
 		return
 	}
@@ -412,7 +442,7 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 	if decision == "decline" {
 		p.status = "declined"
 		b.mu.Unlock()
-		http.Redirect(w, r, b.approvalURL(p.id), http.StatusSeeOther)
+		b.renderOrderOutcome(w, p)
 		return
 	}
 	permissionGeneration := b.permissions[p.session].generation
@@ -433,6 +463,16 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 		result = NewToolResultError("Order submission could not be confirmed. Inspect orders and fills before requesting another submission.")
 	}
 	b.mu.Lock()
+	if result != nil {
+		encoded, _ := json.Marshal(result.StructuredContent)
+		var observation approvalTrace
+		if json.Unmarshal(encoded, &observation) == nil && observation.Outcome != "" {
+			p.trace.Outcome = observation.Outcome
+		} else {
+			p.trace.Outcome = "approved"
+		}
+		result = approvalResultWithTrace(result, p.trace)
+	}
 	p.result = result
 	p.status = "failed"
 	if result != nil && !result.IsError {
@@ -444,19 +484,22 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 		}
 	}
 	b.mu.Unlock()
-	http.Redirect(w, r, b.approvalURL(p.id), http.StatusSeeOther)
+	b.renderOrderOutcome(w, p)
 }
 
 func (b *BrowserApprovals) manage(w http.ResponseWriter, r *http.Request, sessionID string) {
 	session, err := b.manager.SessionManager().Get(sessionID)
-	if err != nil || session.Credentials == nil || b.oauth.VerifyOrderBrowserSession(r, sessionID, session.Credentials.UserID) != nil {
-		b.render(w, http.StatusForbidden, browserOrderPage{Title: "Sign-in required", Message: "Open this page in the browser used to sign in to this Kite MCP connection."})
+	if err != nil || session.Credentials == nil || session.Terminated || !time.Now().Before(session.ExpiresAt) {
+		b.render(w, http.StatusForbidden, browserOrderPage{Title: "Connection unavailable", Message: "This Kite MCP connection has ended."})
 		return
 	}
-	csrf := b.oauth.OrderBrowserCSRF(r, sessionID)
+
 	if r.Method == http.MethodPost {
 		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		if r.ParseForm() != nil || csrf == "" || !validApprovalCSRF(r, csrf) || r.PostForm.Get("decision") != "revoke" {
+		if !b.verifyReviewForm(w, r, "manage/"+sessionID, sessionID, session.Credentials.UserID) {
+			return
+		}
+		if len(r.PostForm["decision"]) != 1 || r.PostForm.Get("decision") != "revoke" {
 			http.Error(w, "Invalid permission form", http.StatusForbidden)
 			return
 		}
@@ -467,14 +510,10 @@ func (b *BrowserApprovals) manage(w http.ResponseWriter, r *http.Request, sessio
 		permission.expires = session.ExpiresAt
 		b.permissions[sessionID] = permission
 		b.mu.Unlock()
-		http.Redirect(w, r, b.manageURL(sessionID), http.StatusSeeOther)
+		b.render(w, http.StatusOK, browserOrderPage{Title: "Approval required for future orders", Message: "Future orders from this connection require approval. Existing orders have not been cancelled."})
 		return
 	}
-	b.mu.Lock()
-	permission, allowed := b.permissions[sessionID]
-	allowed = allowed && permission.allowed && permission.user == session.Credentials.UserID && time.Now().Before(permission.expires)
-	b.mu.Unlock()
-	b.render(w, http.StatusOK, browserOrderPage{Title: "Future order approvals", Account: session.Credentials.UserID, ClientName: permission.clientName, Expiry: permission.expires.In(time.FixedZone("IST", 19800)).Format("02 Jan 2006, 15:04 IST"), Manage: true, Allowed: allowed, CSRF: csrf, Message: "This permission applies only to this Kite MCP login session. Revoking it restores approval for future order requests and does not cancel submitted orders."})
+	b.startReviewLogin(w, r, "manage/"+sessionID, sessionID, session.Credentials.UserID, time.Now().Add(tradeApprovalTimeout))
 }
 
 // Only server-held browser state can reach this path. Re-read current order

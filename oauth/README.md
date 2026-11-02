@@ -40,6 +40,15 @@ Cookies are host-only, `Secure`, `HttpOnly`, `SameSite=Lax`, and use `__Host-` n
 on HTTPS. HTTP loopback development uses unprefixed cookies without `Secure`.
 Consent and callback responses prevent caching, referrer leakage, and framing.
 
+Browser order review is separate from MCP OAuth consent. Opening an approval or
+permission-management link starts a fresh Kite login in any browser. A single-use
+signed callback and random state bind the login to the exact review and account.
+Only a successful matching-account token exchange reveals the short-lived form
+secret. The form still requires explicit confirmation. Approval routes set no
+cookies and accept no MCP bearer token as human approval. Form secrets cannot
+approve another review or grant. Remembered permission remains scoped to the
+original account/client grant and requires a successful order submission.
+
 ## Token and resource binding
 
 Clients should send `resource=<OAUTH_ISSUER>/mcp` in authorization and token

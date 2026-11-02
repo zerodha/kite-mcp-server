@@ -39,7 +39,7 @@ The JSON structure varies by client, but the `command` and `args` values remain 
 
 Clients with **form elicitation** can display order approvals in the conversation.
 Other clients receive a browser link when an order needs approval. Open it in
-the browser used for Kite MCP sign-in and review the action there.
+any browser, sign in to your Kite account, and review the action there.
 
 The browser page also lets you optionally allow future orders from that client.
 See [[Order Approvals]] for scope, expiry, and revocation.

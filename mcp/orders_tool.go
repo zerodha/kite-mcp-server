@@ -57,7 +57,7 @@ var ordersSchema = json.RawMessage(`{
 		},
 		"quantity": {
 			"type": "integer",
-			"description": "Number of shares or lots (required for place mode)",
+			"description": "Quantity in units, not lots (required for place mode); multiply lots by the instrument lot size",
 			"default": 1,
 			"minimum": 1,
 			"maximum": 2147483647
@@ -74,11 +74,11 @@ var ordersSchema = json.RawMessage(`{
 		},
 		"price": {
 			"type": "number",
-			"description": "Limit price (required for LIMIT and SL order types)"
+			"description": "Limit price for LIMIT/SL placement; supply it when changing the price in modify mode"
 		},
 		"trigger_price": {
 			"type": "number",
-			"description": "Trigger price (required for SL and SL-M order types)"
+			"description": "Trigger price for SL/SL-M placement; supply it when changing the trigger in modify mode"
 		},
 		"validity": {
 			"type": "string",
@@ -142,7 +142,7 @@ var ordersSchema = json.RawMessage(`{
 
 func (*OrdersTool) Definition() *mcp.Tool {
 	return newDataTool("orders",
-		"Manage orders. Placement, modification, and cancellation require user approval. Clients with form elicitation show a form. Other clients receive a browser approval link automatically. For ChatGPT mobile or a client known not to display forms, set approval_method=browser on the initial call. If future_orders_allowed=true, use auto unless the user explicitly requests another review. Do not ask the user to request a link; share the returned approval_url immediately and do not open or approve it on their behalf. Native failures reported to the server fall back to browser review when possible; explicit decline, cancellation, and negative confirmation stop the request. An approval_required result means no order was submitted: do not repeat the order call. Use approval_status with its approval_id to check the outcome. Users can explicitly allow future orders for this client from the browser approval page. Use permissions to show or manage this permission. Use mode=list to see all orders today, mode=history for an order's status trail, mode=trades for fills on a specific order, mode=all_trades for all trades today, mode=place to place a new order, mode=modify to change an open order, mode=cancel to cancel an open order. List and all_trades modes return data/pagination with default limit 100 and maximum 500. To show a read-only interactive order book with timeline and fills, use open_kite_view when available with view=orders. Only request mutations when the user asks for the action. After approval_status, inspect both status and the nested submission result; failed or declined is not a successful submission. Do not poll indefinitely. Continue to use orders directly for transaction requests.",
+		"Manage orders. Placement, modification, and cancellation require user approval. Clients with form elicitation show a form. Other clients receive a browser approval link automatically. The user signs in to the matching Kite account and confirms the order in any browser; no original-browser requirement. For ChatGPT mobile or a client known not to display forms, set approval_method=browser on the initial call. If future_orders_allowed=true, use auto unless the user explicitly requests another review. Do not ask the user to request a link; share the returned approval_url immediately and do not open or approve it on their behalf. Native failures reported to the server fall back to browser review when possible; explicit decline, cancellation, and negative confirmation stop the request. An approval_required result means no order was submitted: do not repeat the order call. Use approval_status with its approval_id to check the outcome. Users can explicitly allow future orders for this client from the browser approval page. Use permissions to show or manage this permission. Use mode=list to see all orders today, mode=history for an order's status trail, mode=trades for fills on a specific order, mode=all_trades for all trades today, mode=place to place a new order, mode=modify to change an open order, mode=cancel to cancel an open order. List and all_trades modes return data/pagination with default limit 100 and maximum 500. To show a read-only interactive order book with timeline and fills, use open_kite_view when available with view=orders. Only request mutations when the user asks for the action. Approval observations include approval_method_used, approval_outcome, fallback_reason, native_elicitation_attempted, and native_elicitation_completed. Approval is not evidence of successful submission. After approval_status, inspect both status and the nested submission result; failed or declined is not a successful submission. Do not poll indefinitely. Continue to use orders directly for transaction requests.",
 		ordersSchema,
 		ordersOutputSchema,
 	)

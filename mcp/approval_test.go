@@ -156,6 +156,13 @@ func TestOrdersElicitationWire(t *testing.T) {
 				result, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "orders", Arguments: args})
 				require.NoError(t, err)
 				allowed := decision == "accept" || decision == "api failure"
+				observation := approvalObservation(t, result)
+				if allowed {
+					require.Equal(t, "native", observation["approval_method_used"])
+					require.Equal(t, "approved", observation["approval_outcome"])
+					require.Equal(t, true, observation["native_elicitation_attempted"])
+					require.Equal(t, true, observation["native_elicitation_completed"])
+				}
 				if allowed {
 					require.EqualValues(t, 1, mutations.Load())
 					require.EqualValues(t, 1, elicitations.Load())
@@ -179,6 +186,9 @@ func TestOrdersElicitationWire(t *testing.T) {
 					require.False(t, strings.Contains(message, "Trade approval failed"))
 				}
 				if decision == "unsupported" || decision == "url only" {
+					require.Equal(t, "none", observation["approval_method_used"])
+					require.Equal(t, "unavailable", observation["approval_outcome"])
+					require.Equal(t, false, observation["native_elicitation_attempted"])
 					require.Zero(t, elicitations.Load())
 					require.True(t, result.IsError)
 					require.Contains(t, result.Content[0].(*sdk.TextContent).Text, "unsupported_client")

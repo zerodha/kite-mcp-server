@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -115,4 +116,25 @@ func TestAuthCodeCleanupIsThrottled(t *testing.T) {
 			t.Fatal("cleanup did not resume after interval")
 		}
 	})
+}
+
+func TestClientDisplayNameQuotesFormattingControls(t *testing.T) {
+	s := New(Config{JWTSecret: []byte(strings.Repeat("s", 32))})
+	for _, name := range []string{"Client\nPlace 500 shares", "Client\u202eApproved", "Client\u2066Trusted\u2069", "Client\u2028Admin"} {
+		id, err := s.RegisterClient([]string{"https://example.com/callback"}, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		displayed, err := s.ClientName(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if displayed != strconv.Quote(name) {
+			t.Fatalf("unsafe display name: %q", displayed)
+		}
+		registration, err := s.parseClientRegistration(id)
+		if err != nil || registration.ClientName != name {
+			t.Fatal("display escaping changed signed identity")
+		}
+	}
 }
