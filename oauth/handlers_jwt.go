@@ -387,6 +387,13 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Keep browser proof separate from the bearer token returned to the client.
+	if err := h.server.SetOrderBrowserSession(w, userSessionID, creds.UserID); err != nil {
+		_, _ = h.kcManager.SessionManager().Terminate(userSessionID)
+		h.browserError(w, r, "session error", http.StatusInternalServerError)
+		return
+	}
+
 	// Redirect back to client with code
 	redirectURL := BuildRedirectWithCode(pending.RedirectURI, code, pending.State)
 	h.logger.Info("OAuth callback complete", "client_id", pending.ClientID, "user_id", creds.UserID)

@@ -182,6 +182,8 @@ func TestOrdersElicitationWire(t *testing.T) {
 					require.Zero(t, elicitations.Load())
 					require.True(t, result.IsError)
 					require.Contains(t, result.Content[0].(*sdk.TextContent).Text, "unsupported_client")
+					require.Contains(t, result.Content[0].(*sdk.TextContent).Text, "approval_method=browser")
+					require.Contains(t, result.Content[0].(*sdk.TextContent).Text, orderApprovalHelpURL)
 					read, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "orders", Arguments: map[string]any{"mode": "list"}})
 					require.NoError(t, err)
 					require.False(t, read.IsError, "read-only orders remain available")
@@ -196,9 +198,9 @@ func TestOrderApprovalUsesKiteOmitRulesAndChecksLiveParams(t *testing.T) {
 	details := map[string]any{"changes": approvalOrderParams{&params}}
 	called := false
 	result, err := elicitTradeApproval(context.Background(), time.Second, func(_ context.Context, p *sdk.ElicitParams) (*sdk.ElicitResult, error) {
-		require.Contains(t, p.Message, `"order_type": "LIMIT"`)
-		require.Contains(t, p.Message, `"price": "1500"`)
-		require.NotContains(t, p.Message, `"quantity"`, "omitted quantity must not appear as a change to zero")
+		require.Contains(t, p.Message, "Order type: LIMIT")
+		require.Contains(t, p.Message, "Price: 1500")
+		require.NotContains(t, p.Message, "Quantity:", "omitted quantity must not appear as a change to zero")
 		params.Price = 1600
 		return &sdk.ElicitResult{Action: "accept", Content: map[string]any{"confirm": true}}, nil
 	}, "orders_modify", details, func() (*sdk.CallToolResult, error) { called = true; return NewToolResultText("executed"), nil })

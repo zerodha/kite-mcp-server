@@ -73,6 +73,8 @@ type AuthCode struct {
 
 // TokenClaims are the JWT claims for access tokens
 type TokenClaims struct {
+	// ClientID is taken from the verified OAuth authorization code.
+	ClientID string `json:"client_id,omitempty"`
 	jwt.RegisteredClaims
 	// KiteUserID is the authenticated Kite user
 	KiteUserID string `json:"kite_user_id"`
@@ -509,10 +511,10 @@ func (s *Server) ExchangeCode(req *TokenRequest) (accessToken string, err error)
 	}
 
 	// Generate JWT access token
-	return s.generateAccessToken(authCode.KiteUserID, authCode.KiteSession)
+	return s.generateAccessToken(authCode.KiteUserID, authCode.KiteSession, authCode.ClientID)
 }
 
-func (s *Server) generateAccessToken(kiteUserID, sessionID string) (string, error) {
+func (s *Server) generateAccessToken(kiteUserID, sessionID string, clientIDs ...string) (string, error) {
 	now := time.Now()
 	expiresAt := now.Add(s.config.TokenTTL)
 	if s.config.SessionExpiry != nil {
@@ -541,6 +543,9 @@ func (s *Server) generateAccessToken(kiteUserID, sessionID string) (string, erro
 		Scope:      "default",
 	}
 
+	if len(clientIDs) != 0 {
+		claims.ClientID = clientIDs[0]
+	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(s.config.JWTSecret)
 }

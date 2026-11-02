@@ -94,13 +94,9 @@ func approvalFromContext(ctx context.Context, req *mcp.CallToolRequest, operatio
 		if pending.operation != operation || !bytes.Equal(pending.snapshot, snapshot) {
 			return approvalFailure("parameters_changed", "Transaction parameters changed during approval; no transaction was executed."), nil
 		}
-		response, ok := req.Params.InputResponses["trade_approval"].(*mcp.ElicitResult)
-		if !ok || response == nil || response.Action != "accept" {
-			return approvalFailure("not_accepted", "Explicit approval required; no transaction was executed."), nil
-		}
-		confirmed, ok := response.Content["confirm"].(bool)
-		if !ok || !confirmed {
-			return approvalFailure("not_confirmed", "Explicit affirmative confirmation is required."), nil
+		response, _ := req.Params.InputResponses["trade_approval"].(*mcp.ElicitResult)
+		if failure := validateTradeApproval(response); failure != nil {
+			return failure, nil
 		}
 		if ctx.Err() != nil {
 			return approvalFailure("cancelled", "Tool call was cancelled; no transaction was executed."), nil
@@ -133,12 +129,8 @@ func approvalFromContext(ctx context.Context, req *mcp.CallToolRequest, operatio
 	token := uuid.NewString()
 	store.pending[token] = pendingTradeApproval{owner, operation, snapshot, now.Add(tradeApprovalTimeout)}
 	return &mcp.CallToolResult{
-		RequestState: token,
-		InputRequests: mcp.InputRequestMap{"trade_approval": &mcp.ElicitParams{
-			Mode:            "form",
-			Message:         fmt.Sprintf("Confirm %s. Review the exact transaction below. Omitted modification fields remain unchanged; omitted placement fields use Kite defaults. MARKET/SL-M execution price is determined by the market. Approval authorizes one API attempt.\n%s", operation, snapshot),
-			RequestedSchema: json.RawMessage(`{"type":"object","properties":{"confirm":{"type":"boolean","title":"I confirm this exact transaction"}},"required":["confirm"],"additionalProperties":false}`),
-		}},
+		RequestState:  token,
+		InputRequests: mcp.InputRequestMap{"trade_approval": tradeApprovalForm(operation, snapshot)},
 	}, nil
 }
 

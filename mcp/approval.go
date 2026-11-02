@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"slices"
 	"time"
 
@@ -15,13 +14,15 @@ import (
 
 const tradeApprovalTimeout = 2 * time.Minute
 
-// withTradeApproval is deliberately local to a single tool invocation. There is no
-// reusable approval token, tool argument override, or automatic execution retry.
-// details must contain the normalized parameters captured by execute, not raw
-// assistant arguments. The client may confirm them, but cannot edit them.
+// withTradeApproval validates native approval, a browser-confirmed snapshot, or
+// an explicitly remembered account/client permission. Tool arguments cannot
+// grant approval. details must contain normalized execution parameters.
 func withTradeApproval(ctx context.Context, request *mcp.CallToolRequest, operation string, details any, execute func() (*mcp.CallToolResult, error)) (*mcp.CallToolResult, error) {
+	if result, err, handled := executeBrowserApproved(ctx, request, operation, details, execute); handled {
+		return result, err
+	}
 	if request == nil || request.Session == nil {
-		return approvalFailure("unsupported_client", "MCP session unavailable; no transaction was executed."), nil
+		return approvalFailure("unsupported_client", "Order approval is unavailable in this MCP session; no transaction was executed. "+approvalClientGuidance()), nil
 	}
 	// A continuation must still validate its original approval, even if the
 	// client omits capabilities on the retry. Never turn a declined or malformed
@@ -29,8 +30,23 @@ func withTradeApproval(ctx context.Context, request *mcp.CallToolRequest, operat
 	if request.Params != nil && (request.Params.RequestState != "" || len(request.Params.InputResponses) != 0) {
 		return approvalFromContext(ctx, request, operation, details, execute)
 	}
+	if ctx.Err() != nil {
+		return approvalFailure("cancelled", "Tool call was cancelled; no transaction was executed."), nil
+	}
+	if SafeAssertString(GetArguments(request)["approval_method"], "auto") == "browser" {
+		if browser := browserApprovalsFrom(ctx); browser != nil {
+			return browser.request(ctx, request, operation, details)
+		}
+		return approvalFailure("unsupported_client", "Browser approval is unavailable on this connection; no transaction was executed."), nil
+	}
+	if browser := browserApprovalsFrom(ctx); browser != nil && browser.trusted(ctx, request) {
+		return execute()
+	}
 	if !supportsFormElicitation(requestCapabilities(request)) {
-		return approvalFailure("unsupported_client", "This client must support form elicitation to place, modify, or cancel orders. Use a client with form elicitation or manage the order in Kite; no transaction was executed."), nil
+		if browser := browserApprovalsFrom(ctx); browser != nil {
+			return browser.request(ctx, request, operation, details)
+		}
+		return approvalFailure("unsupported_client", "This client does not support the order approval form; no transaction was executed. "+approvalClientGuidance()), nil
 	}
 	if request.ProtocolVersion() >= "2026-07-28" {
 		return approvalFromContext(ctx, request, operation, details, execute)
@@ -46,11 +62,7 @@ func elicitTradeApproval(ctx context.Context, timeout time.Duration, elicit func
 	}
 	approvalCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	result, err := elicit(approvalCtx, &mcp.ElicitParams{
-		Mode:            "form",
-		Message:         fmt.Sprintf("Confirm %s. Review all transaction details below. Omitted modification fields remain unchanged; omitted placement fields use Kite defaults. MARKET/SL-M orders have no limit price; execution price is determined by the market. This confirmation authorizes exactly one API attempt.\n%s", operation, snapshot),
-		RequestedSchema: json.RawMessage(`{"type":"object","properties":{"confirm":{"type":"boolean","title":"I confirm this exact transaction","description":"Confirm execution of the transaction shown above."}},"required":["confirm"],"additionalProperties":false}`),
-	})
+	result, err := elicit(approvalCtx, tradeApprovalForm(operation, snapshot))
 	if approvalCtx.Err() != nil {
 		if approvalCtx.Err() == context.DeadlineExceeded {
 			return approvalFailure("timeout", "Approval deadline exceeded; no transaction was executed."), nil
@@ -58,17 +70,10 @@ func elicitTradeApproval(ctx context.Context, timeout time.Duration, elicit func
 		return approvalFailure("cancelled", "Tool call was cancelled; no transaction was executed."), nil
 	}
 	if err != nil {
-		return approvalFailure("elicitation_failed", err.Error()), nil
+		return approvalFailure("elicitation_failed", "The order approval form could not be completed; no transaction was executed. "+approvalClientGuidance()+" Details: "+err.Error()), nil
 	}
-	if result == nil {
-		return approvalFailure("missing_response", "No approval response received."), nil
-	}
-	if result.Action != "accept" {
-		return approvalFailure("not_accepted", "User action: "+result.Action+"; no transaction was executed."), nil
-	}
-	confirmed, ok := result.Content["confirm"].(bool)
-	if !ok || !confirmed {
-		return approvalFailure("not_confirmed", "Explicit affirmative confirmation is required."), nil
+	if failure := validateTradeApproval(result); failure != nil {
+		return failure, nil
 	}
 	current, err := json.MarshalIndent(details, "", "  ")
 	if err != nil || !bytes.Equal(snapshot, current) {
@@ -100,7 +105,7 @@ func NewServer(info *mcp.Implementation) *mcp.Server {
 	capabilities.Resources = &mcp.ResourceCapabilities{}
 	server := mcp.NewServer(info, &mcp.ServerOptions{
 		SupportedProtocolVersions: versions, Capabilities: capabilities,
-		Instructions: "When open_kite_view is listed, use it to show interactive Kite views for portfolio allocation, positions, funds, order status and fills, GTT triggers, option chains, quotes, historical charts, or instrument search when the request calls for a visual view. Select its matching view and supply the relevant instrument or underlying arguments. The view tool is read-only; use the existing data tools for text-only analysis and the existing transaction tools for separately authorized mutations. If open_kite_view is unavailable, return results through the ordinary data tools.",
+		Instructions: "When open_kite_view is listed, use it to show interactive Kite views for portfolio allocation, positions, funds, order status and fills, GTT triggers, option chains, quotes, historical charts, or instrument search when the request calls for a visual view. Select its matching view and supply the relevant instrument or underlying arguments. The view tool is read-only; use the existing data tools for text-only analysis and the existing transaction tools for separately authorized mutations. If open_kite_view is unavailable, return results through the ordinary data tools. Only request order mutations when the user asks for the action. Orders use a native approval form or a browser approval link unless the user explicitly allowed future orders for this account/client login session. When orders returns status=approval_required, no order has been submitted: share approval_url as a clickable link, do not open or approve it for the user, and do not repeat the mutation. After the user reviews it, use orders mode=approval_status with approval_id to check its status and result. Never fabricate approval, poll indefinitely, or automatically retry an uncertain mutation. Use orders mode=permissions when the user asks to view or revoke future order permission; share its browser link if permission is enabled. Revoking permission does not cancel existing orders. GTT and Alerts/ATO changes are outside the orders approval guard.",
 	})
 	registerTradeApproval(server)
 	registerAppResource(server)

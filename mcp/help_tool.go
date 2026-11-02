@@ -211,7 +211,7 @@ func parseHelpFrontmatter(text string) (map[string]any, string, error) {
 type HelpTool struct{}
 
 func (*HelpTool) Definition() *sdk.Tool {
-	t := NewTool("help", "Browse Kite workflows and recipes as a tree. Start with key=/, then /orders, /holdings, /technical-analysis, /daily-review, or /troubleshooting. Follow child keys for focused recipes. Reads bundled Markdown only; does not execute trades or fetch account data.", json.RawMessage(`{"type":"object","properties":{"key":{"type":"string","maxLength":1024,"default":"/","description":"Exact help path (maximum 1024 UTF-8 bytes), e.g. /orders/reconcile. Omit for the root index."}},"additionalProperties":false}`))
+	t := NewTool("help", "Browse Kite workflows and recipes as a tree. Start with key=/, then /client-integration, /orders, /holdings, /technical-analysis, /daily-review, or /troubleshooting. Follow child keys for focused recipes. Reads bundled Markdown only; does not execute trades or fetch account data.", json.RawMessage(`{"type":"object","properties":{"key":{"type":"string","maxLength":1024,"default":"/","description":"Exact help path (maximum 1024 UTF-8 bytes), e.g. /orders/reconcile. Omit for the root index."}},"additionalProperties":false}`))
 	closed := false
 	t.Annotations = &sdk.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: &closed}
 	return t

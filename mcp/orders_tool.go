@@ -17,8 +17,18 @@ var ordersSchema = json.RawMessage(`{
 	"properties": {
 		"mode": {
 			"type": "string",
-			"description": "Operation mode: list=all orders today, history=status trail for an order, trades=fills for an order, all_trades=all trades today, place=place new order, modify=modify open order, cancel=cancel open order",
-			"enum": ["list", "history", "trades", "all_trades", "place", "modify", "cancel"]
+			"description": "Operation mode: list=all orders today, history=status trail for an order, trades=fills for an order, all_trades=all trades today, place=place new order, modify=modify open order, cancel=cancel open order, approval_status=check a browser approval outcome, permissions=manage future order permission",
+			"enum": ["list", "history", "trades", "all_trades", "place", "modify", "cancel", "approval_status", "permissions"]
+		},
+		"approval_method": {
+			"type": "string",
+			"enum": ["auto", "browser"],
+			"description": "Use browser to request an order approval link instead of the client's native form. This never grants approval."
+		},
+		"approval_id": {
+			"type": "string",
+			"maxLength": 64,
+			"description": "Browser approval ID (required for approval_status). Check this rather than repeating a pending order request."
 		},
 		"order_id": {
 			"type": "string",
@@ -132,7 +142,7 @@ var ordersSchema = json.RawMessage(`{
 
 func (*OrdersTool) Definition() *mcp.Tool {
 	return NewTool("orders",
-		"Manage orders. Placement, modification, and cancellation require explicit user approval through form elicitation. Clients without form elicitation support cannot execute these mutations. Use mode=list to see all orders today, mode=history for an order's status trail, mode=trades for fills on a specific order, mode=all_trades for all trades today, mode=place to place a new order, mode=modify to change an open order, mode=cancel to cancel an open order. List and all_trades modes return data/pagination with default limit 100 and maximum 500. To show a read-only interactive order book with timeline and fills, use open_kite_view when available with view=orders. Continue to use orders directly for transaction requests.",
+		"Manage orders. Placement, modification, and cancellation require user approval. Clients with form elicitation show a form. Other clients receive a browser approval link (or request one with approval_method=browser); share it with the user and do not open or approve it on their behalf. An approval_required result means no order was submitted: do not repeat the order call. Use approval_status with its approval_id to check the outcome. Users can explicitly allow future orders for this client from the browser approval page. Use permissions to show or manage this permission. Use mode=list to see all orders today, mode=history for an order's status trail, mode=trades for fills on a specific order, mode=all_trades for all trades today, mode=place to place a new order, mode=modify to change an open order, mode=cancel to cancel an open order. List and all_trades modes return data/pagination with default limit 100 and maximum 500. To show a read-only interactive order book with timeline and fills, use open_kite_view when available with view=orders. Only request mutations when the user asks for the action. After approval_status, inspect both status and the nested submission result; failed or declined is not a successful submission. Do not poll indefinitely. Continue to use orders directly for transaction requests.",
 		ordersSchema,
 	)
 }
@@ -144,6 +154,19 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 		mode := SafeAssertString(args["mode"], "")
 
 		switch mode {
+		case "approval_status":
+			if err := ValidateRequired(args, "approval_id"); err != nil {
+				return NewToolResultError(err.Error()), nil
+			}
+			if browser := browserApprovalsFrom(ctx); browser != nil {
+				return browser.status(ctx, request, SafeAssertString(args["approval_id"], ""))
+			}
+			return NewToolResultError("Browser approvals are unavailable on this connection."), nil
+		case "permissions":
+			if browser := browserApprovalsFrom(ctx); browser != nil {
+				return browser.permissionStatus(ctx, request)
+			}
+			return NewToolResultError("Browser approvals are unavailable on this connection."), nil
 		case "list":
 			return PaginatedToolHandler(manager, "orders_list", func(client *kiteconnect.Client) ([]interface{}, error) {
 				orders, err := client.GetOrders()
@@ -313,7 +336,7 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 			})
 
 		default:
-			return NewToolResultError("Invalid mode. Must be one of: list, history, trades, all_trades, place, modify, cancel"), nil
+			return NewToolResultError("Invalid mode. Must be one of: list, history, trades, all_trades, place, modify, cancel, approval_status, permissions"), nil
 		}
 	}
 }

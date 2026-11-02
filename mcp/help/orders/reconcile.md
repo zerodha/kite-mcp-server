@@ -3,6 +3,9 @@ description: "Inspect order status, partial fills and rejection reasons, and rec
 ---
 
 # Reconcile an order
+
+If a browser approval is pending, check `orders({"mode":"approval_status","approval_id":"<approval-id>"})` after the user reviews it. Inspect its status and nested result. Pending, declined, expired, or failed approval is not a successful order submission. Do not repeat the original order call. Use any returned order ID for reconciliation below.
+
 1. Call `orders({"mode":"list","from":0,"limit":100})`. Follow `pagination.has_more` using `from + returned` until complete.
 2. Match the exact order ID. Call `orders({"mode":"history","order_id":"<order-id>"})` for its status trail and `orders({"mode":"trades","order_id":"<order-id>"})` for actual fills.
 3. Report status, filled quantity, pending quantity, and rejection reason when present. A partially filled cancellation leaves the fills intact.

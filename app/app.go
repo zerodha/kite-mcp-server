@@ -31,6 +31,7 @@ type App struct {
 	kcManager        *kc.Manager
 	oauthServer      *oauth.Server
 	jwtOauthHandlers *oauth.Handlers
+	browserApprovals *mcp.BrowserApprovals
 	logger           *slog.Logger
 	metrics          *metrics.Manager
 	rateLimiter      *web.RateLimiter
@@ -219,6 +220,8 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 		&mcpsdk.Implementation{Name: "Kite MCP Server", Version: app.Version},
 	)
 	mcp.RegisterTools(mcpServer, kcManager, app.Config.ExcludedTools, app.logger)
+	app.browserApprovals = mcp.NewBrowserApprovals(kcManager, app.oauthServer)
+	app.browserApprovals.Attach(mcpServer)
 
 	app.logger.Info("All services initialized.")
 	return mcpServer, nil
@@ -257,6 +260,10 @@ func (app *App) setupMux() *http.ServeMux {
 
 	// Docs routes (moat-generated static site)
 	mux.Handle("/", NewDocsHandler())
+
+	if app.browserApprovals != nil {
+		mux.Handle("/order-approvals/", app.browserApprovals)
+	}
 
 	// OAuth endpoints (JWT-based)
 	mux.HandleFunc("/callback", app.jwtOauthHandlers.HandleCallback)
