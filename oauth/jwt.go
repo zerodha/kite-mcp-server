@@ -349,6 +349,20 @@ func ParseAuthorizeRequest(r *http.Request) (*AuthorizeRequest, error) {
 	if len(q["resource"]) > 1 {
 		return nil, errors.New("multiple resource indicators are not supported")
 	}
+	// Pending authorizations retain these values until the flow expires. Bound
+	// decoded values so unauthenticated requests cannot retain large queries.
+	for _, field := range []struct {
+		name string
+		max  int
+	}{
+		{"state", 8 << 10},
+		{"scope", 1024},
+		{"code_challenge", 128},
+	} {
+		if len(q.Get(field.name)) > field.max {
+			return nil, fmt.Errorf("authorization parameter too long: %s", field.name)
+		}
+	}
 
 	clientID := q.Get("client_id")
 	if clientID == "" {
@@ -444,31 +458,36 @@ func ParseTokenRequest(r *http.Request) (*TokenRequest, error) {
 	if err := r.ParseForm(); err != nil {
 		return nil, err
 	}
-	if len(r.Form["resource"]) > 1 {
-		return nil, errors.New("multiple resource indicators are not supported")
+	// OAuth token parameters belong in the POST body. Reject ambiguity before
+	// consuming a one-time code, including body/query parameter pollution.
+	query := r.URL.Query()
+	for _, name := range []string{"resource", "grant_type", "code", "redirect_uri", "client_id", "code_verifier"} {
+		if len(r.PostForm[name]) > 1 || len(query[name]) != 0 {
+			return nil, fmt.Errorf("ambiguous token parameter: %s", name)
+		}
 	}
 
-	grantType := r.FormValue("grant_type")
+	grantType := r.PostForm.Get("grant_type")
 	if grantType != "authorization_code" {
 		return nil, fmt.Errorf("unsupported grant_type: %s", grantType)
 	}
 
-	code := r.FormValue("code")
+	code := r.PostForm.Get("code")
 	if code == "" {
 		return nil, errors.New("missing code")
 	}
 
-	codeVerifier := r.FormValue("code_verifier")
+	codeVerifier := r.PostForm.Get("code_verifier")
 	if codeVerifier == "" {
 		return nil, errors.New("missing code_verifier (PKCE required)")
 	}
 
 	return &TokenRequest{
-		Resource:     r.FormValue("resource"),
+		Resource:     r.PostForm.Get("resource"),
 		GrantType:    grantType,
 		Code:         code,
-		RedirectURI:  r.FormValue("redirect_uri"),
-		ClientID:     r.FormValue("client_id"),
+		RedirectURI:  r.PostForm.Get("redirect_uri"),
+		ClientID:     r.PostForm.Get("client_id"),
 		CodeVerifier: codeVerifier,
 	}, nil
 }

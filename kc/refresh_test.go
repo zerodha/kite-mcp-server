@@ -492,3 +492,66 @@ func TestAuthenticatedClientDoesNotFollowRedirects(t *testing.T) {
 		t.Fatal("account credentials followed upstream redirect")
 	}
 }
+
+func TestRefreshCannotReplaceOrRevokeChangedCredentials(t *testing.T) {
+	for _, outcome := range []string{"success", "rejected", "temporary", "invalid-response"} {
+		t.Run(outcome, func(t *testing.T) {
+			started, release := make(chan struct{}), make(chan struct{})
+			manager := refreshTestManager(t, func(w http.ResponseWriter, r *http.Request) {
+				close(started)
+				<-release
+				w.Header().Set("Content-Type", "application/json")
+				switch outcome {
+				case "success":
+					_, _ = fmt.Fprint(w, `{"status":"success","data":{"user_id":"user","access_token":"stale-renewal"}}`)
+				case "rejected":
+					w.WriteHeader(403)
+					_, _ = fmt.Fprint(w, `{"status":"error","error_type":"TokenException","message":"rejected"}`)
+				case "temporary":
+					w.WriteHeader(503)
+					_, _ = fmt.Fprint(w, `{"status":"error","error_type":"NetworkException","message":"unavailable"}`)
+				case "invalid-response":
+					_, _ = fmt.Fprint(w, `{"status":"success","data":{}}`)
+				}
+			})
+			id := expiredCredentialSession(t, manager, "old-refresh")
+			done := make(chan error, 1)
+			go func() { _, err := manager.GetAuthenticatedClient(id); done <- err }()
+			select {
+			case <-started:
+			case <-time.After(3 * time.Second):
+				close(release)
+				t.Fatal("refresh did not start")
+			}
+			if err := manager.sessionManager.UpdateCredentials(id, &KiteCredentials{UserID: "replacement-user", AccessToken: "replacement-access", RefreshToken: "replacement-refresh", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+				close(release)
+				t.Fatal(err)
+			}
+			close(release)
+			if err := <-done; err == nil {
+				t.Fatal("stale refresh succeeded after credentials changed")
+			}
+			session, err := manager.sessionManager.Get(id)
+			if err != nil {
+				t.Fatal("stale rejection revoked replacement login", err)
+			}
+			if session.Credentials.UserID != "replacement-user" || session.Credentials.AccessToken != "replacement-access" || session.refreshFailure != nil {
+				t.Fatal("stale refresh modified replacement credentials")
+			}
+		})
+	}
+}
+
+func TestCompleteLoginRejectsIncompleteSuccessResponse(t *testing.T) {
+	for _, body := range []string{`{"status":"success","data":{}}`, `{"status":"success","data":{"user_id":"user"}}`, `{"status":"success","data":{"access_token":"access"}}`} {
+		t.Run(body, func(t *testing.T) {
+			manager := refreshTestManager(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprint(w, body)
+			})
+			if creds, err := manager.CompleteLogin("request"); err == nil || creds != nil {
+				t.Fatal("incomplete login response created credentials")
+			}
+		})
+	}
+}

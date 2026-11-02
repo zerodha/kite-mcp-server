@@ -18,12 +18,16 @@ const (
 	DefaultSessionDuration        = 7 * 24 * time.Hour
 	DefaultPendingSessionDuration = 10 * time.Minute
 	DefaultCleanupInterval        = 30 * time.Minute
+	maxPendingAuthorizations      = 10000
 
 	// Error messages
 	errSessionNotFound        = "session ID not found"
 	errCannotUpdateTerminated = "cannot update terminated session"
 	mcpSessionPrefix          = "kitemcp-"
 )
+
+// ErrPendingAuthorizationLimit means all pending OAuth flow slots are occupied.
+var ErrPendingAuthorizationLimit = errors.New("too many pending authorizations")
 
 // Session represents a single, long-lived user/client session.
 type Session struct {
@@ -40,6 +44,8 @@ type Session struct {
 // SessionManager manages all active sessions.
 type SessionManager struct {
 	sessions        map[string]*Session
+	pendingAuth     map[string]time.Time
+	nextAuthExpiry  time.Time
 	mu              sync.RWMutex
 	sessionDuration time.Duration
 	cleanupHooks    []CleanupHook
@@ -65,6 +71,7 @@ func NewSessionManagerWithDuration(logger *slog.Logger, sessionDuration time.Dur
 	ctx, cancel := context.WithCancel(context.Background())
 	return &SessionManager{
 		sessions:        make(map[string]*Session),
+		pendingAuth:     make(map[string]time.Time),
 		sessionDuration: sessionDuration,
 		cleanupHooks:    make([]CleanupHook, 0),
 		cleanupContext:  ctx,
@@ -78,7 +85,50 @@ func NewSessionManagerWithDuration(logger *slog.Logger, sessionDuration time.Dur
 func (sm *SessionManager) GenerateWithData(initialData any) string {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+	return sm.generateWithDataLocked(initialData)
+}
 
+// GeneratePendingAuthorization admits an unauthenticated OAuth flow without
+// letting abandoned requests consume unbounded memory or evict live grants.
+func (sm *SessionManager) GeneratePendingAuthorization(initialData any) (string, error) {
+	if initialData == nil {
+		return "", errors.New("pending authorization data is required")
+	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	now := time.Now()
+	if len(sm.pendingAuth) >= maxPendingAuthorizations && !now.Before(sm.nextAuthExpiry) {
+		sm.nextAuthExpiry = time.Time{}
+		for id, expiry := range sm.pendingAuth {
+			if !now.Before(expiry) {
+				if session := sm.sessions[id]; session != nil && !now.Before(session.ExpiresAt) {
+					if !session.Terminated {
+						session.Terminated = true
+						for _, hook := range sm.cleanupHooks {
+							hook(session)
+						}
+					}
+					delete(sm.sessions, id)
+				}
+				delete(sm.pendingAuth, id)
+			} else if sm.nextAuthExpiry.IsZero() || expiry.Before(sm.nextAuthExpiry) {
+				sm.nextAuthExpiry = expiry
+			}
+		}
+	}
+	if len(sm.pendingAuth) >= maxPendingAuthorizations {
+		return "", ErrPendingAuthorizationLimit
+	}
+	id := sm.generateWithDataLocked(initialData)
+	expiry := sm.sessions[id].ExpiresAt
+	sm.pendingAuth[id] = expiry
+	if sm.nextAuthExpiry.IsZero() || expiry.Before(sm.nextAuthExpiry) {
+		sm.nextAuthExpiry = expiry
+	}
+	return id, nil
+}
+
+func (sm *SessionManager) generateWithDataLocked(initialData any) string {
 	sessionID := mcpSessionPrefix + uuid.New().String()
 	now := time.Now()
 	expiresAt := now.Add(sm.sessionDuration)
@@ -124,6 +174,7 @@ func (sm *SessionManager) GetOrCreate(sessionID string) (*Session, bool, error) 
 				}
 			}
 			delete(sm.sessions, sessionID)
+			delete(sm.pendingAuth, sessionID)
 			// Fall through to create new session
 		} else if session.Terminated {
 			return nil, false, errors.New("session is terminated")
@@ -168,6 +219,7 @@ func (sm *SessionManager) Terminate(sessionID string) (bool, error) {
 		}
 	}
 	delete(sm.sessions, sessionID)
+	delete(sm.pendingAuth, sessionID)
 	return true, nil
 }
 
@@ -200,6 +252,22 @@ func (sm *SessionManager) UpdateCredentials(sessionID string, creds *KiteCredent
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	return sm.updateCredentialsLocked(sessionID, creds)
+}
+
+// updateRenewedCredentials cannot replace credentials installed while renewal
+// was in flight. The original refresh token belongs to one credential version.
+func (sm *SessionManager) updateRenewedCredentials(sessionID string, generation uint64, creds *KiteCredentials) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	session := sm.sessions[sessionID]
+	if session == nil || session.Credentials == nil || session.Credentials.generation != generation {
+		return errors.New("session credentials changed during token renewal")
+	}
+	return sm.updateCredentialsLocked(sessionID, creds)
+}
+
+func (sm *SessionManager) updateCredentialsLocked(sessionID string, creds *KiteCredentials) error {
 	session, exists := sm.sessions[sessionID]
 	if !exists {
 		return errors.New(errSessionNotFound)
@@ -229,6 +297,24 @@ func (sm *SessionManager) UpdateCredentials(sessionID string, creds *KiteCredent
 	return nil
 }
 
+// A rejection of an old refresh token must not log out replacement credentials.
+func (sm *SessionManager) terminateRejectedRefresh(sessionID string, generation uint64) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	session := sm.sessions[sessionID]
+	if session == nil || session.Credentials == nil || session.Credentials.generation != generation {
+		return
+	}
+	if !session.Terminated {
+		session.Terminated = true
+		for _, hook := range sm.cleanupHooks {
+			hook(session)
+		}
+	}
+	delete(sm.sessions, sessionID)
+	delete(sm.pendingAuth, sessionID)
+}
+
 // rejectAccessToken invalidates only the credential version that was rejected.
 // A delayed response from an old request must not invalidate a newer token.
 func (sm *SessionManager) rejectAccessToken(sessionID, accessToken string, generation uint64) {
@@ -240,10 +326,10 @@ func (sm *SessionManager) rejectAccessToken(sessionID, accessToken string, gener
 	}
 }
 
-func (sm *SessionManager) recordRefreshFailure(sessionID string, err error) {
+func (sm *SessionManager) recordRefreshFailure(sessionID string, generation uint64, err error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	if session := sm.sessions[sessionID]; session != nil {
+	if session := sm.sessions[sessionID]; session != nil && session.Credentials != nil && session.Credentials.generation == generation {
 		session.refreshFailure = err
 		session.refreshRetryAt = time.Now().Add(5 * time.Second)
 	}
@@ -266,6 +352,7 @@ func (sm *SessionManager) CleanupExpiredSessions() int {
 				}
 			}
 			delete(sm.sessions, sessionID)
+			delete(sm.pendingAuth, sessionID)
 			cleaned++
 		}
 	}
@@ -337,6 +424,7 @@ func (sm *SessionManager) Validate(sessionID string) (bool, error) {
 			}
 		}
 		delete(sm.sessions, sessionID)
+		delete(sm.pendingAuth, sessionID)
 		return true, nil
 	}
 

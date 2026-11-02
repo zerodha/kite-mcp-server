@@ -185,16 +185,16 @@ func (m *Manager) authenticatedCredentials(sessionID string) (*KiteCredentials, 
 			if errors.As(err, &apiErr) && apiErr.ErrorType == kiteconnect.TokenError {
 				// Discard a permanently rejected grant. Temporary upstream failures leave
 				// the refresh token intact so a later request can try again.
-				_, _ = m.sessionManager.Terminate(sessionID)
+				m.sessionManager.terminateRejectedRefresh(sessionID, creds.generation)
 				return nil, errors.New("kite refresh token is invalid or expired. Please re-authenticate via the OAuth flow")
 			}
 			err := errors.New("unable to refresh Kite access right now. Please try again later")
-			m.sessionManager.recordRefreshFailure(sessionID, err)
+			m.sessionManager.recordRefreshFailure(sessionID, creds.generation, err)
 			return nil, err
 		}
 		if renewed.AccessToken == "" || (renewed.UserID != "" && renewed.UserID != creds.UserID) {
 			err := errors.New("invalid Kite token renewal response")
-			m.sessionManager.recordRefreshFailure(sessionID, err)
+			m.sessionManager.recordRefreshFailure(sessionID, creds.generation, err)
 			return nil, err
 		}
 		creds.AccessToken = renewed.AccessToken
@@ -204,7 +204,7 @@ func (m *Manager) authenticatedCredentials(sessionID string) (*KiteCredentials, 
 		creds.ExpiresAt = kiteAccessTokenExpiry(time.Now())
 		// This lookup-only update rejects logout/expiry during renewal and keeps
 		// the original grant deadline. A refresh must never recreate a session.
-		if err := m.sessionManager.UpdateCredentials(sessionID, creds); err != nil {
+		if err := m.sessionManager.updateRenewedCredentials(sessionID, creds.generation, creds); err != nil {
 			return nil, errors.New("session ended during token renewal. Please re-authenticate via the OAuth flow")
 		}
 		updated, err := m.sessionManager.Get(sessionID)
@@ -269,6 +269,9 @@ func (m *Manager) CompleteLogin(requestToken string) (*KiteCredentials, error) {
 		}
 		m.Logger.Error("Failed to generate Kite session from request token", fields...)
 		return nil, &LoginError{UpstreamStatus: status, Err: err}
+	}
+	if userSess.AccessToken == "" || userSess.UserID == "" {
+		return nil, &LoginError{UpstreamStatus: int(response.status.Load()), Err: errors.New("invalid Kite login response")}
 	}
 
 	creds := &KiteCredentials{

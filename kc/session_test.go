@@ -2,11 +2,13 @@ package kc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
@@ -491,5 +493,113 @@ func TestConcurrentCleanup(t *testing.T) {
 
 	if remaining != 0 {
 		t.Errorf("Expected 0 sessions remaining after cleanup, got %d", remaining)
+	}
+}
+
+func TestPendingAuthorizationCapacityAndExpiryRecovery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		manager := NewSessionManager(testLogger())
+		active := manager.Generate()
+		if err := manager.UpdateCredentials(active, &KiteCredentials{UserID: "user", AccessToken: "access", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+		var first string
+		for range maxPendingAuthorizations {
+			id, err := manager.GeneratePendingAuthorization("pending")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if first == "" {
+				first = id
+			}
+		}
+		for range 2 {
+			if id, err := manager.GeneratePendingAuthorization("pending"); id != "" || !errors.Is(err, ErrPendingAuthorizationLimit) {
+				t.Fatal("capacity did not reject pending flow", id, err)
+			}
+		}
+		if _, err := manager.Get(first); err != nil {
+			t.Fatal("live pending flow was evicted", err)
+		}
+		secondActive := manager.Generate()
+		if len(manager.pendingAuth) != maxPendingAuthorizations || len(manager.sessions) != maxPendingAuthorizations+2 {
+			t.Fatal("capacity rejection changed session store")
+		}
+		if _, err := manager.Terminate(first); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Minute)
+		livePending, err := manager.GeneratePendingAuthorization("live pending")
+		if err != nil {
+			t.Fatal("terminating a flow did not release its slot", err)
+		}
+		time.Sleep(5 * time.Minute)
+		if _, err := manager.GeneratePendingAuthorization("new pending"); err != nil {
+			t.Fatal("expired flows did not release capacity", err)
+		}
+		if len(manager.pendingAuth) != 2 || len(manager.sessions) != 4 {
+			t.Fatal("expiry recovery removed wrong sessions", len(manager.pendingAuth), len(manager.sessions))
+		}
+		for _, id := range []string{active, secondActive, livePending} {
+			if _, err := manager.Get(id); err != nil {
+				t.Fatal("live session was evicted", id, err)
+			}
+		}
+	})
+}
+
+func TestPendingAuthorizationAdmissionIsAtomic(t *testing.T) {
+	manager := NewSessionManager(testLogger())
+	for range maxPendingAuthorizations - 10 {
+		if _, err := manager.GeneratePendingAuthorization("pending"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var accepted atomic.Int32
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Go(func() {
+			_, err := manager.GeneratePendingAuthorization("pending")
+			if err == nil {
+				accepted.Add(1)
+			} else if !errors.Is(err, ErrPendingAuthorizationLimit) {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	if accepted.Load() != 10 || len(manager.pendingAuth) != maxPendingAuthorizations || len(manager.sessions) != maxPendingAuthorizations {
+		t.Fatal("concurrent admission exceeded capacity", accepted.Load())
+	}
+}
+
+func TestPendingAuthorizationDeletionReleasesAdmission(t *testing.T) {
+	for _, operation := range []string{"terminate", "validate", "cleanup", "get-or-create"} {
+		t.Run(operation, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				manager := NewSessionManager(testLogger())
+				id, err := manager.GeneratePendingAuthorization("pending")
+				if err != nil {
+					t.Fatal(err)
+				}
+				time.Sleep(DefaultPendingSessionDuration + time.Second)
+				switch operation {
+				case "terminate":
+					_, err = manager.Terminate(id)
+				case "validate":
+					_, err = manager.Validate(id)
+				case "cleanup":
+					manager.CleanupExpiredSessions()
+				case "get-or-create":
+					_, _, err = manager.GetOrCreate(id)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(manager.pendingAuth) != 0 {
+					t.Fatal("deleted authorization still occupies admission slot")
+				}
+			})
+		})
 	}
 }

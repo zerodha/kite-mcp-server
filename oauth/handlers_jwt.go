@@ -48,6 +48,10 @@ func (h *Handlers) browserError(w http.ResponseWriter, r *http.Request, reason s
 		title = "Too many login attempts"
 		message = "There have been too many login requests."
 		guidance = "Wait a few minutes, then start a new login from your MCP client."
+	case "authorization busy":
+		title = "Sign-in temporarily unavailable"
+		message = "Too many sign-in requests are in progress."
+		guidance = "Wait a few minutes, then start a new login from your MCP client."
 	case "kite rate limited":
 		title = "Kite login temporarily limited"
 		message = "The Kite Connect login request was rate limited."
@@ -154,7 +158,12 @@ func (h *Handlers) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate a temporary session to track this OAuth flow
-	tempSessionID := h.kcManager.SessionManager().GenerateWithData(pending)
+	tempSessionID, err := h.kcManager.SessionManager().GeneratePendingAuthorization(pending)
+	if err != nil {
+		w.Header().Set("Retry-After", "60")
+		h.browserError(w, r, "authorization busy", http.StatusServiceUnavailable)
+		return
+	}
 
 	// This cookie protects the consent form only. The callback state cookie
 	// is created only after explicit approval, immediately before Kite login.
@@ -402,11 +411,15 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 
 // HandleToken handles POST /token
 func (h *Handlers) HandleToken(w http.ResponseWriter, r *http.Request) {
+	// Token responses contain credentials and must never be stored by caches.
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 	req, err := ParseTokenRequest(r)
 	if err != nil {
 		h.logger.Warn("invalid token request", "error", err)
