@@ -18,7 +18,10 @@ description: Integrate code mode tool calls with result parsing, pagination, and
 4. Run independent reads in bounded parallel batches and retain per-call errors.
    Keep dependent calls sequential. Never turn missing quotes into zero prices,
    treat INTL reference values as live quotes, or sum `day` and `net` positions.
-5. Keep approval with the user. Never fabricate confirmation or automatically
+5. Select approval from client capabilities. Use `approval_method=browser` on
+   the first mutation call for ChatGPT mobile or a client known not to display
+   forms. If future_orders_allowed=true, use auto unless the user requests another review. Do not ask the user to request a link. Keep approval with the user.
+   Never fabricate confirmation or automatically
    submit a browser form. If `status=approval_required`, share `approval_url` as a
    clickable link without opening it yourself. No order has been submitted.
 6. After user review, call `orders` with `mode=approval_status` and its

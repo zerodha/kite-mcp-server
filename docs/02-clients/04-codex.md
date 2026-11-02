@@ -47,8 +47,9 @@ is called, check `/mcp` and complete authentication.
 
 ## Order approvals
 
-Review the form before placing, modifying, or cancelling an order. If the form
-is unavailable, ask for a browser approval link. See [[Order Approvals]] for
+Review the form before placing, modifying, or cancelling an order. When a form
+is unavailable, the assistant should select browser review automatically and
+share the link. See [[Order Approvals]] for
 browser review and optional future order permission.
 
 See the [official OpenAI MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)

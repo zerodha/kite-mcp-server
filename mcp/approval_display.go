@@ -2,7 +2,9 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -15,7 +17,27 @@ import (
 const orderApprovalHelpURL = "https://mcp.kite.trade/reference/order-approvals/"
 
 func approvalClientGuidance() string {
-	return "Ask for a browser approval link (approval_method=browser). If browser review is unavailable, switch to a client with order approval forms, such as ChatGPT web. Client guidance: " + orderApprovalHelpURL
+	return "Use browser review automatically when available (approval_method=browser); do not ask the user to request a link. If the connected tool lacks browser approval, refresh its tool metadata or use a client with order approval forms, such as ChatGPT web. Client guidance: " + orderApprovalHelpURL
+}
+
+// A transport failure or malformed response means the form was unavailable.
+// Explicit user decisions and cancellation/expiry must never start a new review.
+func nativeApprovalUnavailable(result *mcp.ElicitResult, err error) bool {
+	if err != nil {
+		return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+	}
+	if result == nil {
+		return true
+	}
+	switch result.Action {
+	case "decline", "cancel":
+		return false
+	case "accept":
+		_, valid := result.Content["confirm"].(bool)
+		return !valid
+	default:
+		return true
+	}
 }
 
 // Format the same immutable snapshot that is checked before execution. The
@@ -140,9 +162,9 @@ func validateTradeApproval(result *mcp.ElicitResult) *mcp.CallToolResult {
 	}
 	switch result.Action {
 	case "decline":
-		return approvalFailure("not_accepted", "Order approval was declined; no transaction was executed. If no approval form appeared, ask for a browser approval link. Help: "+orderApprovalHelpURL)
+		return approvalFailure("not_accepted", "Order approval was declined; no transaction was executed. Stop this request. Do not retry or start browser review unless the user requests it.")
 	case "cancel":
-		return approvalFailure("not_accepted", "Order approval was cancelled; no transaction was executed. If no approval form appeared, ask for a browser approval link. Help: "+orderApprovalHelpURL)
+		return approvalFailure("not_accepted", "Order approval was cancelled; no transaction was executed. Stop this request. Do not retry or start browser review unless the user requests it.")
 	case "accept":
 	default:
 		return approvalFailure("not_accepted", "The client did not return a valid approval response; no transaction was executed. "+approvalClientGuidance())

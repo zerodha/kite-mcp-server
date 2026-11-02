@@ -42,16 +42,36 @@ func withTradeApproval(ctx context.Context, request *mcp.CallToolRequest, operat
 	if browser := browserApprovalsFrom(ctx); browser != nil && browser.trusted(ctx, request) {
 		return execute()
 	}
-	if !supportsFormElicitation(requestCapabilities(request)) {
+	capabilities := requestCapabilities(request)
+	if !supportsFormElicitation(capabilities) {
 		if browser := browserApprovalsFrom(ctx); browser != nil {
 			return browser.request(ctx, request, operation, details)
 		}
 		return approvalFailure("unsupported_client", "This client does not support the order approval form; no transaction was executed. "+approvalClientGuidance()), nil
 	}
+	// A generic legacy elicitation capability does not identify a usable form
+	// surface. Prefer browser review when the server can provide it; preserve
+	// legacy form compatibility for transports without a browser approval broker.
+	if capabilities.Elicitation.Form == nil {
+		if browser := browserApprovalsFrom(ctx); browser != nil {
+			return browser.request(ctx, request, operation, details)
+		}
+	}
 	if request.ProtocolVersion() >= "2026-07-28" {
 		return approvalFromContext(ctx, request, operation, details, execute)
 	}
-	return elicitTradeApproval(ctx, tradeApprovalTimeout, request.Session.Elicit, operation, details, execute)
+	unavailable := false
+	result, err := elicitTradeApproval(ctx, tradeApprovalTimeout, func(formCtx context.Context, params *mcp.ElicitParams) (*mcp.ElicitResult, error) {
+		response, err := request.Session.Elicit(formCtx, params)
+		unavailable = formCtx.Err() == nil && nativeApprovalUnavailable(response, err)
+		return response, err
+	}, operation, details, execute)
+	if unavailable && ctx.Err() == nil {
+		if browser := browserApprovalsFrom(ctx); browser != nil {
+			return browser.request(ctx, request, operation, details)
+		}
+	}
+	return result, err
 }
 
 // Kept separate from transport for deterministic deadline and integrity tests.
@@ -105,7 +125,7 @@ func NewServer(info *mcp.Implementation) *mcp.Server {
 	capabilities.Resources = &mcp.ResourceCapabilities{}
 	server := mcp.NewServer(info, &mcp.ServerOptions{
 		SupportedProtocolVersions: versions, Capabilities: capabilities,
-		Instructions: "When open_kite_view is listed, use it to show interactive Kite views for portfolio allocation, positions, funds, order status and fills, GTT triggers, option chains, quotes, historical charts, or instrument search when the request calls for a visual view. Select its matching view and supply the relevant instrument or underlying arguments. The view tool is read-only; use the existing data tools for text-only analysis and the existing transaction tools for separately authorized mutations. If open_kite_view is unavailable, return results through the ordinary data tools. Only request order mutations when the user asks for the action. Orders use a native approval form or a browser approval link unless the user explicitly allowed future orders for this account/client login session. When orders returns status=approval_required, no order has been submitted: share approval_url as a clickable link, do not open or approve it for the user, and do not repeat the mutation. After the user reviews it, use orders mode=approval_status with approval_id to check its status and result. Never fabricate approval, poll indefinitely, or automatically retry an uncertain mutation. Use orders mode=permissions when the user asks to view or revoke future order permission; share its browser link if permission is enabled. Revoking permission does not cancel existing orders. GTT and Alerts/ATO changes are outside the orders approval guard.",
+		Instructions: "When open_kite_view is listed, use it to show interactive Kite views for portfolio allocation, positions, funds, order status and fills, GTT triggers, option chains, quotes, historical charts, or instrument search when the request calls for a visual view. Select its matching view and supply the relevant instrument or underlying arguments. The view tool is read-only; use the existing data tools for text-only analysis and the existing transaction tools for separately authorized mutations. If open_kite_view is unavailable, return results through the ordinary data tools. Only request order mutations when the user asks for the action. Orders use a native approval form or a browser approval link unless the user explicitly allowed future orders for this account/client login session. Choose the approval method automatically from the client capabilities. Generic elicitation without explicit form support uses browser review when available. If future_orders_allowed=true, use approval_method=auto to honour that permission unless the user explicitly requests another review. For ChatGPT mobile or a client known not to display approval forms, set approval_method=browser on the first mutation call. Do not ask the user to request an approval link. If a native form is unavailable, share the browser link returned by the server. An explicit decline, cancellation, or negative confirmation stops the request; do not start another approval without a new user request. When orders returns status=approval_required, no order has been submitted: share approval_url as a clickable link, do not open or approve it for the user, and do not repeat the mutation. After the user reviews it, use orders mode=approval_status with approval_id to check its status and result. Never fabricate approval, poll indefinitely, or automatically retry an uncertain mutation. Use orders mode=permissions when the user asks to view or revoke future order permission; share its browser link if permission is enabled. Revoking permission does not cancel existing orders. GTT and Alerts/ATO changes are outside the orders approval guard.",
 	})
 	registerTradeApproval(server)
 	registerAppResource(server)

@@ -98,3 +98,13 @@ func TestApprovalDisplayQuotesUnicodeLayoutControls(t *testing.T) {
 		require.Contains(t, form.Message, `\u202`)
 	}
 }
+
+func TestNativeApprovalUnavailableHonoursCancellation(t *testing.T) {
+	require.False(t, nativeApprovalUnavailable(nil, context.Canceled))
+	require.False(t, nativeApprovalUnavailable(nil, context.DeadlineExceeded))
+	require.False(t, nativeApprovalUnavailable(&sdk.ElicitResult{Action: "decline"}, nil))
+	require.False(t, nativeApprovalUnavailable(&sdk.ElicitResult{Action: "cancel"}, nil))
+	require.False(t, nativeApprovalUnavailable(&sdk.ElicitResult{Action: "accept", Content: map[string]any{"confirm": false}}, nil))
+	require.True(t, nativeApprovalUnavailable(nil, nil))
+	require.True(t, nativeApprovalUnavailable(&sdk.ElicitResult{Action: "accept"}, nil))
+}

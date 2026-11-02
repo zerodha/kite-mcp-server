@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -191,6 +192,65 @@ func TestBrowserApprovalWithoutElicitation(t *testing.T) {
 			require.Contains(t, status.Content[0].(*sdk.TextContent).Text, `"status":"submitted"`)
 			browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
 			require.EqualValues(t, 1, f.calls.Load(), "unchecked permission requires another approval")
+		})
+	}
+}
+
+func TestUnavailableNativeApprovalFallsBackWithoutAnotherOrderCall(t *testing.T) {
+	for _, version := range []string{"2025-11-25", "2026-07-28"} {
+		for _, scenario := range []string{"transport-error", "malformed-response", "decline", "cancel", "negative"} {
+			t.Run(version+"/"+scenario, func(t *testing.T) {
+				f := newBrowserApprovalFixture(t)
+				cs, cookie := f.connect(t, "approval-test", "Approval-capable client", version, &sdk.ClientOptions{ElicitationHandler: func(context.Context, *sdk.ElicitRequest) (*sdk.ElicitResult, error) {
+					switch scenario {
+					case "transport-error":
+						return nil, fmt.Errorf("native form unavailable")
+					case "malformed-response":
+						return &sdk.ElicitResult{Action: "accept"}, nil
+					case "negative":
+						return &sdk.ElicitResult{Action: "accept", Content: map[string]any{"confirm": false}}, nil
+					default:
+						return &sdk.ElicitResult{Action: scenario}, nil
+					}
+				}})
+				if version == "2026-07-28" && scenario == "transport-error" {
+					// An MRTR client can stop locally before sending any response to
+					// the server. It cannot trigger a server-side fallback in that case.
+					_, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "orders", Arguments: browserOrderArgs()})
+					require.ErrorContains(t, err, "native form unavailable")
+					require.Zero(t, f.calls.Load())
+					require.Empty(t, f.b.pending)
+					return
+				}
+				result := callBrowserOrder(t, cs, browserOrderArgs())
+				require.Zero(t, f.calls.Load(), "native failure and fallback must not submit an order")
+				if scenario != "transport-error" && scenario != "malformed-response" {
+					require.True(t, result.IsError)
+					require.Empty(t, f.b.pending, "explicit user decisions must not create another review")
+					return
+				}
+				id := browserApprovalID(t, result)
+				csrf := pageCSRF(t, browserPage(t, f.b, id, cookie))
+				require.Equal(t, http.StatusSeeOther, postBrowserDecision(f.b, id, cookie, url.Values{"csrf": {csrf}, "decision": {"approve"}}, "").Code)
+				require.EqualValues(t, 1, f.calls.Load())
+			})
+		}
+	}
+}
+
+func TestGenericElicitationUsesBrowserAutomatically(t *testing.T) {
+	for _, version := range []string{"2025-11-25", "2026-07-28"} {
+		t.Run(version, func(t *testing.T) {
+			f := newBrowserApprovalFixture(t)
+			cs, _ := f.connect(t, "approval-test", "Generic legacy client", version, &sdk.ClientOptions{
+				Capabilities: &sdk.ClientCapabilities{Elicitation: &sdk.ElicitationCapabilities{}},
+				ElicitationHandler: func(context.Context, *sdk.ElicitRequest) (*sdk.ElicitResult, error) {
+					t.Error("generic capabilities must not require the user to request browser fallback")
+					return &sdk.ElicitResult{Action: "decline"}, nil
+				},
+			})
+			browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
+			require.Zero(t, f.calls.Load())
 		})
 	}
 }

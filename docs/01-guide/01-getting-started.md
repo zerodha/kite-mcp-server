@@ -71,7 +71,7 @@ Supported clients can also show portfolio charts, instrument details, and other
 - **Sign-in expired:** reconnect through your client's OAuth flow.
 - **No tools appear:** enable the connection in the current conversation and
   check your organisation's connector settings.
-- **Order form unavailable:** ask for a browser approval link and open it in
-  the browser used to sign in to Kite MCP.
+- **Order form unavailable:** your assistant should select browser review
+  automatically. Open its link in the browser used to sign in to Kite MCP.
 
 See the [FAQ](../../reference/faq/) for more troubleshooting.

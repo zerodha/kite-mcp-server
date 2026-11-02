@@ -25,8 +25,9 @@ https://mcp.kite.trade/mcp
 ## Order approvals
 
 On ChatGPT web, review the approval form shown for order placement, modification,
-or cancellation. Native forms do not currently work in this flow on the mobile
-app; ask the assistant for a browser approval link instead.
+or cancellation. On the mobile app, the assistant should select browser review
+automatically and share the approval link. You do not need to ask for a link
+separately.
 
 Open the link in the browser used to connect Kite MCP and review the order there.
 See [[Order Approvals]] for browser review and optional future order permission.
@@ -41,6 +42,11 @@ See [[Order Approvals]] for browser review and optional future order permission.
 
 If sign-in fails, reconnect from the connection settings. If you cannot add a
 custom connection, check your account access and workspace settings.
+
+If the assistant says `approval_method` or `approval_status` is missing while
+Help describes browser approvals, refresh the Kite connection's tool metadata
+in ChatGPT web and start a new conversation. Reconnecting alone may keep an old
+tool schema. See the [official metadata refresh guidance](https://developers.openai.com/apps-sdk/deploy/connect-chatgpt#refresh-metadata).
 
 ## Verify the connection
 

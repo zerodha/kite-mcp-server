@@ -96,6 +96,13 @@ func approvalFromContext(ctx context.Context, req *mcp.CallToolRequest, operatio
 		}
 		response, _ := req.Params.InputResponses["trade_approval"].(*mcp.ElicitResult)
 		if failure := validateTradeApproval(response); failure != nil {
+			if nativeApprovalUnavailable(response, nil) && ctx.Err() == nil {
+				if browser := browserApprovalsFrom(ctx); browser != nil {
+					locked = false
+					store.Unlock()
+					return browser.request(ctx, req, operation, details)
+				}
+			}
 			return failure, nil
 		}
 		if ctx.Err() != nil {

@@ -24,8 +24,15 @@ in chat does not replace the approval form or browser review.
 6. Return to your assistant and ask it to check the approval's outcome. Do not
    repeat the original order request.
 
-If your client's form does not appear, ask the assistant to request a browser
-approval link instead.
+Your assistant selects the approval method from the client's capabilities.
+On ChatGPT mobile, it should choose browser review automatically and share the
+link. If a native form failure reaches the server, it returns browser review when
+available. A client that fails locally before replying cannot trigger that
+fallback, so known mobile clients should choose browser review up front.
+You do not need to request a link separately.
+
+An explicit decline, cancellation, or negative confirmation stops the request.
+The assistant must not start another review unless you ask it to.
 
 Links expire after two minutes. Approval permits one submission; it does not
 guarantee exchange execution. Cancelling an order does not reverse existing fills.
@@ -60,7 +67,7 @@ will need approval. Revoking permission does not cancel orders already submitted
 | Client | Approval options |
 |--------|------------------|
 | ChatGPT web | Review the form in your conversation, or request a browser approval link. |
-| ChatGPT mobile | Native approval forms do not currently work in this flow. Request a browser approval link. |
+| ChatGPT mobile | The assistant selects browser review automatically and shares the link. |
 | Pi and other code mode clients | Open the browser link shared by your assistant. |
 | Other clients with form support | Review the native form, or request browser approval. |
 
