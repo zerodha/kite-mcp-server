@@ -13,6 +13,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -56,6 +57,12 @@ func main() {
 		level = slog.LevelInfo
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	listener, err := listenLocal(*port)
+	if err != nil {
+		logger.Error("Failed to listen for MCP clients", "error", err)
+		os.Exit(1)
+	}
+	defer listener.Close()
 
 	// 1. Start mock Kite API server.
 	kiteMockURL := startMockKiteServer(logger, *mockDir)
@@ -69,7 +76,7 @@ func main() {
 	}
 
 	// 3. KC manager pointing to mock server.
-	addr := fmt.Sprintf("http://localhost:%d", *port)
+	addr := "http://" + listener.Addr().String()
 	kcManager, err := kc.New(kc.Config{
 		APIKey:      "mock_api_key",
 		APISecret:   "mock_api_secret",
@@ -100,9 +107,14 @@ func main() {
 	}
 
 	// 5. OAuth server + test JWT.
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		logger.Error("Failed to create test signing secret", "error", err)
+		os.Exit(1)
+	}
 	oauthSrv := oauth.New(oauth.Config{
 		Issuer:        addr,
-		JWTSecret:     []byte("mock-jwt-secret-at-least-32-bytes!"),
+		JWTSecret:     secret,
 		TokenTTL:      24 * time.Hour,
 		SessionExpiry: kcManager.SessionExpiry,
 	})
@@ -130,7 +142,7 @@ func main() {
 	mux.Handle("/mcp", oauthSrv.Middleware(http.HandlerFunc(handler.ServeHTTP)))
 
 	// 8. Print connection info.
-	endpoint := fmt.Sprintf("http://localhost:%d/mcp", *port)
+	endpoint := addr + "/mcp"
 	if *jsonOut {
 		info := map[string]string{
 			"endpoint": endpoint,
@@ -158,8 +170,8 @@ func main() {
 
 	// 9. Start server.
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", *port),
-		Handler: mux,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -174,7 +186,7 @@ func main() {
 	}()
 
 	logger.Info("MCP mock server listening", "port", *port)
-	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+	if err := srv.Serve(listener); err != http.ErrServerClosed {
 		logger.Error("Server error", "error", err)
 		os.Exit(1)
 	}
@@ -263,7 +275,7 @@ func startMockKiteServer(logger *slog.Logger, mockDir string) string {
 		http.NotFound(w, r)
 	})
 
-	listener, err := net.Listen("tcp", ":0")
+	listener, err := listenLocal(0)
 	if err != nil {
 		logger.Error("Failed to start mock Kite server", "error", err)
 		os.Exit(1)
@@ -271,8 +283,12 @@ func startMockKiteServer(logger *slog.Logger, mockDir string) string {
 
 	go http.Serve(listener, mux)
 
-	port := listener.Addr().(*net.TCPAddr).Port
-	return fmt.Sprintf("http://localhost:%d", port)
+	return "http://" + listener.Addr().String()
+}
+
+// Local fixtures and test credentials must not be exposed on LAN interfaces.
+func listenLocal(port int) (net.Listener, error) {
+	return net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 }
 
 func serveMock(w http.ResponseWriter, mockDir, filename string) {

@@ -4,8 +4,11 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+	"time"
 )
 
 // testLogger creates a discard logger for tests
@@ -264,6 +267,94 @@ func TestLoadConfigAcceptsSevenDayToken(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-jwt-secret-32-bytes-minimum")
 	t.Setenv("OAUTH_TOKEN_TTL", "168h")
 	if err := NewApp(testLogger()).LoadConfig(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadConfigIssuerOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		issuer string
+		valid  bool
+	}{
+		{"https://mcp.example", true},
+		{"https://mcp.example/", true},
+		{"HTTPS://mcp.example", true},
+		{"http://localhost:8080", true},
+		{"http://[::1]:8080", true},
+		{"https://user:password@mcp.example", false},
+		{"https://mcp.example/prefix", false},
+		{"https://mcp.example?", false},
+		{"https://mcp.example?token=secret", false},
+		{"https://mcp.example#", false},
+		{"https://mcp.example#fragment", false},
+		{"https://mcp.example:", false},
+		{"https://mcp.example:99999", false},
+		{"file:///tmp/server", false},
+		{"mcp.example", false},
+	} {
+		t.Run(tc.issuer, func(t *testing.T) {
+			app := NewApp(testLogger())
+			app.Config = &Config{KiteAPIKey: "key", KiteAPISecret: "secret", JWTSecret: strings.Repeat("s", 32), OAuthIssuer: tc.issuer}
+			if err := app.LoadConfig(); (err == nil) != tc.valid {
+				t.Fatalf("valid=%v, error=%v", tc.valid, err)
+			}
+			if tc.valid && strings.HasSuffix(app.Config.OAuthIssuer, "/") {
+				t.Fatal("issuer kept a trailing slash, which produces incorrect endpoint URLs")
+			}
+		})
+	}
+}
+
+func TestDefaultIssuerSupportsIPv6(t *testing.T) {
+	app := NewApp(testLogger())
+	app.Config = &Config{KiteAPIKey: "key", KiteAPISecret: "secret", JWTSecret: strings.Repeat("s", 32), AppHost: "::1", AppPort: "8080"}
+	if err := app.LoadConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if got := app.buildServerURL(); got != "[::1]:8080" {
+		t.Fatalf("invalid listener address: %q", got)
+	}
+	if got := app.Config.OAuthIssuer; got != "http://[::1]:8080" {
+		t.Fatalf("invalid issuer: %q", got)
+	}
+}
+
+func TestShutdownWaitsForActiveRequests(t *testing.T) {
+	app := NewApp(testLogger())
+	started, release, draining := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	srv.Config.RegisterOnShutdown(func() { close(draining) })
+	stop := app.setupGracefulShutdown(srv.Config)
+	defer stop()
+	response := make(chan error, 1)
+	go func() {
+		r, err := srv.Client().Get(srv.URL)
+		if r != nil {
+			_ = r.Body.Close()
+		}
+		response <- err
+	}()
+	<-started
+	done := make(chan struct{})
+	go func() { stop(); close(done) }()
+	<-draining
+	select {
+	case <-done:
+		t.Error("shutdown returned while an active request still needed services")
+	default:
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown failed to finish after requests drained")
+	}
+	if err := <-response; err != nil {
 		t.Fatal(err)
 	}
 }

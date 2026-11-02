@@ -22,6 +22,8 @@ const (
 	defaultUpdateMinute   = 0 // 0 minutes
 	defaultRetryAttempts  = 3
 	defaultRetryDelay     = 3 * time.Second
+	maxCatalogBytes       = 512 << 20
+	maxCatalogRecords     = 1_000_000
 )
 
 var (
@@ -53,7 +55,8 @@ type UpdateConfig struct {
 	RetryDelay time.Duration
 	// EnableScheduler enables automatic scheduled updates
 	EnableScheduler bool
-	// MemoryLimit is the maximum memory usage in bytes (0 = no limit)
+	// MemoryLimit optionally lowers the decoded catalog byte limit (0 = 512 MiB).
+	// This bounds input size, not the complete heap used by the resulting indexes.
 	MemoryLimit int64
 }
 
@@ -65,7 +68,7 @@ func DefaultUpdateConfig() *UpdateConfig {
 		RetryAttempts:   defaultRetryAttempts,
 		RetryDelay:      defaultRetryDelay,
 		EnableScheduler: true,
-		MemoryLimit:     0, // No limit by default
+		MemoryLimit:     0, // Use the default catalog input bound.
 	}
 }
 
@@ -149,6 +152,7 @@ func New(cfg Config) (*Manager, error) {
 // newManagerWithConfig is the internal constructor used by both old and new APIs
 func newManagerWithConfig(config *UpdateConfig, logger *slog.Logger) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
+	configCopy := *config
 
 	m := &Manager{
 		isinToInstruments: make(map[string][]*Instrument),
@@ -157,7 +161,7 @@ func newManagerWithConfig(config *UpdateConfig, logger *slog.Logger) *Manager {
 		tokenToInstrument: make(map[uint32]*Instrument),
 		segmentIDs:        make(map[string]uint32),
 		lastUpdated:       time.Now(),
-		config:            config,
+		config:            &configCopy,
 		logger:            logger,
 		schedulerCtx:      ctx,
 		schedulerCancel:   cancel,
@@ -231,9 +235,18 @@ func (m *Manager) updateInstrumentsWithRetry(force bool) error {
 	m.mutex.RUnlock()
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if err := m.schedulerCtx.Err(); err != nil {
+			return err
+		}
 		if attempt > 0 {
 			m.logger.Warn("Retrying instrument update", "attempt", attempt+1, "max_attempts", maxAttempts, "delay", retryDelay)
-			time.Sleep(retryDelay)
+			timer := time.NewTimer(retryDelay)
+			select {
+			case <-m.schedulerCtx.Done():
+				timer.Stop()
+				return m.schedulerCtx.Err()
+			case <-timer.C:
+			}
 		}
 
 		count, err := m.updateInstruments(force)
@@ -342,7 +355,7 @@ func (m *Manager) updateInstruments(force bool) (int, error) {
 func (m *Manager) loadFromURL() (map[uint32]*Instrument, error) {
 	m.logger.Debug("Creating HTTP request to fetch instruments", "url", instrumentsURL)
 	// HTTP GET request to instruments URL
-	req, err := http.NewRequest("GET", instrumentsURL, nil)
+	req, err := http.NewRequestWithContext(m.schedulerCtx, "GET", instrumentsURL, nil)
 	if err != nil {
 		m.logger.Error("Error creating HTTP request", "error", err)
 		return nil, fmt.Errorf("error creating request: %v", err)
@@ -398,7 +411,16 @@ func (m *Manager) parseInstrumentsJSON(reader io.Reader) (map[uint32]*Instrument
 
 	// Process JSONL formatted data
 	m.logger.Debug("Creating scanner for JSONL data")
-	scanner := bufio.NewScanner(reader)
+	m.mutex.RLock()
+	limit := int64(maxCatalogBytes)
+	if m.config.MemoryLimit > 0 && m.config.MemoryLimit < limit {
+		limit = m.config.MemoryLimit
+	}
+	m.mutex.RUnlock()
+	// Apply the limit after decompression so compressed responses cannot expand
+	// into an unbounded catalog. Read one extra byte to detect truncation.
+	bounded := &io.LimitedReader{R: reader, N: limit + 1}
+	scanner := bufio.NewScanner(bounded)
 
 	// Increase scanner buffer to handle large lines
 	const maxCapacity = 512 * 1024 // 512KB
@@ -410,6 +432,9 @@ func (m *Manager) parseInstrumentsJSON(reader io.Reader) (map[uint32]*Instrument
 	m.logger.Debug("Starting to scan JSON lines")
 	// Read and process each line as a separate JSON object
 	for scanner.Scan() {
+		if bounded.N == 0 {
+			return nil, fmt.Errorf("instruments response exceeds %d decoded bytes", limit)
+		}
 		line := scanner.Text()
 
 		// Skip empty lines
@@ -425,6 +450,12 @@ func (m *Manager) parseInstrumentsJSON(reader io.Reader) (map[uint32]*Instrument
 		if instrument.InstrumentToken == 0 || instrument.Tradingsymbol == "" || instrument.Exchange == "" || instrument.Segment == "" {
 			return nil, fmt.Errorf("invalid instrument record at line %d", count+1)
 		}
+		if instrument.ID == "" {
+			instrument.ID = instrument.Exchange + ":" + instrument.Tradingsymbol
+		}
+		if count >= maxCatalogRecords {
+			return nil, fmt.Errorf("instruments response exceeds %d records", maxCatalogRecords)
+		}
 
 		// Process each instrument
 		mp[instrument.InstrumentToken] = &instrument
@@ -438,6 +469,9 @@ func (m *Manager) parseInstrumentsJSON(reader io.Reader) (map[uint32]*Instrument
 	if err := scanner.Err(); err != nil {
 		m.logger.Error("Scanner error", "error", err)
 		return nil, fmt.Errorf("error reading instruments file: %v", err)
+	}
+	if bounded.N == 0 {
+		return nil, fmt.Errorf("instruments response exceeds %d decoded bytes", limit)
 	}
 	if count == 0 {
 		return nil, errors.New("instruments response contained no instrument records")
@@ -483,6 +517,38 @@ func (m *Manager) LoadMap(tokenToInstrument map[uint32]*Instrument) {
 // insertUnsafe inserts a new instrument without acquiring locks.
 // This method must be called with the mutex already held.
 func (m *Manager) insertUnsafe(inst *Instrument) {
+	if inst == nil {
+		return
+	}
+	// The catalog owns its values. A caller retaining an inserted pointer must
+	// not be able to mutate live lookup data outside the manager's lock.
+	copy := *inst
+	inst = &copy
+	if previous := m.tokenToInstrument[inst.InstrumentToken]; previous != nil {
+		if m.idToInst[previous.ID] == previous {
+			delete(m.idToInst, previous.ID)
+			delete(m.idToToken, previous.ID)
+		}
+		if previous.Segment == segIndices {
+			alias := previous.Segment + ":" + previous.Tradingsymbol
+			if m.idToInst[alias] == previous {
+				delete(m.idToInst, alias)
+			}
+		}
+		if entries := m.isinToInstruments[previous.ISIN]; len(entries) != 0 {
+			kept := make([]*Instrument, 0, len(entries))
+			for _, entry := range entries {
+				if entry.InstrumentToken != previous.InstrumentToken {
+					kept = append(kept, entry)
+				}
+			}
+			if len(kept) == 0 {
+				delete(m.isinToInstruments, previous.ISIN)
+			} else {
+				m.isinToInstruments[previous.ISIN] = kept
+			}
+		}
+	}
 	// ISIN -> Instrument
 	if inst.ISIN != "" {
 		if _, ok := m.isinToInstruments[inst.ISIN]; !ok {
@@ -538,14 +604,19 @@ func (m *Manager) GetUpdateStats() UpdateStats {
 func (m *Manager) GetConfig() *UpdateConfig {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	return m.config
+	copy := *m.config
+	return &copy
 }
 
 // UpdateConfig updates the manager configuration
 func (m *Manager) UpdateConfig(config *UpdateConfig) {
+	if config == nil {
+		config = DefaultUpdateConfig()
+	}
+	copy := *config
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.config = config
+	m.config = &copy
 	m.logger.Info("Instruments manager configuration updated",
 		"update_hour", config.UpdateHour,
 		"update_minute", config.UpdateMinute,

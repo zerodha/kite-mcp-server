@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -117,8 +118,15 @@ func (app *App) LoadConfig() error {
 	}
 	// Default OAuth issuer to local URL if not set
 	if app.Config.OAuthIssuer == "" {
-		app.Config.OAuthIssuer = "http://" + app.Config.AppHost + ":" + app.Config.AppPort
+		app.Config.OAuthIssuer = "http://" + app.buildServerURL()
 	}
+	issuer, err := url.Parse(app.Config.OAuthIssuer)
+	if err != nil || issuer.Hostname() == "" || !sameMCPOrigin(issuer, issuer) ||
+		issuer.User != nil || (issuer.Path != "" && issuer.Path != "/") || issuer.RawQuery != "" || issuer.ForceQuery ||
+		issuer.Fragment != "" || strings.Contains(app.Config.OAuthIssuer, "#") {
+		return fmt.Errorf("OAUTH_ISSUER must be an HTTP or HTTPS origin without credentials, a path, a query, or a fragment")
+	}
+	app.Config.OAuthIssuer = strings.TrimSuffix(app.Config.OAuthIssuer, "/")
 	if app.Config.OAuthTokenTTL == "" {
 		app.Config.OAuthTokenTTL = DefaultOAuthTokenTTL
 	}
@@ -154,13 +162,15 @@ func (app *App) RunServer() error {
 	if err != nil {
 		return err
 	}
+	defer app.shutdownServices()
 	srv := app.createHTTPServer(url)
-	app.setupGracefulShutdown(srv)
+	stop := app.setupGracefulShutdown(srv)
+	defer stop()
 	return app.startServer(srv, mcpServer, url)
 }
 
 func (app *App) buildServerURL() string {
-	return app.Config.AppHost + ":" + app.Config.AppPort
+	return net.JoinHostPort(app.Config.AppHost, app.Config.AppPort)
 }
 
 func (app *App) configureHTTPClient() {
@@ -198,6 +208,8 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 		SessionDuration: kc.DefaultSessionDuration,
 	})
 	if err != nil {
+		instManager.Shutdown()
+		app.metrics.Shutdown()
 		return nil, fmt.Errorf("failed to create Kite Connect manager: %w", err)
 	}
 	app.kcManager = kcManager
@@ -228,28 +240,52 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 }
 
 func (app *App) createHTTPServer(url string) *http.Server {
-	return &http.Server{Addr: url}
+	return &http.Server{
+		Addr:              url,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    64 << 10,
+		// SSE responses and native approval forms may stay open for minutes.
+		// Bound request reads without imposing a response write deadline.
+	}
 }
 
-func (app *App) setupGracefulShutdown(srv *http.Server) {
+func (app *App) setupGracefulShutdown(srv *http.Server) func() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
 	go func() {
-		defer stop()
+		defer close(done)
 		<-ctx.Done()
 		app.logger.Info("Shutting down server...")
-
-		// Shutdown services
-		app.kcManager.Shutdown()
-		app.metrics.Shutdown()
 
 		// Shutdown HTTP server
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			app.logger.Error("Server shutdown error", "error", err)
+			_ = srv.Close()
 		}
 		app.logger.Info("Server shutdown complete")
 	}()
+	// Also release the signal registration and wait for HTTP draining when
+	// ListenAndServe fails, or returns before Shutdown has finished.
+	return func() {
+		stop()
+		<-done
+	}
+}
+
+func (app *App) shutdownServices() {
+	if app.kcManager != nil {
+		app.kcManager.Shutdown()
+	}
+	if app.metrics != nil {
+		app.metrics.Shutdown()
+	}
+	if app.rateLimiter != nil {
+		app.rateLimiter.Shutdown()
+	}
 }
 
 func (app *App) setupMux() *http.ServeMux {

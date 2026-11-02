@@ -25,7 +25,10 @@ type RateLimiter struct {
 	cleanupCancel  context.CancelFunc
 	cleanupRunning bool
 	trustedProxies []netip.Prefix
+	overflow       *rate.Limiter
 }
+
+const maxRateLimitPeers = 10000
 
 // NewRateLimiter creates a new rate limiter manager.
 // Trusted proxy CIDRs are optional. X-Forwarded-For is used only when the
@@ -33,6 +36,7 @@ type RateLimiter struct {
 func NewRateLimiter(trustedProxyCIDRs ...string) *RateLimiter {
 	m := &RateLimiter{
 		limiters: make(map[string]*limiterEntry),
+		overflow: rate.NewLimiter(rate.Every(12*time.Second), 5),
 	}
 	for _, cidr := range trustedProxyCIDRs {
 		if prefix, err := netip.ParsePrefix(strings.TrimSpace(cidr)); err == nil {
@@ -76,6 +80,11 @@ func (m *RateLimiter) getLimiter(ip string) *rate.Limiter {
 
 	entry, exists := m.limiters[ip]
 	if !exists {
+		// Share a bounded overflow bucket instead of allocating indefinitely or
+		// evicting active peers and resetting their rate limits.
+		if len(m.limiters) >= maxRateLimitPeers {
+			return m.overflow
+		}
 		// Allow 5 requests every 12 seconds.
 		limiter := rate.NewLimiter(rate.Every(12*time.Second), 5)
 		entry = &limiterEntry{
@@ -94,6 +103,17 @@ func (m *RateLimiter) getLimiter(ip string) *rate.Limiter {
 	}
 
 	return entry.limiter
+}
+
+// Shutdown stops background cleanup when the HTTP server is closed.
+func (m *RateLimiter) Shutdown() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cleanupCancel != nil {
+		m.cleanupCancel()
+		m.cleanupCancel = nil
+	}
+	m.cleanupRunning = false
 }
 
 // Middleware returns a middleware that enforces rate limiting.

@@ -1,12 +1,14 @@
 package instruments
 
 import (
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -837,6 +839,10 @@ func TestMemoryOptimizations(t *testing.T) {
 func TestNewConfigConstructor(t *testing.T) {
 	// Test production mode (with HTTP loading disabled for tests)
 	t.Run("production_mode", func(t *testing.T) {
+		server := setupTestServer()
+		defer server.Close()
+		restore := hijackInstrumentsURL(server.URL)
+		defer restore()
 		config := DefaultUpdateConfig()
 		config.EnableScheduler = false // Disable for tests
 
@@ -847,9 +853,8 @@ func TestNewConfigConstructor(t *testing.T) {
 			TestData:     nil, // This would trigger HTTP loading in real usage
 		})
 
-		// HTTP call may succeed or fail depending on environment
 		if err != nil {
-			t.Logf("HTTP loading failed as expected in test environment: %v", err)
+			t.Fatalf("HTTP loading failed: %v", err)
 		} else {
 			t.Log("HTTP loading succeeded - manager created successfully")
 			manager.Shutdown()
@@ -912,6 +917,153 @@ func TestNewConfigConstructor(t *testing.T) {
 			t.Errorf("Expected default retry attempts %d, got %d", defaultRetryAttempts, manager.config.RetryAttempts)
 		}
 	})
+}
+
+func TestCatalogInputLimitAppliesAfterDecompression(t *testing.T) {
+	for _, compressed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("gzip=%t", compressed), func(t *testing.T) {
+			manager := newTestManager()
+			defer manager.Shutdown()
+			config := manager.GetConfig()
+			config.RetryAttempts = 1
+			config.MemoryLimit = 512
+			manager.UpdateConfig(config)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var output io.Writer = w
+				if compressed {
+					w.Header().Set("Content-Encoding", "gzip")
+					zip := gzip.NewWriter(w)
+					defer zip.Close()
+					output = zip
+				}
+				_, _ = io.WriteString(output, strings.Repeat(`{"instrument_token":1,"exchange":"NSE","tradingsymbol":"X","segment":"NSE"}`+"\n", 20))
+			}))
+			defer server.Close()
+			restore := hijackInstrumentsURL(server.URL)
+			defer restore()
+			if err := manager.ForceUpdateInstruments(); err == nil || !strings.Contains(err.Error(), "decoded bytes") {
+				t.Fatalf("oversized catalog was not rejected: %v", err)
+			}
+			if manager.Count() != 3 {
+				t.Fatal("oversized response replaced the prior catalog")
+			}
+		})
+	}
+}
+
+func TestCatalogUpdateCancellationInterruptsFetchAndRetry(t *testing.T) {
+	for _, stalled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stalled=%t", stalled), func(t *testing.T) {
+			manager := newTestManager()
+			defer manager.Shutdown()
+			config := manager.GetConfig()
+			config.RetryDelay = time.Hour
+			manager.UpdateConfig(config)
+			requested := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				close(requested)
+				if stalled {
+					<-r.Context().Done()
+					return
+				}
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}))
+			defer server.Close()
+			restore := hijackInstrumentsURL(server.URL)
+			defer restore()
+			done := make(chan error, 1)
+			go func() { done <- manager.ForceUpdateInstruments() }()
+			select {
+			case <-requested:
+			case <-time.After(time.Second):
+				t.Fatal("update did not reach the test endpoint")
+			}
+			if !stalled {
+				deadline := time.Now().Add(time.Second)
+				for manager.GetUpdateStats().FailedUpdates == 0 && time.Now().Before(deadline) {
+					time.Sleep(time.Millisecond)
+				}
+				if manager.GetUpdateStats().FailedUpdates == 0 {
+					t.Fatal("update never entered its retry wait")
+				}
+			}
+			manager.Shutdown()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatal("cancelled update unexpectedly succeeded")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("shutdown did not cancel the catalog update")
+			}
+		})
+	}
+}
+
+func TestCatalogOwnsConfigAndInsertedInstruments(t *testing.T) {
+	config := DefaultUpdateConfig()
+	config.EnableScheduler = false
+	inst := &Instrument{ID: "NSE:OWNED", InstrumentToken: 1, Exchange: "NSE", Tradingsymbol: "OWNED", Segment: "NSE"}
+	manager, err := New(Config{Logger: testLogger(), UpdateConfig: config, TestData: map[uint32]*Instrument{1: inst}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Shutdown()
+	config.RetryAttempts = 999
+	view := manager.GetConfig()
+	view.RetryAttempts = 888
+	inst.Tradingsymbol = "MUTATED"
+	actual, err := manager.GetByTradingsymbol("NSE", "OWNED")
+	if err != nil || actual.Tradingsymbol != "OWNED" || manager.GetConfig().RetryAttempts != defaultRetryAttempts {
+		t.Fatalf("caller mutation changed manager data: %+v %v", actual, err)
+	}
+	updated := manager.GetConfig()
+	updated.RetryAttempts = 2
+	manager.UpdateConfig(updated)
+	updated.RetryAttempts = 999
+	if manager.GetConfig().RetryAttempts != 2 {
+		t.Fatal("UpdateConfig retained a caller-owned pointer")
+	}
+}
+
+func TestCatalogDerivesMissingInstrumentID(t *testing.T) {
+	server := setupTestServer()
+	defer server.Close()
+	restore := hijackInstrumentsURL(server.URL)
+	defer restore()
+	manager := newTestManagerWithoutUpdate()
+	defer manager.Shutdown()
+	if err := manager.ForceUpdateInstruments(); err != nil {
+		t.Fatal(err)
+	}
+	if inst, err := manager.GetByTradingsymbol("NSE", "SBIN"); err != nil || inst.ID != "NSE:SBIN" {
+		t.Fatalf("symbol lookup failed for a record without an explicit ID: %+v %v", inst, err)
+	}
+}
+
+func TestCatalogReplacementRemovesStaleIndexes(t *testing.T) {
+	manager := newTestManagerWithoutUpdate()
+	defer manager.Shutdown()
+	old := &Instrument{ID: "NSE:OLD", InstrumentToken: 1, Exchange: "NSE", Tradingsymbol: "OLD", Segment: segIndices, ISIN: "OLD-ISIN"}
+	manager.Insert(old)
+	manager.Insert(old)
+	if entries, err := manager.GetByISIN("OLD-ISIN"); err != nil || len(entries) != 1 {
+		t.Fatalf("repeated insertion duplicated ISIN entries: %+v %v", entries, err)
+	}
+	updated := *old
+	updated.ID, updated.Tradingsymbol, updated.ISIN = "NSE:NEW", "NEW", "NEW-ISIN"
+	manager.LoadMap(map[uint32]*Instrument{1: &updated})
+	for _, id := range []string{"NSE:OLD", "INDICES:OLD"} {
+		if _, err := manager.GetByID(id); err != ErrInstrumentNotFound {
+			t.Fatalf("replacement left stale ID %s", id)
+		}
+	}
+	if _, err := manager.GetByISIN("OLD-ISIN"); err != ErrInstrumentNotFound {
+		t.Fatal("replacement retained the previous ISIN")
+	}
+	if entries, err := manager.GetByISIN("NEW-ISIN"); err != nil || len(entries) != 1 || entries[0].Tradingsymbol != "NEW" {
+		t.Fatalf("replacement not indexed correctly: %+v %v", entries, err)
+	}
 }
 
 // BenchmarkManagerInsert benchmarks instrument insertion
