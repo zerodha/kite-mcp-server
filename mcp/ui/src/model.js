@@ -130,3 +130,5 @@ export function snapshotTime(value) {
   if (!Number.isFinite(date.getTime())) return String(value);
   return new Intl.DateTimeFormat('en-IN', { timeZone:'Asia/Kolkata', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit' }).format(date) + ' IST';
 }
+
+export function referenceOnly(row) { return instrumentRef(row)?.exchange === 'INTL'; }

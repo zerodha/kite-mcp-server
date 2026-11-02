@@ -146,7 +146,7 @@ var marketSchema = json.RawMessage(`{
 
 func (*MarketTool) Definition() *mcp.Tool {
 	tool := NewTool("market",
-		"Retrieve market data and search instruments. Use mode=option_chain with underlying and optional exchange/expiry to discover a complete indexed option chain, paginated by strike with expiries, spot and future references; fetch quotes separately. Use mode=quote for full market snapshots (OHLC, volume, bid/ask depth, OI) for up to 500 instruments, mode=ltp for last traded price only (lighter), mode=ohlc for today's OHLC, mode=historical for historical candle data, mode=search to find instruments by name, symbol, ISIN, or token across all exchanges. Search returns data/pagination/meta, sorted by ID then token, with default limit 100 and maximum 500. Quote/LTP/OHLC return data/meta with missing_instruments; entirely unresolved requests return an error. Search results come from the BOD instrument master by default; set include_live_quote=true to enrich returned results with live quote fields and quote_timestamp. For an interactive option chain, quote, historical chart, or instrument finder, use open_kite_view when available with view=option_chain, quote, historical, or search.",
+		"Retrieve market data and search instruments. Use mode=option_chain with underlying and optional exchange/expiry to discover a complete indexed option chain, paginated by strike with expiries, spot and future references; fetch quotes separately. Use mode=quote for full market snapshots (OHLC, volume, bid/ask depth, OI) for up to 500 instruments, mode=ltp for last traded price only (lighter), mode=ohlc for today's OHLC, mode=historical for historical candle data, mode=search to find instruments by name, symbol, ISIN, or token across all exchanges. Search returns data/pagination/meta, sorted with exact symbol matches first, then by ID and token, with default limit 100 and maximum 500. Quote/LTP/OHLC return data/meta with missing_instruments; entirely unresolved requests return an error. Search results come from the BOD instrument master by default; set include_live_quote=true to enrich returned results with live quote fields and quote_timestamp. For an interactive option chain, quote, historical chart, or instrument finder, use open_kite_view when available with view=option_chain, quote, historical, or search.",
 		marketSchema,
 	)
 	// Negotiated protocols through 2025-11-25 require object output schemas
@@ -229,7 +229,7 @@ func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 			return handler.WithKiteClient(request, "market_historical", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				data, err := client.GetHistoricalData(instrumentToken, interval, fromDate, toDate, continuous, oi)
 				if err != nil {
-					return NewToolResultError("Failed to get historical data"), nil
+					return NewToolResultError(fmt.Sprintf("Failed to get historical data: %s", err)), nil
 				}
 				if data == nil {
 					data = make([]kiteconnect.HistoricalData, 0)
@@ -369,9 +369,20 @@ func handleMarketSearch(handler *BaseToolHandler, manager *kc.Manager, args map[
 		return NewToolResultError("Instrument not found"), nil
 	}
 
-	// Sort every multi-result lookup before slicing, including ISIN and
-	// underlying searches. Instrument token breaks ties in the public ID.
+	// Exact symbols precede partial matches so derivatives cannot push the
+	// requested cash instrument beyond the first page. Keep ties deterministic.
+	query := strings.TrimSpace(SafeAssertString(args["query"], ""))
+	exactSymbol := func(inst instruments.Instrument) bool {
+		return searchMode == "search" && query != "" &&
+			(strings.EqualFold(inst.Tradingsymbol, query) || strings.EqualFold(inst.ID, query))
+	}
 	slices.SortFunc(out, func(a, b instruments.Instrument) int {
+		if exactSymbol(a) != exactSymbol(b) {
+			if exactSymbol(a) {
+				return -1
+			}
+			return 1
+		}
 		if order := cmp.Compare(a.ID, b.ID); order != 0 {
 			return order
 		}
@@ -390,10 +401,14 @@ func handleMarketSearch(handler *BaseToolHandler, manager *kc.Manager, args map[
 
 		instrumentIDs := make([]string, 0, len(paginatedData))
 		for _, instrument := range paginatedData {
-			instrumentIDs = append(instrumentIDs, instrument.ID)
+			if instrument.Exchange != "INTL" {
+				instrumentIDs = append(instrumentIDs, instrument.ID)
+			}
 		}
 
-		liveQuotes, err = client.GetQuote(instrumentIDs...)
+		if len(instrumentIDs) > 0 {
+			liveQuotes, err = client.GetQuote(instrumentIDs...)
+		}
 		if err != nil {
 			return NewToolResultError("Failed to get live quotes for search enrichment"), nil
 		}
@@ -402,6 +417,7 @@ func handleMarketSearch(handler *BaseToolHandler, manager *kc.Manager, args map[
 	finalData := make([]interface{}, len(paginatedData))
 	enrichedCount := 0
 	missingQuotes := make([]string, 0)
+	referenceOnly := make([]string, 0)
 	for i, instrument := range paginatedData {
 		var item map[string]interface{}
 		if verbosity == "compact" {
@@ -409,7 +425,10 @@ func handleMarketSearch(handler *BaseToolHandler, manager *kc.Manager, args map[
 		} else {
 			item = marketSearchFullResult(instrument)
 		}
-		if includeLiveQuote {
+		if instrument.Exchange == "INTL" {
+			referenceOnly = append(referenceOnly, instrument.ID)
+		}
+		if includeLiveQuote && instrument.Exchange != "INTL" {
 			if quote, ok := liveQuotes[instrument.ID]; ok {
 				enrichMarketSearchResult(item, quote.LastPrice, quote.LowerCircuitLimit, quote.UpperCircuitLimit, quote.OHLC, quote.Timestamp)
 				enrichedCount++
@@ -422,6 +441,9 @@ func handleMarketSearch(handler *BaseToolHandler, manager *kc.Manager, args map[
 	meta := map[string]interface{}{
 		"instrument_data_source": "bod_instruments",
 		"live_quote_enriched":    enrichedCount > 0,
+	}
+	if len(referenceOnly) > 0 {
+		meta["reference_only_instruments"] = referenceOnly
 	}
 	if includeLiveQuote {
 		fields := make([]string, 0)

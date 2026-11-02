@@ -30,10 +30,7 @@ func withTradeApproval(ctx context.Context, request *mcp.CallToolRequest, operat
 		return approvalFromContext(ctx, request, operation, details, execute)
 	}
 	if !supportsFormElicitation(requestCapabilities(request)) {
-		if ctx.Err() != nil {
-			return approvalFailure("cancelled", "Tool call was cancelled; no transaction was executed."), nil
-		}
-		return execute()
+		return approvalFailure("unsupported_client", "This client must support form elicitation to place, modify, or cancel orders. Use a client with form elicitation or manage the order in Kite; no transaction was executed."), nil
 	}
 	if request.ProtocolVersion() >= "2026-07-28" {
 		return approvalFromContext(ctx, request, operation, details, execute)

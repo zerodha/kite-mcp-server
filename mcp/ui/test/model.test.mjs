@@ -71,3 +71,10 @@ test('historical dates reject impossible calendar dates instead of normalizing t
   assert.throws(()=>historyArguments(111,'2026-02-30','2026-03-05'),/valid start date/);
   assert.equal(historyArguments(111,'2024-02-29','2024-03-01').from_date,'2024-02-29');
 });
+
+test('international reference rows are distinguished from NSE instruments',async()=>{
+  const {referenceOnly}=await import('../src/model.js');
+  assert.equal(referenceOnly({id:'INTL:RS',instrument_token:123}),true);
+  assert.equal(referenceOnly({exchange:'INTL',tradingsymbol:'RS'}),true);
+  assert.equal(referenceOnly({id:'NSE:INFY',instrument_token:408065}),false);
+});

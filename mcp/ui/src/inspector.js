@@ -1,5 +1,5 @@
 import { el, action, detailList, metric, rangeBar } from './dom.js';
-import { instrumentRef, rowIdentity, finite, formatCell, tone, receivedTime, dateIST, historyArguments, rowsFor, holdingMetrics, expiryFor, snapshotTime, holdingQuantity, optionStrike } from './model.js';
+import { instrumentRef, referenceOnly, rowIdentity, finite, formatCell, tone, receivedTime, dateIST, historyArguments, rowsFor, holdingMetrics, expiryFor, snapshotTime, holdingQuantity, optionStrike } from './model.js';
 import { priceChart } from './chart.js';
 
 export class Inspector {
@@ -20,7 +20,7 @@ export class Inspector {
     if(['quote','ltp','ohlc'].includes(mode)) { this.quote=row;this.quoteTime='From the main snapshot'; }
     this.container.hidden=false;this.onSelection(rowIdentity(row));this.render();
     this.container.querySelector('h2')?.focus({preventScroll:true});
-    if(this.requests.canCall()) this.loadQuote();
+    if(this.requests.canCall()&&!referenceOnly(row)) this.loadQuote();
   }
   close() {
     const opener=this.opener, key=this.row?rowIdentity(this.row):null;this.clear();
@@ -28,6 +28,7 @@ export class Inspector {
     target?.focus({preventScroll:true});
   }
   async loadQuote() {
+    if(referenceOnly(this.row))return;
     const generation=this.generation, version=this.quoteVersion=(this.quoteVersion||0)+1;this.quoteLoading=true;this.quoteError='';this.render();
     try {
       const payload=await this.requests.run('quote','market',{mode:'quote',instruments:[this.ref.id]});
@@ -40,6 +41,7 @@ export class Inspector {
     finally { if(generation===this.generation && version===this.quoteVersion){this.quoteLoading=false;this.render();} }
   }
   async loadHistory() {
+    if(referenceOnly(this.row))return;
     const generation=this.generation, version=this.chartVersion=(this.chartVersion||0)+1;
     let args;
     try {args=historyArguments(this.ref.token,this.from,this.to,this.interval);}catch(error){this.chartError=error.message;this.render();return;}
@@ -104,10 +106,11 @@ export class Inspector {
     const from=input('From','from','date',this.from),to=input('To','to','date',this.to);
     const label=el('label','Interval'),interval=el('select');interval.name='interval';interval.id='chart-interval';
     for(const [id,text] of [['minute','1 minute'],['5minute','5 minutes'],['15minute','15 minutes'],['60minute','1 hour'],['day','Daily']]){const option=el('option',text);option.value=id;interval.append(option);}interval.value=this.interval;label.append(interval);form.append(label);
-    const button=el('button',this.chartLoading?'Loading…':'Load chart');button.type='button';button.id='chart-load';button.disabled=this.chartLoading||!this.requests.canCall()||!this.ref.token;form.append(button);
+    const button=el('button',this.chartLoading?'Loading…':'Load chart');button.type='button';button.id='chart-load';button.disabled=this.chartLoading||!this.requests.canCall()||!this.ref.token||referenceOnly(this.row);form.append(button);
     const save=()=>{this.from=from.value;this.to=to.value;this.interval=interval.value;};from.onchange=save;to.onchange=save;interval.onchange=save;
     button.onclick=event=>{event.preventDefault();save();this.loadHistory();};target.append(form);
-    if(!this.ref.token)target.append(el('p','A chart needs an instrument token. Load a full quote or use instrument search.','muted'));
+    if(referenceOnly(this.row))target.append(el('p','This international instrument is reference data only. Kite quotes and historical charts are unavailable.','muted'));
+    else if(!this.ref.token)target.append(el('p','A chart needs an instrument token. Load a full quote or use instrument search.','muted'));
     if(this.chartError)target.append(el('p',this.chartError,'panel-error'));
     if(this.chartLoading)target.append(el('p','Loading historical candles…','muted'));
     if(this.history) {
@@ -133,8 +136,8 @@ export class Inspector {
     const q=this.quote,change=finite(q?.last_price)&&finite(q?.ohlc?.close)?q.last_price-q.ohlc.close:null;
     quoteLine.append(el('strong',q?`₹${formatCell(q.last_price,'last_price')}`:'—','quote-price'));
     if(finite(change))quoteLine.append(el('span',`Day change ${formatCell(change,'price_change')}${q.ohlc.close?` (${formatCell(change/q.ohlc.close*100,'return_percent')})`:''}`,tone(change)));
-    const refresh=action(this.quoteLoading?'Loading quote…':'Refresh quote',()=>this.loadQuote(),'quiet');refresh.id='inspector-quote-refresh';refresh.disabled=this.quoteLoading||!this.requests.canCall();this.container.append(quoteLine);
-    this.container.append(el('p',this.quoteTime||'Quote not loaded','muted'));
+    const refresh=action(this.quoteLoading?'Loading quote…':'Refresh quote',()=>this.loadQuote(),'quiet');refresh.id='inspector-quote-refresh';refresh.disabled=this.quoteLoading||!this.requests.canCall()||referenceOnly(this.row);this.container.append(quoteLine);
+    this.container.append(el('p',referenceOnly(this.row)?'International reference instrument. Kite quotes and historical charts are unavailable.':this.quoteTime||'Quote not loaded','muted'));
     if(snapshotTime(q?.timestamp||q?.quote_timestamp))this.container.append(el('p',`Quote timestamp: ${snapshotTime(q.timestamp||q.quote_timestamp)}`,'muted'));
     const quoteActions=el('div',null,'quote-actions');quoteActions.append(refresh);this.container.append(quoteActions);
     if(this.quoteError)this.container.append(el('p',`${this.quoteError}${q?' Displayed quote is the previous snapshot.':''}`,'panel-error'));
@@ -144,7 +147,7 @@ export class Inspector {
     for(const name of names) {
       const button=action(name[0].toUpperCase()+name.slice(1),()=>{
         this.tab=name;this.render();this.container.querySelector(`#inspector-tab-${name}`)?.focus();
-        if(name==='chart'&&!this.history&&!this.chartLoading&&this.ref.token&&this.requests.canCall())this.loadHistory();
+        if(name==='chart'&&!referenceOnly(this.row)&&!this.history&&!this.chartLoading&&this.ref.token&&this.requests.canCall())this.loadHistory();
       });
       button.id=`inspector-tab-${name}`;button.setAttribute('role','tab');button.setAttribute('aria-selected',String(this.tab===name));button.setAttribute('aria-controls','inspector-body');button.tabIndex=this.tab===name?0:-1;
       button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const index=event.key==='Home'?0:event.key==='End'?names.length-1:(names.indexOf(this.tab)+(event.key==='ArrowRight'?1:-1)+names.length)%names.length;tabs.querySelectorAll('button')[index].click();};

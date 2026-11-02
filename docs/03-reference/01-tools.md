@@ -73,10 +73,10 @@ in both views; use `net` to assess current exposure and never sum the two views.
 
 Manage orders placed during the current trading day.
 
-Placement, modification, and cancellation use form elicitation when the client
-advertises support (including legacy `elicitation: {}`). Clients that do not
-advertise form support, including URL-only clients, execute through the normal
-tool call without an additional server approval form. All order modes remain
+Placement, modification, and cancellation require form elicitation support
+(including legacy `elicitation: {}`). Clients that do not advertise form support,
+including URL-only clients, receive an `unsupported_client` error without
+executing the mutation. All order modes remain
 available in `tools/list`. Authentication and order validation still apply.
 
 For capable clients, MCP 2026-07-28 uses per-request capabilities and
@@ -90,7 +90,7 @@ omitted modification fields remain unchanged. Placement defaults validity to DAY
 The response must have `action: "accept"` and boolean `content.confirm: true`.
 An `approved=true` tool argument never grants approval.
 
-When elicitation is used, declines, cancellations, missing or invalid
+Declines, cancellations, missing or invalid
 confirmation, disconnects, and the two-minute deadline block execution. An
 elicitation failure never falls back to direct execution. Continuations still
 validate the original approval even if capabilities are omitted on the retry.
@@ -106,7 +106,7 @@ release capacity.
 
 Each approval authorizes one API attempt with the parameters shown. The server
 does not automatically retry mutations; after an ambiguous API failure, inspect
-the order book before initiating another trade. On clients supporting form elicitation, a repeated tool call requires
+the order book before initiating another trade. A repeated tool call requires
 fresh approval. This is client-mediated consent through a trusted MCP client,
 not independent user authentication. GTT and Alerts/ATO are outside this approval
 gate.

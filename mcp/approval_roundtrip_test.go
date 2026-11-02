@@ -81,20 +81,20 @@ func TestApprovalModernDiscoveryAndWire(t *testing.T) {
 			require.Contains(t, string(schema), `"cancel"`)
 		}
 	}
-	for _, cs := range sessions {
+	for i, cs := range sessions {
 		result, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "orders", Arguments: map[string]any{"mode": "place", "tradingsymbol": "IDEA"}})
 		require.NoError(t, err)
-		require.False(t, result.IsError)
+		require.Equal(t, i != 1, result.IsError)
 	}
 	require.Equal(t, 1, elicited)
-	require.Equal(t, 3, executed)
+	require.Equal(t, 1, executed)
 	require.Positive(t, modernCalls, "must exercise 2026 discovery and request metadata")
 	// Omitting capabilities on an approval retry cannot bypass a decline.
 	responseAction = "decline"
 	declined, err := sessions[1].CallTool(ctx, &sdk.CallToolParams{Name: "orders", Arguments: map[string]any{"mode": "place", "tradingsymbol": "IDEA"}})
 	require.NoError(t, err)
 	require.True(t, declined.IsError)
-	require.Equal(t, 3, executed)
+	require.Equal(t, 1, executed)
 
 	// A previously capable session cannot supply capabilities for a later request.
 	for _, override := range []string{"omit", "url"} {
@@ -106,10 +106,10 @@ func TestApprovalModernDiscoveryAndWire(t *testing.T) {
 		require.Contains(t, string(schema), `"place"`)
 		result, err := sessions[1].CallTool(ctx, &sdk.CallToolParams{Name: "orders", Arguments: map[string]any{"mode": "place"}})
 		require.NoError(t, err)
-		require.False(t, result.IsError)
+		require.True(t, result.IsError)
 	}
 	require.Equal(t, 2, elicited)
-	require.Equal(t, 5, executed)
+	require.Equal(t, 1, executed)
 }
 
 func TestApprovalRoundTripStateIntegrity(t *testing.T) {

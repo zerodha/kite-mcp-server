@@ -295,3 +295,47 @@ func TestPositionViewsRemainDistinctAcrossPages(t *testing.T) {
 		require.Equal(t, offset == 0, pagination["has_more"])
 	}
 }
+
+func TestFinderExactSymbolPrecedesDerivativePages(t *testing.T) {
+	manager := readContractManager(t, func(http.ResponseWriter, *http.Request) { t.Fatal("unexpected quote request") })
+	fixtures := map[uint32]*instruments.Instrument{
+		408065: {ID: "NSE:INFY", InstrumentToken: 408065, Exchange: "NSE", Tradingsymbol: "INFY"},
+	}
+	for i := 0; i < 150; i++ {
+		token := uint32(1000 + i)
+		fixtures[token] = &instruments.Instrument{ID: fmt.Sprintf("NFO:INFY%03dCE", i), InstrumentToken: token, Exchange: "NFO", Tradingsymbol: fmt.Sprintf("INFY%03dCE", i)}
+	}
+	manager.Instruments.LoadMap(fixtures)
+	for _, field := range []string{"id", "tradingsymbol"} {
+		result := callReadContract(t, &MarketTool{}, manager, map[string]interface{}{"mode": "search", "query": "infy", "filter_on": field})
+		require.False(t, result.IsError)
+		response := readContractJSON(t, result)
+		require.Equal(t, "NSE:INFY", response["data"].([]interface{})[0].(map[string]interface{})["id"])
+		require.Equal(t, float64(151), response["pagination"].(map[string]interface{})["total"])
+	}
+}
+
+func TestFinderInternationalReferencesDoNotRequestQuotes(t *testing.T) {
+	manager := readContractManager(t, func(http.ResponseWriter, *http.Request) { t.Fatal("reference instrument must not call Kite quotes") })
+	manager.Instruments.LoadMap(map[uint32]*instruments.Instrument{
+		123: {ID: "INTL:RS", InstrumentToken: 123, Exchange: "INTL", Tradingsymbol: "RS"},
+	})
+	result := callReadContract(t, &MarketTool{}, manager, map[string]interface{}{"mode": "search", "query": "RS", "include_live_quote": true})
+	require.False(t, result.IsError)
+	response := readContractJSON(t, result)
+	meta := response["meta"].(map[string]interface{})
+	require.Equal(t, []interface{}{"INTL:RS"}, meta["reference_only_instruments"])
+	require.Empty(t, meta["missing_live_quotes"])
+	require.Len(t, response["data"], 1)
+}
+
+func TestHistoricalFailureIncludesUpstreamReason(t *testing.T) {
+	manager := readContractManager(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"status":"error","error_type":"InputException","message":"invalid token"}`))
+	})
+	result := callReadContract(t, &MarketTool{}, manager, map[string]interface{}{"mode": "historical", "instrument_token": 123, "interval": "day", "from_date": "2026-10-01", "to_date": "2026-10-22"})
+	require.True(t, result.IsError)
+	require.Contains(t, result.Content[0].(*mcpsdk.TextContent).Text, "Failed to get historical data: invalid token")
+}

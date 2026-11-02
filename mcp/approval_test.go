@@ -96,9 +96,7 @@ func TestOrdersElicitationWire(t *testing.T) {
 						_, _ = w.Write([]byte(`{"status":"success","data":[{"order_id":"order-1","exchange":"NSE","tradingsymbol":"INFY","transaction_type":"BUY","quantity":3,"product":"CNC","order_type":"LIMIT","price":1500,"validity":"DAY"}]}`))
 						return
 					}
-					if decision != "unsupported" && decision != "url only" {
-						require.True(t, approved.Load(), "Capable clients must explicitly approve")
-					}
+					require.True(t, approved.Load(), "Every mutation must be explicitly approved")
 					mutations.Add(1)
 					require.NoError(t, r.ParseForm())
 					if mode != "cancel" {
@@ -157,15 +155,10 @@ func TestOrdersElicitationWire(t *testing.T) {
 				args := map[string]any{"mode": mode, "exchange": "NSE", "tradingsymbol": "INFY", "transaction_type": "BUY", "quantity": 3, "product": "CNC", "order_type": "LIMIT", "price": 1500, "validity": "DAY", "order_id": "order-1", "approved": true}
 				result, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "orders", Arguments: args})
 				require.NoError(t, err)
-				fallback := decision == "unsupported" || decision == "url only"
-				allowed := decision == "accept" || decision == "api failure" || fallback
+				allowed := decision == "accept" || decision == "api failure"
 				if allowed {
 					require.EqualValues(t, 1, mutations.Load())
-					if fallback {
-						require.Zero(t, elicitations.Load())
-					} else {
-						require.EqualValues(t, 1, elicitations.Load())
-					}
+					require.EqualValues(t, 1, elicitations.Load())
 				} else {
 					require.Zero(t, mutations.Load())
 					require.True(t, result.IsError)
@@ -187,7 +180,11 @@ func TestOrdersElicitationWire(t *testing.T) {
 				}
 				if decision == "unsupported" || decision == "url only" {
 					require.Zero(t, elicitations.Load())
-					require.False(t, result.IsError)
+					require.True(t, result.IsError)
+					require.Contains(t, result.Content[0].(*sdk.TextContent).Text, "unsupported_client")
+					read, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "orders", Arguments: map[string]any{"mode": "list"}})
+					require.NoError(t, err)
+					require.False(t, read.IsError, "read-only orders remain available")
 				}
 			})
 		}

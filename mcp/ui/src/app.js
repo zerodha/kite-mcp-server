@@ -1,5 +1,5 @@
 import { App, applyHostStyleVariables } from '@modelcontextprotocol/ext-apps';
-import { allowedTools, requestKey, readResult, rowsFor, columnsFor, visibleRows, pageArguments, formatCell, columnLabel, isMoney, isSigned, instrumentRef, rowIdentity, expiryFor, finite, tone, receivedTime, optionStrike } from './model.js';
+import { allowedTools, requestKey, readResult, rowsFor, columnsFor, visibleRows, pageArguments, formatCell, columnLabel, isMoney, isSigned, instrumentRef, referenceOnly, rowIdentity, expiryFor, finite, tone, receivedTime, optionStrike } from './model.js';
 import { el, action, detailList } from './dom.js';
 import { PanelRequests } from './requests.js';
 import { Inspector } from './inspector.js';
@@ -35,7 +35,7 @@ function showWidget(view){
   for(const name of ['orders','gtt','options'])$(name+'-view').hidden=view!==name;
   const current=view==='snapshot'?args.mode:view;
   for(const button of $('widget-nav').querySelectorAll('button'))button.setAttribute('aria-pressed',String(button.dataset.widget===current));
-  $('refresh-prices').closest('#price-refresh').hidden=view!=='snapshot'||!['holdings','positions','search'].includes(args.mode)||!rows.some(instrumentRef);
+  $('refresh-prices').closest('#price-refresh').hidden=view!=='snapshot'||!['holdings','positions','search'].includes(args.mode)||!rows.some(row=>instrumentRef(row)&&!referenceOnly(row));
   if(view!=='snapshot')$('title').textContent={orders:'Orders',gtt:'GTT',options:'Option chain'}[view];
   else $('title').textContent=modes[args.mode]||'Kite';
 }
@@ -145,7 +145,7 @@ function renderTable(visible,container){
 function render(){
   const previousChart=$('content').querySelector('.portfolio-chart');
   if(previousChart)chartStates.set(previousChart.dataset.mode,{open:previousChart.open,basis:previousChart.querySelector('select')?.value});
-  $('price-refresh').hidden=!['holdings','positions','search'].includes(args.mode)||!rows.some(instrumentRef)||waiting||Boolean(errorMessage)||cancelled;
+  $('price-refresh').hidden=!['holdings','positions','search'].includes(args.mode)||!rows.some(row=>instrumentRef(row)&&!referenceOnly(row))||waiting||Boolean(errorMessage)||cancelled;
   $('price-status').hidden=$('price-refresh').hidden||!priceMessage;
   $('price-status').textContent=priceMessage;
   $('title').textContent=modes[args.mode]||(args.mode?columnLabel(args.mode):'Kite');
@@ -204,6 +204,7 @@ function render(){
   if(payload?.meta?.timestamp_note)notes.push(payload.meta.timestamp_note);
   if(payload?.meta?.timezone)notes.push(`Timezone: ${payload.meta.timezone}.`);
   if(args.mode==='historical')notes.push('Chart shows all candles in this snapshot, unaffected by table filters.');
+  if(payload?.meta?.reference_only_instruments?.length)notes.push(`International reference data only: ${payload.meta.reference_only_instruments.join(', ')}. Kite quotes and charts are unavailable.`);
   if(args.mode==='search')notes.push('Instrument-master prices are reference values unless enriched with a timestamped quote. Contract filters apply to this page. Select an instrument for a fresh quote.');
   if(connected&&!app.getHostCapabilities()?.serverTools)notes.push('This host does not support additional requests from the app. Ask for another snapshot in chat.');
   $('note').textContent=notes.join(' ');showWidget(activeWidget);setBusy();
@@ -255,7 +256,7 @@ async function call(nextArgs,{refreshSummary=true}={}){
 }
 $('refresh-prices').onclick=async()=>{
   if(priceBusy||waiting||inFlight||!canCall())return;
-  const instruments=[...new Set(rows.map(row=>instrumentRef(row)?.id).filter(Boolean))];
+  const instruments=[...new Set(rows.filter(row=>!referenceOnly(row)).map(row=>instrumentRef(row)?.id).filter(Boolean))];
   if(!instruments.length)return;
   const generation=++priceGeneration;priceBusy=true;priceMessage='Requesting quotes for this page…';render();
   try {

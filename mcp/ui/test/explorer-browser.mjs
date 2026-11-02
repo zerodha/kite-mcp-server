@@ -260,6 +260,19 @@ try{
  await page.waitForFunction(()=>window.calls.some(call=>call.arguments.query==='Infosys'&&call.arguments.filter_on==='name'));
  await app.locator('.instrument-row:visible').waitFor();
  assert.match(await app.locator('.instrument-row:visible').textContent(),/INFY/);
+ // Reference instruments never request unsupported quotes or charts.
+ await page.evaluate(()=>{
+  window.referenceStart=window.calls.length;
+  window.emit('market',{mode:'search',query:'RS',verbosity:'full'},{data:[{id:'INTL:RS',exchange:'INTL',tradingsymbol:'RS',instrument_token:999}],meta:{reference_only_instruments:['INTL:RS']}});
+ });
+ await app.locator('.instrument-row:visible').waitFor();
+ await app.locator('.instrument-row:visible').click();
+ await app.locator('#inspector').getByText('International reference instrument. Kite quotes and historical charts are unavailable.',{exact:true}).waitFor();
+ assert.equal(await app.locator('#inspector-quote-refresh').isDisabled(),true);
+ await app.getByRole('tab',{name:'Chart',exact:true}).click();
+ assert.equal(await app.locator('#chart-load').isDisabled(),true);
+ assert.equal(await page.evaluate(()=>window.calls.length-window.referenceStart),0);
+ await app.getByRole('button',{name:'Back to list',exact:true}).click();
  // Unsettled holdings contribute to both quantity and derived values.
  await page.evaluate(()=>window.emit('portfolio',{mode:'holdings'},{data:[{tradingsymbol:'T1TEST',exchange:'NSE',instrument_token:777,quantity:0,t1_quantity:10,average_price:100,last_price:150,pnl:500}]}));
  await app.getByRole('heading',{name:'Holdings',exact:true}).waitFor();
