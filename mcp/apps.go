@@ -83,6 +83,7 @@ func registerAppResource(server *mcp.Server) {
 // handler with an explicit, bounded initial snapshot.
 func registerAppLauncher(server *mcp.Server, manager *kc.Manager) {
 	tool := NewTool(appLauncher, "Open Kite to view read-only portfolio and market widgets.", json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`))
+	tool.OutputSchema = accountOutputSchema
 	tool.Title = "Kite"
 	tool.Annotations = &mcp.ToolAnnotations{ReadOnlyHint: true}
 	tool.Meta = mcp.Meta{
@@ -178,6 +179,11 @@ func registerReadWidgetTools(server *mcp.Server, manager *kc.Manager, excluded m
 		}
 		schema, _ := json.Marshal(map[string]any{"type": "object", "properties": properties, "required": []string{"mode"}, "additionalProperties": false})
 		tool := NewTool(spec.name, spec.description, schema)
+		if spec.original == "orders" {
+			tool.OutputSchema = ordersOutputSchema
+		} else {
+			tool.OutputSchema = gttOutputSchema
+		}
 		tool.Annotations = &mcp.ToolAnnotations{ReadOnlyHint: true}
 		tool.Meta = mcp.Meta{"ui": map[string]any{"visibility": []string{"app"}}}
 		server.AddTool(tool, wrapHandler(withAppData(spec.name, readWidgetHandler(spec.modes, spec.handler))))

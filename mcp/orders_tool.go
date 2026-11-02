@@ -141,9 +141,10 @@ var ordersSchema = json.RawMessage(`{
 }`)
 
 func (*OrdersTool) Definition() *mcp.Tool {
-	return NewTool("orders",
+	return newDataTool("orders",
 		"Manage orders. Placement, modification, and cancellation require user approval. Clients with form elicitation show a form. Other clients receive a browser approval link (or request one with approval_method=browser); share it with the user and do not open or approve it on their behalf. An approval_required result means no order was submitted: do not repeat the order call. Use approval_status with its approval_id to check the outcome. Users can explicitly allow future orders for this client from the browser approval page. Use permissions to show or manage this permission. Use mode=list to see all orders today, mode=history for an order's status trail, mode=trades for fills on a specific order, mode=all_trades for all trades today, mode=place to place a new order, mode=modify to change an open order, mode=cancel to cancel an open order. List and all_trades modes return data/pagination with default limit 100 and maximum 500. To show a read-only interactive order book with timeline and fills, use open_kite_view when available with view=orders. Only request mutations when the user asks for the action. After approval_status, inspect both status and the nested submission result; failed or declined is not a successful submission. Do not poll indefinitely. Continue to use orders directly for transaction requests.",
 		ordersSchema,
+		ordersOutputSchema,
 	)
 }
 

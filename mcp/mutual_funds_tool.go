@@ -24,9 +24,10 @@ var mutualFundsSchema = json.RawMessage(`{
 }`)
 
 func (*MutualFundsTool) Definition() *mcp.Tool {
-	return NewTool("mutual_funds",
+	return newDataTool("mutual_funds",
 		"Retrieve mutual fund data from Coin (Zerodha's mutual fund platform). Use mode=holdings to get all mutual fund holdings.",
 		mutualFundsSchema,
+		mutualFundsOutputSchema,
 	)
 }
 

@@ -116,6 +116,9 @@ func callBrowserOrder(t *testing.T, cs *sdk.ClientSession, args map[string]any) 
 	t.Helper()
 	result, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "orders", Arguments: args})
 	require.NoError(t, err)
+	if !result.IsError && len(result.InputRequests) == 0 {
+		validateStructuredOutput(t, (&OrdersTool{}).Definition(), result)
+	}
 	return result
 }
 func browserApprovalID(t *testing.T, result *sdk.CallToolResult) string {

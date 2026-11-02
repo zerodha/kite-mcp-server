@@ -212,6 +212,7 @@ type HelpTool struct{}
 
 func (*HelpTool) Definition() *sdk.Tool {
 	t := NewTool("help", "Browse Kite workflows and recipes as a tree. Start with key=/, then /client-integration, /orders, /holdings, /technical-analysis, /daily-review, or /troubleshooting. Follow child keys for focused recipes. Reads bundled Markdown only; does not execute trades or fetch account data.", json.RawMessage(`{"type":"object","properties":{"key":{"type":"string","maxLength":1024,"default":"/","description":"Exact help path (maximum 1024 UTF-8 bytes), e.g. /orders/reconcile. Omit for the root index."}},"additionalProperties":false}`))
+	t.OutputSchema = helpOutputSchema
 	closed := false
 	t.Annotations = &sdk.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: &closed}
 	return t
@@ -280,7 +281,9 @@ func (c *helpCatalog) lookup(key string) *sdk.CallToolResult {
 	if key != "/" {
 		text += "\nParent key: `" + path.Dir(key) + "`\n"
 	}
-	return NewToolResultText(text)
+	result := NewToolResultText(text)
+	result.StructuredContent = map[string]any{"key": key, "text": text}
+	return result
 }
 
 func (c *helpCatalog) children(key string) []string {

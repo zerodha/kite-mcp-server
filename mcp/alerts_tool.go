@@ -99,9 +99,10 @@ var alertsSchema = json.RawMessage(`{
 }`)
 
 func (*AlertsTool) Definition() *mcp.Tool {
-	return NewTool("alerts",
+	return newDataTool("alerts",
 		"Manage Kite price alerts - create, modify, delete, and retrieve alerts with optional history",
 		alertsSchema,
+		alertsOutputSchema,
 	)
 }
 

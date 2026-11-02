@@ -61,7 +61,7 @@ func (h *BaseToolHandler) WithKiteClientContext(ctx context.Context, request *mc
 	return fn(client)
 }
 
-// MarshalResponse marshals data to JSON and returns an MCP text result
+// MarshalResponse preserves JSON text and also exposes an object structured result.
 func (h *BaseToolHandler) MarshalResponse(data interface{}, toolName string) (*mcp.CallToolResult, error) {
 	v, err := json.Marshal(data)
 	if err != nil {
@@ -70,7 +70,9 @@ func (h *BaseToolHandler) MarshalResponse(data interface{}, toolName string) (*m
 	}
 
 	h.manager.Logger.Debug("Response marshaled successfully", "tool", toolName, "response_size", len(v))
-	return NewToolResultText(string(v)), nil
+	result := NewToolResultText(string(v))
+	result.StructuredContent = structuredJSON(v)
+	return result, nil
 }
 
 // HandleAPICall wraps common API call pattern with error handling and response marshalling

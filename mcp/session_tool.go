@@ -24,9 +24,10 @@ var sessionSchema = json.RawMessage(`{
 }`)
 
 func (*SessionTool) Definition() *mcp.Tool {
-	return NewTool("session",
+	return newDataTool("session",
 		"Inspect or invalidate the current authenticated session. Use mode=status to check session state and mode=logout to invalidate the current session.",
 		sessionSchema,
+		sessionOutputSchema,
 	)
 }
 

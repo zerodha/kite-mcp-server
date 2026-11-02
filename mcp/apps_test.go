@@ -62,6 +62,7 @@ func TestAppsMixedClientDiscoveryAndReads(t *testing.T) {
 			}
 			require.Len(t, listing.Tools, expectedCount)
 			for _, tool := range listing.Tools {
+				require.NotNil(t, tool.OutputSchema, tool.Name)
 				require.NotEqual(t, "orders", tool.Name)
 				if tool.Name == "gtt_read" {
 					require.True(t, tool.Annotations.ReadOnlyHint)

@@ -172,7 +172,7 @@ browser-only revocation URL. User-facing documentation lives in Order Approvals.
 
 - Resource: `ui://kite/explorer-v1.html`, MIME type `text/html;profile=mcp-app`.
 - Tool linkage: `_meta.ui.resourceUri`, with the official SDK helper's compatibility alias `_meta["ui/resourceUri"]`.
-- Data: existing `content` is retained, with object `structuredContent` for rendering. Existing market output schemas and structured responses remain intact.
+- Data: all data tools declare object-root output schemas. `MarshalResponse` retains the original JSON `content` and also returns `structuredContent`: objects keep their fields, while bare lists and null use a `data` wrapper. Raw JSON bytes preserve upstream encoders and integer precision. Help retains Markdown and adds `key`/`text` structured fields. Errors and pending protocol elicitation responses need not contain structured data. Schemas leave upstream account fields open because grouped modes and Kite API responses vary. Apps consume the same structured results; the existing market contract remains intact.
 - Result metadata: `_meta["trade.kite/app"]` identifies the originating tool and arguments. This lets the shared resource refresh the correct request even if a host omits `hostContext.toolInfo`. Launcher results also carry an `origin` with the launcher tool and its original empty arguments, so the UI can correlate the launch input with the portfolio snapshot without host tool metadata.
 - Bridge: the pinned official `@modelcontextprotocol/ext-apps` SDK handles initialization, notifications, tool calls, resizing and teardown.
 - Build: bundled HTML is committed and embedded in Go. Ordinary Go builds do not require Node.js, npm, or external asset access.

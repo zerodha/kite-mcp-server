@@ -66,6 +66,8 @@ func registerViewLauncher(server *mcp.Server, manager *kc.Manager, excluded map[
 	schema, _ := json.Marshal(map[string]any{"type": "object", "properties": properties, "required": []string{"view"}, "additionalProperties": false})
 	tool := NewTool(viewLauncher, "Open an interactive read-only Kite widget when the user asks to see/show a portfolio treemap, holdings, position P&L chart, funds, orders or order timeline, GTT monitor, option chain, quote/depth, historical chart, or instrument finder. Choose the matching view. This displays the widget and its initial data; it never places, modifies, or cancels trades. For text-only answers or hosts without Apps support, use portfolio, market, orders, or gtt data tools instead.", schema)
 	tool.Title = "Kite"
+	// Views can return account objects as well as market data envelopes.
+	tool.OutputSchema = json.RawMessage(`{"type":"object","description":"Read-only snapshot from the selected view; shape matches its underlying data tool."}`)
 	tool.Annotations = &mcp.ToolAnnotations{ReadOnlyHint: true}
 	tool.Meta = mcp.Meta{"ui": map[string]any{"resourceUri": appResourceURI, "visibility": []string{"model", "app"}}, "ui/resourceUri": appResourceURI}
 	server.AddTool(tool, wrapHandler(viewLauncherHandler(manager, excluded)))

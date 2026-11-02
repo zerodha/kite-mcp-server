@@ -41,8 +41,11 @@ Most Kite tools select an operation with `mode`; [[Tools]] lists their inputs.
 
 - Check `isError` and failed calls before interpreting results. A completed
   script does not mean every request succeeded.
-- For market results, use `structuredContent` when available. Other results may
-  contain JSON in text blocks; sign-in instructions and errors can be plain text.
+- Prefer `structuredContent` for successful tool results. JSON objects retain
+  their fields; bare lists and null responses are wrapped as `{ "data": ... }`.
+  The original JSON text is retained for clients that need it. Help returns
+  `{ "key": ..., "text": ... }` alongside its original Markdown. Check
+  `isError` first; errors and sign-in instructions can be plain text.
 - Fetch subsequent pages using `pagination.from + pagination.returned` while
   `pagination.has_more` is true. Stop and report an inconsistent empty page.
 - Combine independent reads in small parallel batches. Resolve an instrument
