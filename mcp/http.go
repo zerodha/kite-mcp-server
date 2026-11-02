@@ -16,6 +16,9 @@ func NewHTTPHandler(server *sdk.Server, options *sdk.StreamableHTTPOptions) http
 	legacyOptions.Stateless = false
 	modernOptions := legacyOptions
 	modernOptions.Stateless = true
+	// Modern POSTs own their whole lifecycle. Disconnects must cancel tool work,
+	// especially before a queued account mutation reaches the Kite API.
+	modernOptions.PropagateRequestCancellation = true
 	getServer := func(*http.Request) *sdk.Server { return server }
 	legacy := sdk.NewStreamableHTTPHandler(getServer, &legacyOptions)
 	modern := sdk.NewStreamableHTTPHandler(getServer, &modernOptions)

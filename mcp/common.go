@@ -75,7 +75,11 @@ func (h *BaseToolHandler) MarshalResponse(data interface{}, toolName string) (*m
 
 // HandleAPICall wraps common API call pattern with error handling and response marshalling
 func (h *BaseToolHandler) HandleAPICall(request *mcp.CallToolRequest, toolName string, apiCall func(client *kiteconnect.Client) (interface{}, error)) (*mcp.CallToolResult, error) {
-	return h.WithKiteClient(request, toolName, func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+	return h.HandleAPICallContext(context.Background(), request, toolName, apiCall)
+}
+
+func (h *BaseToolHandler) HandleAPICallContext(ctx context.Context, request *mcp.CallToolRequest, toolName string, apiCall func(client *kiteconnect.Client) (interface{}, error)) (*mcp.CallToolResult, error) {
+	return h.WithKiteClientContext(ctx, request, toolName, func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 		data, err := apiCall(client)
 		if err != nil {
 			h.manager.Logger.Error("API call failed", "tool", toolName, "error", err)
@@ -274,7 +278,7 @@ func CreatePaginatedResponse[T any](data []T, params PaginationParams, total int
 
 // GetArguments extracts arguments from the request as a map
 func GetArguments(request *mcp.CallToolRequest) map[string]interface{} {
-	if request.Params == nil || request.Params.Arguments == nil {
+	if request == nil || request.Params == nil || request.Params.Arguments == nil {
 		return make(map[string]interface{})
 	}
 	var args map[string]interface{}
@@ -288,7 +292,7 @@ func GetArguments(request *mcp.CallToolRequest) map[string]interface{} {
 func SimpleToolHandler(manager *kc.Manager, toolName string, apiCall func(client *kiteconnect.Client) (interface{}, error)) ToolHandler {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return handler.HandleAPICall(request, toolName, apiCall)
+		return handler.HandleAPICallContext(ctx, request, toolName, apiCall)
 	}
 }
 
@@ -300,7 +304,7 @@ func PaginatedToolHandler[T any](manager *kc.Manager, toolName string, apiCall f
 		if err != nil {
 			return NewToolResultError(err.Error()), nil
 		}
-		return handler.WithKiteClient(request, toolName, func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+		return handler.WithKiteClientContext(ctx, request, toolName, func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 			data, err := apiCall(client)
 			if err != nil {
 				handler.manager.Logger.Error("API call failed", "tool", toolName, "error", err)

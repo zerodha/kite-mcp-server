@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"math"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
@@ -20,7 +21,9 @@ var gttSchema = json.RawMessage(`{
 			"enum": ["list", "place", "modify", "delete"]
 		},
 		"trigger_id": {
-			"type": "number",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 2147483647,
 			"description": "GTT trigger ID (required for modify and delete modes)"
 		},
 		"exchange": {
@@ -57,7 +60,9 @@ var gttSchema = json.RawMessage(`{
 			"description": "Trigger price (for single-leg GTT)"
 		},
 		"quantity": {
-			"type": "number",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 2147483647,
 			"description": "Order quantity (for single-leg GTT)"
 		},
 		"limit_price": {
@@ -69,7 +74,9 @@ var gttSchema = json.RawMessage(`{
 			"description": "Upper trigger price (for two-leg GTT)"
 		},
 		"upper_quantity": {
-			"type": "number",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 2147483647,
 			"description": "Quantity for the upper leg (for two-leg GTT)"
 		},
 		"upper_limit_price": {
@@ -81,7 +88,9 @@ var gttSchema = json.RawMessage(`{
 			"description": "Lower trigger price (for two-leg GTT)"
 		},
 		"lower_quantity": {
-			"type": "number",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 2147483647,
 			"description": "Quantity for the lower leg (for two-leg GTT)"
 		},
 		"lower_limit_price": {
@@ -118,6 +127,11 @@ func (*GTTTool) Handler(manager *kc.Manager) ToolHandler {
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := GetArguments(request)
 		mode := SafeAssertString(args["mode"], "")
+		if mode == "modify" || mode == "delete" {
+			if err := validateNumericArgument(args, "trigger_id", 1, 2147483647, true); err != nil {
+				return NewToolResultError(err.Error()), nil
+			}
+		}
 
 		switch mode {
 		case "list":
@@ -189,6 +203,16 @@ func (*GTTTool) Handler(manager *kc.Manager) ToolHandler {
 }
 
 func buildGTTParams(args map[string]interface{}) (kiteconnect.GTTParams, error) {
+	for _, field := range []string{"last_price", "trigger_value", "limit_price", "upper_trigger_value", "upper_limit_price", "lower_trigger_value", "lower_limit_price"} {
+		if err := validateNumericArgument(args, field, 0, math.MaxFloat64, false); err != nil {
+			return kiteconnect.GTTParams{}, err
+		}
+	}
+	for _, field := range []string{"quantity", "upper_quantity", "lower_quantity"} {
+		if err := validateNumericArgument(args, field, 1, 2147483647, true); err != nil {
+			return kiteconnect.GTTParams{}, err
+		}
+	}
 	gttParams := kiteconnect.GTTParams{
 		Exchange:        SafeAssertString(args["exchange"], "NSE"),
 		Tradingsymbol:   SafeAssertString(args["tradingsymbol"], ""),

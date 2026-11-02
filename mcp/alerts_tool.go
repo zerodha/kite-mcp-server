@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
@@ -22,7 +23,8 @@ var alertsSchema = json.RawMessage(`{
 		},
 		"uuids": {
 			"type": "array",
-			"description": "Array of alert UUIDs (for get/modify/delete modes). Single UUID for specific alert, multiple for batch operations",
+			"maxItems": 500,
+			"description": "Array of alert UUIDs (for get/modify/delete modes). Exactly one UUID for modify; multiple UUIDs for get/delete",
 			"items": {
 				"type": "string"
 			}
@@ -93,7 +95,7 @@ var alertsSchema = json.RawMessage(`{
 			"description": "JSON string containing basket configuration. Required when alert_type=ato"
 		}
 	},
-	"required": ["mode", "uuids"]
+	"required": ["mode"]
 }`)
 
 func (*AlertsTool) Definition() *mcp.Tool {
@@ -108,22 +110,36 @@ func (*AlertsTool) Handler(manager *kc.Manager) ToolHandler {
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := GetArguments(request)
 		mode := SafeAssertString(args["mode"], "")
+		if raw, exists := args["uuids"]; exists {
+			ids, ok := raw.([]interface{})
+			if !ok || len(ids) > 500 {
+				return NewToolResultError("uuids must be an array of at most 500 identifiers"), nil
+			}
+			for _, id := range ids {
+				if err := validatePathIdentifier(id, "uuids"); err != nil {
+					return NewToolResultError(err.Error()), nil
+				}
+			}
+			if mode == "modify" && len(ids) != 1 {
+				return NewToolResultError("Exactly one UUID is required for modify mode"), nil
+			}
+		}
 
 		switch mode {
 		case "get":
-			return handler.WithKiteClient(request, "alerts_get", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "alerts_get", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				return handleGetAlerts(handler, args, client)
 			})
 		case "create":
-			return handler.WithKiteClient(request, "alerts_create", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "alerts_create", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				return handleCreateAlert(handler, args, client)
 			})
 		case "modify":
-			return handler.WithKiteClient(request, "alerts_modify", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "alerts_modify", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				return handleModifyAlert(handler, args, client)
 			})
 		case "delete":
-			return handler.WithKiteClient(request, "alerts_delete", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "alerts_delete", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				return handleDeleteAlerts(handler, args, client)
 			})
 		default:
@@ -289,9 +305,18 @@ func validateAlertParams(args map[string]interface{}, isCreate bool) error {
 	// Validate required parameters
 	requiredParams := []string{"name", "alert_type", "lhs_exchange", "lhs_tradingsymbol", "lhs_attribute", "operator", "rhs_type"}
 	for _, param := range requiredParams {
+		if err := validateStringChoices(args, param); err != nil {
+			return err
+		}
 		if SafeAssertString(args[param], "") == "" {
 			return ValidationError{Parameter: param, Message: "is required"}
 		}
+	}
+	if err := validateStringChoices(args, "alert_type", "simple", "ato"); err != nil {
+		return err
+	}
+	if err := validateStringChoices(args, "operator", "<=", ">=", "<", ">", "=="); err != nil {
+		return err
 	}
 
 	// Validate RHS parameters based on type
@@ -300,6 +325,9 @@ func validateAlertParams(args map[string]interface{}, isCreate bool) error {
 	case "constant":
 		if _, ok := args["rhs_constant"]; !ok {
 			return ValidationError{Parameter: "rhs_constant", Message: "is required when rhs_type=constant"}
+		}
+		if err := validateNumericArgument(args, "rhs_constant", -math.MaxFloat64, math.MaxFloat64, false); err != nil {
+			return err
 		}
 	case "instrument":
 		requiredInstrumentParams := []string{"rhs_exchange", "rhs_tradingsymbol", "rhs_attribute"}

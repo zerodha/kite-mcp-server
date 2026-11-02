@@ -152,6 +152,9 @@ func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := GetArguments(request)
 		mode := SafeAssertString(args["mode"], "")
+		if err := validateOrderArguments(args, mode); err != nil {
+			return NewToolResultError(err.Error()), nil
+		}
 
 		switch mode {
 		case "approval_status":

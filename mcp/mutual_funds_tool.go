@@ -38,7 +38,7 @@ func (*MutualFundsTool) Handler(manager *kc.Manager) ToolHandler {
 
 		switch mode {
 		case "holdings":
-			return handler.WithKiteClient(request, "mutual_funds_holdings", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "mutual_funds_holdings", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				holdings, err := client.GetMFHoldings()
 				if err != nil {
 					return NewToolResultError("Failed to get mutual fund holdings"), nil

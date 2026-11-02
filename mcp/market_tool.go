@@ -38,7 +38,9 @@ var marketSchema = json.RawMessage(`{
 			"items": { "type": "string", "minLength": 1 }
 		},
 		"instrument_token": {
-			"type": "number",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 4294967295,
 			"description": "Numeric instrument token (required for historical mode). Use search mode to find this."
 		},
 		"interval": {
@@ -78,6 +80,7 @@ var marketSchema = json.RawMessage(`{
 		},
 		"query": {
 			"type": "string",
+			"maxLength": 200,
 			"description": "Search text (required for mode=search with search_mode=search)"
 		},
 		"filter_on": {
@@ -114,11 +117,15 @@ var marketSchema = json.RawMessage(`{
 			"description": "ISIN identifier (for search_mode=get_by_isin)"
 		},
 		"inst_token": {
-			"type": "number",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 4294967295,
 			"description": "Instrument token (for search_mode=get_by_inst_token)"
 		},
 		"exch_token": {
-			"type": "number",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 4294967295,
 			"description": "Exchange token (for search_mode=get_by_exch_token)"
 		},
 		"from": {
@@ -172,7 +179,7 @@ func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 			if err != nil {
 				return NewToolResultError(err.Error()), nil
 			}
-			return handler.WithKiteClient(request, "market_quote", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "market_quote", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				quotes, err := client.GetQuote(requested...)
 				if err != nil {
 					return NewToolResultError("Failed to get quotes"), nil
@@ -185,7 +192,7 @@ func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 			if err != nil {
 				return NewToolResultError(err.Error()), nil
 			}
-			return handler.WithKiteClient(request, "market_ltp", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "market_ltp", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				ltp, err := client.GetLTP(requested...)
 				if err != nil {
 					return NewToolResultError("Failed to get LTP"), nil
@@ -198,7 +205,7 @@ func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 			if err != nil {
 				return NewToolResultError(err.Error()), nil
 			}
-			return handler.WithKiteClient(request, "market_ohlc", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "market_ohlc", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				ohlc, err := client.GetOHLC(requested...)
 				if err != nil {
 					return NewToolResultError("Failed to get OHLC data"), nil
@@ -208,6 +215,12 @@ func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 
 		case "historical":
 			if err := ValidateRequired(args, "instrument_token", "from_date", "to_date", "interval"); err != nil {
+				return NewToolResultError(err.Error()), nil
+			}
+			if err := validateNumericArgument(args, "instrument_token", 1, 4294967295, true); err != nil {
+				return NewToolResultError(err.Error()), nil
+			}
+			if err := validateStringChoices(args, "interval", "minute", "3minute", "5minute", "10minute", "15minute", "30minute", "60minute", "day"); err != nil {
 				return NewToolResultError(err.Error()), nil
 			}
 			instrumentToken := SafeAssertInt(args["instrument_token"], 0)
@@ -226,7 +239,7 @@ func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 			continuous := SafeAssertBool(args["continuous"], false)
 			oi := SafeAssertBool(args["oi"], false)
 
-			return handler.WithKiteClient(request, "market_historical", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "market_historical", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				data, err := client.GetHistoricalData(instrumentToken, interval, fromDate, toDate, continuous, oi)
 				if err != nil {
 					return NewToolResultError(fmt.Sprintf("Failed to get historical data: %s", err)), nil
@@ -244,7 +257,7 @@ func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 			return handleMarketOptionChain(handler, manager, args)
 
 		case "search":
-			return handleMarketSearch(handler, manager, args, request)
+			return handleMarketSearch(ctx, handler, manager, args, request)
 
 		default:
 			return NewToolResultError("Invalid mode. Must be one of: quote, ltp, ohlc, historical, search, option_chain"), nil
@@ -252,13 +265,35 @@ func (*MarketTool) Handler(manager *kc.Manager) ToolHandler {
 	}
 }
 
-func handleMarketSearch(handler *BaseToolHandler, manager *kc.Manager, args map[string]interface{}, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func handleMarketSearch(ctx context.Context, handler *BaseToolHandler, manager *kc.Manager, args map[string]interface{}, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	params, parseErr := ParsePaginationParams(args)
 	if parseErr != nil {
 		return NewToolResultError(parseErr.Error()), nil
 	}
 	searchMode := SafeAssertString(args["search_mode"], "search")
 	verbosity := SafeAssertString(args["verbosity"], "compact")
+	// Validate before recording labels: arbitrary modes otherwise create an
+	// unbounded number of time series while falling through to text search.
+	if err := validateStringChoices(args, "search_mode", "search", "get_by_id", "get_by_tradingsymbol", "get_by_isin", "get_by_inst_token", "get_by_exch_token"); err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+	if err := validateStringChoices(args, "verbosity", "compact", "full"); err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+	if err := validateStringChoices(args, "filter_on", "id", "name", "isin", "tradingsymbol", "underlying"); err != nil {
+		return NewToolResultError(err.Error()), nil
+	}
+	if searchMode == "search" {
+		query, ok := args["query"].(string)
+		if !ok || strings.TrimSpace(query) == "" || len(query) > 200 {
+			return NewToolResultError("query must be a non-empty string of at most 200 bytes"), nil
+		}
+	}
+	for _, field := range []string{"inst_token", "exch_token"} {
+		if err := validateNumericArgument(args, field, 1, 4294967295, true); err != nil {
+			return NewToolResultError(err.Error()), nil
+		}
+	}
 
 	if manager.Metrics() != nil {
 		manager.Metrics().IncrementDailyWithLabels("tool_calls", map[string]string{"tool": "market_search"})
@@ -394,7 +429,7 @@ func handleMarketSearch(handler *BaseToolHandler, manager *kc.Manager, args map[
 
 	var liveQuotes kiteconnect.Quote
 	if includeLiveQuote && len(paginatedData) > 0 {
-		client, authErr := manager.GetAuthenticatedClient(GetSessionID(request))
+		client, authErr := manager.GetAuthenticatedClientContext(ctx, GetSessionID(request))
 		if authErr != nil {
 			return NewToolResultError(authErr.Error()), nil
 		}

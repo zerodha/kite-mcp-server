@@ -70,7 +70,7 @@ func (*PortfolioTool) Handler(manager *kc.Manager) ToolHandler {
 
 		switch mode {
 		case "profile":
-			return handler.WithKiteClient(request, "portfolio_profile", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "portfolio_profile", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				profile, err := client.GetUserProfile()
 				if err != nil {
 					return NewToolResultError("Failed to get profile"), nil
@@ -79,7 +79,7 @@ func (*PortfolioTool) Handler(manager *kc.Manager) ToolHandler {
 			})
 
 		case "margins":
-			return handler.WithKiteClient(request, "portfolio_margins", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "portfolio_margins", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				margins, err := client.GetUserMargins()
 				if err != nil {
 					return NewToolResultError("Failed to get margins"), nil
@@ -92,7 +92,7 @@ func (*PortfolioTool) Handler(manager *kc.Manager) ToolHandler {
 			if err != nil {
 				return NewToolResultError(err.Error()), nil
 			}
-			return handler.WithKiteClient(request, "portfolio_holdings", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
+			return handler.WithKiteClientContext(ctx, request, "portfolio_holdings", func(client *kiteconnect.Client) (*mcp.CallToolResult, error) {
 				holdingsType := SafeAssertString(args["type"], "full")
 
 				switch holdingsType {
