@@ -90,3 +90,7 @@ kite-mcp-server-*
 # MCP Apps UI dependencies
 mcp/ui/node_modules/
 mcp/ui/test-artifacts/
+
+# Local eval credentials and generated results
+/eval/mcp.json
+/eval/results.jsonl

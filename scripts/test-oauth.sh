@@ -16,6 +16,9 @@
 
 set -e
 
+MCP_HEADERS=$(mktemp "${TMPDIR:-/tmp}/kite-mcp-oauth-headers.XXXXXX")
+trap 'rm -f -- "$MCP_HEADERS"' EXIT
+
 # Configuration
 SERVER_URL="${SERVER_URL:-http://localhost:8080}"
 REDIRECT_URI="${REDIRECT_URI:-$SERVER_URL/callback}"
@@ -133,7 +136,7 @@ echo ""
 
 # Step 6: Test MCP endpoint - Initialize
 echo "=== Step 6: MCP Initialize ==="
-INIT_RESPONSE=$(curl -s -D /tmp/mcp_headers.txt -X POST "$SERVER_URL/mcp" \
+INIT_RESPONSE=$(curl -s -D "$MCP_HEADERS" -X POST "$SERVER_URL/mcp" \
     -H "Authorization: Bearer $ACCESS_TOKEN" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
@@ -143,18 +146,18 @@ echo "Response:"
 echo "$INIT_RESPONSE"
 echo ""
 
-MCP_SESSION=$(grep -i "mcp-session-id" /tmp/mcp_headers.txt | cut -d: -f2 | tr -d ' \r\n')
+MCP_SESSION=$(grep -i "mcp-session-id" "$MCP_HEADERS" | cut -d: -f2 | tr -d ' \r\n')
 echo "MCP Session ID: $MCP_SESSION"
 echo ""
 
-# Step 7: Test MCP tool call - get_profile
-echo "=== Step 7: MCP Tool Call (get_profile) ==="
+# Step 7: Test MCP tool call - portfolio/profile
+echo "=== Step 7: MCP Tool Call (portfolio/profile) ==="
 PROFILE_RESPONSE=$(curl -s -X POST "$SERVER_URL/mcp" \
     -H "Authorization: Bearer $ACCESS_TOKEN" \
     -H "Mcp-Session-Id: $MCP_SESSION" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
-    -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_profile","arguments":{}}}')
+    -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"portfolio","arguments":{"mode":"profile"}}}')
 
 echo "Response:"
 echo "$PROFILE_RESPONSE" | sed 's/^data: //' | jq '.result.content[0].text | fromjson' 2>/dev/null || echo "$PROFILE_RESPONSE"

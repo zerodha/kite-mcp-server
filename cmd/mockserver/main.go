@@ -5,7 +5,7 @@
 //
 // Usage:
 //
-//	go run ./cmd/mockserver
+//	go run -tags=testing ./cmd/mockserver
 //
 // The server prints the MCP endpoint URL and a Bearer token for authentication.
 // Connect with pi-mcp-adapter, Claude Desktop, or any MCP client.

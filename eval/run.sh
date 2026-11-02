@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 PROMPTS_FILE="${SCRIPT_DIR}/prompts.jsonl"
 RESULTS_FILE="${SCRIPT_DIR}/results.jsonl"
-MCP_CONFIG="${SCRIPT_DIR}/mcp.json"
+MCP_CONFIG=""
 PORT=8989
 START_SERVER=false
 
@@ -26,6 +26,9 @@ cleanup() {
     fi
     if [[ -n "${CONN_INFO_FILE:-}" ]]; then
         rm -f "$CONN_INFO_FILE"
+    fi
+    if [[ -n "${MCP_CONFIG:-}" ]]; then
+        rm -f -- "$MCP_CONFIG"
     fi
 }
 trap cleanup EXIT
@@ -67,20 +70,18 @@ else
     ENDPOINT="http://localhost:${PORT}/mcp"
 fi
 
-# Write mcp.json for pi-mcp-adapter.
-cat > "$MCP_CONFIG" <<EOF
-{
-    "mcpServers": {
-        "kite": {
-            "url": "${ENDPOINT}",
-            "auth": "bearer",
-            "bearerToken": "${KITE_MCP_TOKEN}",
-            "directTools": true,
-            "lifecycle": "eager"
-        }
-    }
-}
-EOF
+# Keep the bearer config private and separate from any existing user config.
+# mktemp creates this owned file with mode 600; cleanup removes it on exit.
+MCP_CONFIG=$(mktemp "${TMPDIR:-/tmp}/kite-mcp-eval.XXXXXX")
+jq -n --arg endpoint "$ENDPOINT" --arg token "$KITE_MCP_TOKEN" '
+    {mcpServers: {kite: {
+        url: $endpoint,
+        auth: "bearer",
+        bearerToken: $token,
+        directTools: true,
+        lifecycle: "eager"
+    }}}
+' > "$MCP_CONFIG"
 
 echo "MCP config written to $MCP_CONFIG"
 echo "Endpoint: $ENDPOINT"
