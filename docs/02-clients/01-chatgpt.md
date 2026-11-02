@@ -22,12 +22,29 @@ https://mcp.kite.trade/mcp
 6. Save and start the connection flow
 7. Complete the Zerodha login flow in the browser when prompted
 
+## Order approvals
+
+On ChatGPT web, review the approval form shown for order placement, modification,
+or cancellation. Native forms do not currently work in this flow on the mobile
+app; ask the assistant for a browser approval link instead.
+
+Open the link in the browser used to connect Kite MCP and review the order there.
+See [[Order Approvals]] for browser review and optional future order permission.
+
 ## Notes
 
-- Remote MCP support in ChatGPT is still rolling out and UI labels may change
+- Custom connections must be enabled for your account or workspace
 - ChatGPT handles OAuth and client registration automatically
 - You normally do not need to create a client ID manually
 
 ## Troubleshooting
 
-If the connector is rejected during login, try removing and recreating it. Client registration is open and rate limited; HTTPS callback URIs need no approval.
+If sign-in fails, reconnect from the connection settings. If you cannot add a
+custom connection, check your account access and workspace settings.
+
+## Verify the connection
+
+> Use Kite MCP to show my account profile. Do not place any orders.
+
+Inspect the tool result to confirm that the answer comes from Kite. If no tool
+is called, check that the connection is enabled for this conversation.

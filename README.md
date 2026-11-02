@@ -12,7 +12,7 @@ Want to use AI with your Kite trading account? Just add `https://mcp.kite.trade/
 - **Order Management**: Place, modify, and cancel orders with full order history
 - **GTT Orders**: Good Till Triggered order management
 - **Market Data Access**: Real-time quotes, historical data, OHLC data
-- **Pagination Support**: Automatic pagination for large datasets (holdings, orders, trades)
+- **Pagination Support**: Explicit page controls and metadata for large datasets (holdings, orders, trades)
 - **Comprehensive Coverage**: Implements most Kite Connect API endpoints
 - **Streamable HTTP Transport**: Connect through the `/mcp` endpoint
 - **Built-in Documentation**: Auto-served documentation at runtime
@@ -43,13 +43,13 @@ If your client supports project-local HTTP MCP config, you can also add a `.mcp.
 }
 ```
 
-Clients without native HTTP transport support can use [mcp-remote](https://github.com/modelcontextprotocol/mcp-remote) as a bridge.
+Clients without native HTTP transport support can use [mcp-remote](https://www.npmjs.com/package/mcp-remote) as a bridge.
 
 For self-hosting with your own API keys, follow the installation steps below.
 
 ### Prerequisites
 
-- **For hosted version (recommended)**: Nothing! Just use `https://mcp.kite.trade/mcp`
+- **For the hosted version**: A Zerodha account and an MCP client with remote OAuth support or a stdio bridge
 - **For self-hosting**: Go 1.25 or later
 - **For self-hosting**: Valid Kite Connect API credentials
 
@@ -103,62 +103,28 @@ The server will start and serve documentation at `http://localhost:8080/`
 
 ## Client Integration
 
-### Setup Guide
+Use the [client setup guides](https://mcp.kite.trade/guide/getting-started/) for
+ChatGPT, Claude, Codex CLI, Pi, Cursor, VS Code, Windsurf, Cline, and JetBrains.
+Configuration formats and OAuth controls vary by client. Native HTTP clients
+connect directly; stdio clients can use `mcp-remote` as an OAuth bridge.
 
-- [Claude Desktop (Hosted Mode)](#claude-desktop-hosted-mode)
-- [Claude Desktop (HTTP Mode)](#claude-desktop-http-mode)
-- [Other MCP Clients](#other-mcp-clients)
-
-### Claude Desktop (Hosted Mode)
-
-For the hosted version, add to your Claude Desktop configuration (`~/.config/Claude/claude_desktop_config.json`):
+For a self-hosted server, use its `/mcp` URL in the relevant client guide. Local
+HTTP bridge connections need `--allow-http`:
 
 ```json
 {
   "mcpServers": {
     "kite": {
       "command": "npx",
-      "args": ["mcp-remote", "https://mcp.kite.trade/mcp"]
-    }
-  }
-}
-```
-
-### Claude Desktop (HTTP Mode)
-
-Start the self-hosted server using the steps above, then add this to your Claude
-Desktop configuration (`~/.config/Claude/claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "kite": {
-      "command": "npx",
-      "args": ["mcp-remote", "http://localhost:8080/mcp", "--allow-http"]
+      "args": ["-y", "mcp-remote", "http://localhost:8080/mcp", "--allow-http"]
     }
   }
 }
 ```
 
 Keep the server running separately. Its Kite credentials belong in the server's
-environment; the bridge connects through OAuth.
-
-### Other MCP Clients
-
-For other MCP-compatible clients, use the hosted endpoint `https://mcp.kite.trade/mcp` with [mcp-remote](https://github.com/modelcontextprotocol/mcp-remote) or configure your client to connect directly to the HTTP endpoint.
-
-If your client supports project-local MCP config, the following works well:
-
-```json
-{
-  "mcpServers": {
-    "kite-mcp": {
-      "type": "http",
-      "url": "https://mcp.kite.trade/mcp"
-    }
-  }
-}
-```
+environment; the bridge connects through OAuth. Interactive views and order
+approval forms depend on the host's capabilities.
 
 ## Available Tools
 
@@ -173,14 +139,18 @@ Kite MCP exposes 7 grouped account/market tools and a workflow help tool:
 - `session` - Session status and logout
 - `help` - Embedded workflow tree, e.g. `{"key":"/orders/reconcile"}`; replaced by native Skills discovery for clients advertising Skills support
 
-See `docs/03-reference/01-tools.md` for the full mode and parameter reference, and
+See [Tools](docs/03-reference/01-tools.md) for the full mode and parameter reference, and
 [Help and Skills](docs/03-reference/04-help-and-skills.md) for recipes, negotiation, and authoring.
+[Code Mode](docs/03-reference/07-code-mode.md) covers generated tool calls, result parsing, and approval handling.
 
 ## API Coverage
 
 This server implements the majority of Kite Connect API endpoints and also provides additional tools.
 
 ## Development
+
+See [Development reference](DEVELOPMENT.md) for help catalog authoring, Skills
+integration, order approval internals, and MCP Apps development.
 
 ### Development Environment
 
@@ -292,7 +262,11 @@ You can exclude specific tools by setting the `EXCLUDED_TOOLS` environment varia
 EXCLUDED_TOOLS=orders,gtt,alerts
 ```
 
-The hosted version at `mcp.kite.trade` excludes potentially destructive trading operations for security. For accessing the other operations you can generate your own API keys and run the server locally.
+Tool availability depends on the deployment. Check `tools/list` for the server
+you connect to. The `orders` tool uses native or browser approval for
+placement, modification, and cancellation, with an optional remembered permission
+for the current login session; GTT and Alerts/ATO mutations are
+outside that guard. See [Order Approvals](docs/03-reference/06-order-approvals.md).
 
 ### Open Client Registration
 
@@ -397,6 +371,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Support
 
-For bugs and general suggestions, please use GitHub Discussions.
+For bugs and general suggestions, use [GitHub Discussions](https://github.com/zerodha/kite-mcp-server/discussions).
 
 For Kite Connect API documentation, visit: https://kite.trade/docs/connect/

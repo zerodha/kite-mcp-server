@@ -5,7 +5,29 @@ description: Complete reference for all MCP tools and their parameters
 
 # Tools
 
-Kite MCP exposes 7 grouped tools using a `mode` parameter and a `help` tool using a `key` path. Clients advertising the Skills extension use native Skills discovery in place of `help`. The AI assistant selects the appropriate tool and mode based on the user's request.
+Ask your assistant for the information or action you need. It selects the tool
+and `mode`; you do not need to write tool calls yourself.
+
+## Find a tool
+
+| Tool | Use it for |
+|------|------------|
+| [portfolio](#portfolio) | Account profile, funds, holdings, and positions |
+| [orders](#orders) | Today's orders, fills, placement, modification, and cancellation |
+| [gtt](#gtt) | Persistent price triggers and their orders |
+| [market](#market) | Quotes, historical candles, instrument search, and option chains |
+| [alerts](#alerts) | Price alerts and alert-to-order baskets |
+| [mutual_funds](#mutual-funds) | Coin holdings |
+| [session](#session) | Authentication status and logout |
+| [help](#help) | Bundled workflows and troubleshooting |
+| [open_kite_view](#open-kite-view) | Interactive views in clients that support MCP Apps |
+
+The seven grouped tools use a `mode` parameter. The `help` tool uses a `key`
+path; clients with the Skills extension use native Skills discovery instead.
+Interactive views are available only in compatible clients.
+
+See [pagination](#pagination) for list responses and page limits.
+For analysis using a client’s code tool, see [[Code Mode]].
 
 ## help
 
@@ -16,31 +38,7 @@ slashes are accepted; keys are exact and case-sensitive. Unknown keys produce
 an MCP tool error with navigation instructions. This read-only tool requires no
 Kite API call and does not authorize transactions.
 
-See [Help and Skills](04-help-and-skills.md) for the catalog structure and Skills
-protocol interface.
-
-## Pagination contract
-
-Paginated modes are `portfolio holdings` (`full` and `compact`), `portfolio positions`,
-`orders list`, `orders all_trades`, `gtt list`, `market search`, and `market option_chain` (strike rows).
-
-- `from` is an integer from 0 to 2147483647, default 0.
-- `limit` is an integer from 1 to 500, default 100. Zero, negative, fractional,
-  string, and null values are rejected rather than coerced or treated as unlimited.
-- These modes always return `data` and `pagination`, including when pagination
-  arguments are omitted. An offset beyond the end returns an empty array and
-  `has_more: false`. Continue with `from + returned` while `has_more` is true.
-- Search results sort by `id`, then `instrument_token`, before slicing. Pages are
-  stable for an unchanged instrument catalog; a catalog refresh can change matches.
-
-```json
-{"data": [], "pagination": {"from": 0, "limit": 100, "total": 0, "returned": 0, "has_more": false}}
-```
-
-**Response-shape change:** clients previously reading bare arrays from these modes
-must now read `data`. Holdings `summary`, profile, margins, and other unpaginated
-operations retain their existing response shapes. Market quote/LTP/OHLC now use
-an explicit `data`/`meta` envelope as documented below.
+See [Help and Skills](../help-and-skills/) for available workflows and how to use them.
 
 ## portfolio
 
@@ -53,13 +51,13 @@ Retrieve portfolio and account information.
 | `holdings` | Demat holdings with P&L. Supports `type` (full/summary/compact); full and compact support pagination |
 | `positions` | Open intraday and overnight positions. Supports pagination |
 
-**Parameters:**
+### Parameters
 
 | Parameter | Type | Modes | Description |
 |-----------|------|-------|-------------|
 | `mode` | string | all | **Required.** Operation mode |
 | `type` | string | holdings | Holdings data type: `full` (default), `summary`, `compact` |
-| `from` | integer | holdings, positions | Pagination start index (0-based, default: 0; see bounds above) |
+| `from` | integer | holdings, positions | Pagination start index (0-based, default: 0; see [pagination](#pagination)) |
 | `limit` | integer | holdings, positions | Page size: 1-500, default 100; always includes pagination metadata |
 
 Position rows retain the upstream fields and add `view`: `day` for today's
@@ -73,43 +71,11 @@ in both views; use `net` to assess current exposure and never sum the two views.
 
 Manage orders placed during the current trading day.
 
-Placement, modification, and cancellation require form elicitation support
-(including legacy `elicitation: {}`). Clients that do not advertise form support,
-including URL-only clients, receive an `unsupported_client` error without
-executing the mutation. All order modes remain
-available in `tools/list`. Authentication and order validation still apply.
+Placement, modification, and cancellation require approval in your client or
+browser, unless you have explicitly allowed future orders from this client.
+See [[Order Approvals]] for browser review, expiry, and revocation.
 
-For capable clients, MCP 2026-07-28 uses per-request capabilities and
-`InputRequiredResult` with `inputRequests`, followed by a retry carrying
-`inputResponses` and opaque `requestState`. Older protocols use nested
-`elicitation/create`.
-The approval shows the normalized order parameters, including instrument,
-exchange, BUY/SELL, quantity, product, order type, price, and validity. Modification
-and cancellation also show the latest order history entry fetched from Kite;
-omitted modification fields remain unchanged. Placement defaults validity to DAY.
-The response must have `action: "accept"` and boolean `content.confirm: true`.
-An `approved=true` tool argument never grants approval.
-
-Declines, cancellations, missing or invalid
-confirmation, disconnects, and the two-minute deadline block execution. An
-elicitation failure never falls back to direct execution. Continuations still
-validate the original approval even if capabilities are omitted on the retry.
-Approval failures use the `Trade approval failed [code]` prefix, distinct from
-Kite API failures.
-
-Multi-round-trip approval state expires after two minutes and is bound to the
-account session, operation, and normalized transaction details. It is consumed
-atomically before execution, so a retry cannot reuse an approval. Server restart
-invalidates pending approvals. Each account session can hold up to eight pending
-approvals, within a server-wide limit of 1,024. Expired or consumed approvals
-release capacity.
-
-Each approval authorizes one API attempt with the parameters shown. The server
-does not automatically retry mutations; after an ambiguous API failure, inspect
-the order book before initiating another trade. A repeated tool call requires
-fresh approval. This is client-mediated consent through a trusted MCP client,
-not independent user authentication. GTT and Alerts/ATO are outside this approval
-gate.
+GTT and Alerts/ATO mutations use separate tools and are outside this approval gate.
 
 | Mode | Description |
 |------|-------------|
@@ -120,20 +86,24 @@ gate.
 | `place` | Place a new order on the exchange |
 | `modify` | Modify an existing open order |
 | `cancel` | Cancel an open order |
+| `approval_status` | Check the outcome of a browser approval without repeating the order request |
+| `permissions` | Get a link to view or revoke future order permission for this connection |
 
-**Parameters:**
+### Parameters
 
 | Parameter | Type | Modes | Description |
 |-----------|------|-------|-------------|
 | `mode` | string | all | **Required.** Operation mode |
+| `approval_method` | string | place, modify, cancel | `auto` (default) or `browser` to request a browser review |
+| `approval_id` | string | approval_status | **Required.** ID returned with the pending browser approval |
 | `order_id` | string | history, trades, modify, cancel | Order ID |
 | `variety` | string | place, modify, cancel | Order variety: `regular` (default), `co`, `amo`, `iceberg`, `auction` |
-| `exchange` | string | place | Exchange: `NSE` (default), `BSE`, `MCX`, `NFO`, `BFO` |
+| `exchange` | string | place | **Required.** Exchange: `NSE`, `BSE`, `MCX`, `NFO`, `BFO` |
 | `tradingsymbol` | string | place | Trading symbol (e.g. `INFY`, `NIFTY2560118000CE`) |
 | `transaction_type` | string | place | `BUY` or `SELL` |
 | `quantity` | integer | place, modify | Order quantity in units. Required for place; optional for modify |
 | `product` | string | place | `CNC` (delivery), `MIS` (intraday), `NRML` (F&O overnight), `MTF` (margin funding) |
-| `order_type` | string | place, modify | `MARKET`, `LIMIT`, `SL` (stop-loss limit), `SL-M` (stop-loss market) |
+| `order_type` | string | place, modify | **Required in both modes.** `MARKET`, `LIMIT`, `SL` (stop-loss limit), `SL-M` (stop-loss market) |
 | `price` | number | place, modify | Limit price. Required for `LIMIT` and `SL` orders |
 | `trigger_price` | number | place, modify | Trigger price. Required for `SL` and `SL-M` orders |
 | `validity` | string | place, modify | `DAY`, `IOC` (immediate or cancel), `TTL` (time-to-live) |
@@ -143,18 +113,27 @@ gate.
 | `iceberg_quantity` | integer | place | Quantity per leg for iceberg orders |
 | `tag` | string | place | Optional alphanumeric label (max 20 characters) |
 | `market_protection` | number | place | Market protection % for MARKET/SL-M. `0`=disabled, `1`-`100`=custom, `-1`=auto |
+| `autoslice` | boolean | place | Automatically split quantities above the exchange freeze limit (default: false) |
 | `from` | integer | list, all_trades | Pagination start index (0-based) |
 | `limit` | integer | list, all_trades | Page size: 1-500, default 100 |
 
 For placement and modification, supplied `quantity`, `validity_ttl`, `iceberg_legs`, and `iceberg_quantity` values must be integers from 1 to 2147483647, inclusive. `disclosed_quantity` accepts integers from 0 to 2147483647, inclusive. Fractions, strings, null, and values outside these ranges are rejected before any Kite API request.
 
-Modification leaves omitted fields unchanged. Setting `validity` to `TTL` requires a positive `validity_ttl` in the same request; the duration is included in the approval details and sent to Kite.
+A browser review returns `status=approval_required`, `approval_url`,
+`approval_id`, and `expires_at`. No order has been submitted at that point.
+Share the link with the user, then check `approval_status` after they review it.
+That response contains the status and the submission result, if available.
+Approval outcomes are available for up to 15 minutes after the request.
+
+Modification requires `order_id` and `order_type`. Supply the current order type
+when changing another field. Other omitted fields remain unchanged. Setting `validity` to `TTL` requires a positive `validity_ttl` in the same request; the duration is included in the approval details and sent to Kite.
+
 
 ---
 
 ## gtt
 
-Manage GTT (Good Till Triggered) orders. GTT orders persist across trading sessions and execute automatically when a price condition is met.
+Manage GTT (Good Till Triggered) orders. GTT orders persist across trading sessions and execute automatically when a price condition is met. GTT mutations do not use the `orders` approval form and may be excluded by the server.
 
 | Mode | Description |
 |------|-------------|
@@ -163,20 +142,22 @@ Manage GTT (Good Till Triggered) orders. GTT orders persist across trading sessi
 | `modify` | Update an existing GTT |
 | `delete` | Remove a GTT |
 
-**Parameters:**
+### Parameters
 
 | Parameter | Type | Modes | Description |
 |-----------|------|-------|-------------|
 | `mode` | string | all | **Required.** Operation mode |
 | `trigger_id` | number | modify, delete | GTT trigger ID |
-| `exchange` | string | place, modify | Exchange: `NSE` (default), `BSE`, `MCX`, `NFO`, `BFO` |
+| `exchange` | string | place, modify | **Required.** Exchange: `NSE`, `BSE`, `MCX`, `NFO`, `BFO` |
 | `tradingsymbol` | string | place, modify | Trading symbol |
 | `last_price` | number | place, modify | Current price of the instrument |
 | `transaction_type` | string | place, modify | `BUY` or `SELL` |
 | `product` | string | place | `CNC`, `NRML`, `MIS`, `MTF` |
 | `trigger_type` | string | place, modify | `single` or `two-leg` |
 
-**Single-leg parameters** (when trigger_type=single):
+### Single-leg parameters
+
+Use these when `trigger_type=single`.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -184,7 +165,9 @@ Manage GTT (Good Till Triggered) orders. GTT orders persist across trading sessi
 | `quantity` | number | Order quantity |
 | `limit_price` | number | Limit price for the resulting order |
 
-**Two-leg (OCO) parameters** (when trigger_type=two-leg):
+### Two-leg parameters (OCO)
+
+Use these when `trigger_type=two-leg`.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -195,7 +178,7 @@ Manage GTT (Good Till Triggered) orders. GTT orders persist across trading sessi
 | `lower_quantity` | number | Quantity for the lower leg |
 | `lower_limit_price` | number | Limit price for the lower leg |
 
-**List pagination:**
+### List pagination
 
 | Parameter | Type | Modes | Description |
 |-----------|------|-------|-------------|
@@ -233,17 +216,33 @@ Retrieve market data and search instruments.
 | `search` | Search the instrument master list across all exchanges |
 | `option_chain` | Indexed option chain by underlying and expiry, paginated by strike |
 
-**Common parameters:**
+### Quote, LTP, and OHLC parameters
 
 | Parameter | Type | Modes | Description |
 |-----------|------|-------|-------------|
 | `mode` | string | all | **Required.** Operation mode |
 | `instruments` | string[] | quote, ltp, ohlc | 1-500 non-empty strings in `exchange:tradingsymbol` format, e.g. `["NSE:INFY"]`; duplicate symbols are requested once |
 
+### Quote responses
+
 Quote, LTP, and OHLC return a consistent envelope:
 
 ```json
-{"data": {"NSE:INFY": {"last_price": 1500}}, "meta": {"requested_count": 2, "returned_count": 1, "missing_instruments": ["NSE:UNKNOWN"], "partial": true}}
+{
+  "data": {
+    "NSE:INFY": {
+      "last_price": 1500
+    }
+  },
+  "meta": {
+    "requested_count": 2,
+    "returned_count": 1,
+    "missing_instruments": [
+      "NSE:UNKNOWN"
+    ],
+    "partial": true
+  }
+}
 ```
 
 `data` contains only resolved symbols from the request. Counts refer to unique
@@ -252,17 +251,17 @@ response retains the successful data. If no symbols resolve, the response has
 `isError: true`, empty `data`, and an `error` message advising correction of the
 exchange/symbols. Missing symbols are not represented as zero-priced quotes.
 
-Market successes expose identical values in JSON text content and
-`structuredContent`, with an advertised output schema covering data/meta envelopes
-and historical candles. Historical responses use
-`{"data": [<candles>], "meta": {"timezone": "Asia/Kolkata"}}`; clients previously
-reading a bare candle array must now read `data`. Object envelopes conform to the
-[MCP 2025-11-25 output contract](https://modelcontextprotocol.io/specification/2025-11-25/schema#tool).
+### Data and timestamps
+
+Market results include `structuredContent` for code-capable clients. Historical
+candles are in `data`, with their timezone in `meta.timezone`.
 LTP and OHLC metadata includes `as_of_available: false` and `timestamp_note`:
 these upstream endpoints supply no timestamps. Use `mode=quote` for upstream
 `timestamp` and `last_trade_time`; receipt time is not a price as-of timestamp.
 
-**Option-chain parameters** (`mode=option_chain`):
+### Option chains
+
+Use `mode=option_chain`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -286,10 +285,17 @@ formation makes no live quote calls; request `mode=quote` separately for contrac
 IDs and distinguish the catalog's reference prices from current quotes.
 
 ```json
-{"mode":"option_chain","exchange":"NFO","underlying":"NIFTY","limit":500}
+{
+  "mode": "option_chain",
+  "exchange": "NFO",
+  "underlying": "NIFTY",
+  "limit": 500
+}
 ```
 
-**Historical parameters** (mode=historical):
+### Historical candles
+
+Use `mode=historical`.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -300,7 +306,9 @@ IDs and distinguish the catalog's reference prices from current quotes.
 | `continuous` | boolean | Stitch futures into continuous series (default: false) |
 | `oi` | boolean | Include open interest (default: false) |
 
-**Search parameters** (mode=search):
+### Instrument search
+
+Use `mode=search`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -318,7 +326,7 @@ IDs and distinguish the catalog's reference prices from current quotes.
 | `limit` | integer | 100 | Page size: 1-500; always includes pagination metadata |
 | `include_live_quote` | boolean | `false` | Enrich returned search results with live quote data such as latest `last_price`, `lower_circuit_limit`, and `upper_circuit_limit` |
 
----
+### Search data sources
 
 Search responses include a `meta` block. By default, `instrument_data_source` is `bod_instruments`, which means fields such as circuit limits come from the beginning-of-day instrument master. When `include_live_quote=true`, quotes are fetched only for the returned page.
 `live_quote_enriched` is true only if at least one result was enriched. The
@@ -326,13 +334,15 @@ Search responses include a `meta` block. By default, `instrument_data_source` is
 `lower_circuit_limit`, `upper_circuit_limit`, `ohlc`, and `quote_timestamp`.
 `missing_live_quotes` lists instruments for which enrichment was unavailable;
 those records retain their BOD values and have no invented quote timestamp.
+INTL entries are returned as reference data only, listed in
+`meta.reference_only_instruments`, and are not sent for quote enrichment.
 If no quotes resolve, `live_quote_fields` is empty. Enrichment describes the data
 source, not a guarantee of freshness: inspect the upstream `quote_timestamp` and
 market session when interpreting a returned price.
 
 ## alerts
 
-Manage Kite price alerts. Alerts trigger when a price condition is met.
+Manage Kite price alerts. Alerts trigger when a price condition is met. ATO alerts can submit basket orders when triggered; their mutations do not use the `orders` approval form.
 
 | Mode | Description |
 |------|-------------|
@@ -341,12 +351,12 @@ Manage Kite price alerts. Alerts trigger when a price condition is met.
 | `modify` | Update an existing alert |
 | `delete` | Delete one or more alerts |
 
-**Parameters:**
+### Parameters
 
 | Parameter | Type | Modes | Description |
 |-----------|------|-------|-------------|
 | `mode` | string | all | **Required.** Operation mode |
-| `uuids` | string[] | all | **Required.** Alert UUIDs. Empty array for get-all. Single UUID for modify. One or more for delete |
+| `uuids` | string[] | all | **Required.** Use `[]` for create or get-all, one UUID for modify, and one or more for delete |
 | `status` | string | get | Filter: `enabled`, `disabled`, `deleted` |
 | `type` | string | get | Filter: `simple`, `ato` |
 | `history` | boolean | get | Include trigger history (default: false) |
@@ -373,7 +383,7 @@ Retrieve mutual fund data from Coin.
 |------|-------------|
 | `holdings` | All mutual fund holdings |
 
-**Parameters:**
+### Parameters
 
 | Parameter | Type | Modes | Description |
 |-----------|------|-------|-------------|
@@ -390,8 +400,41 @@ Inspect or invalidate the current authenticated session.
 | `status` | Show the current session state, including whether it is authenticated |
 | `logout` | Invalidate the current session so future tool calls require re-authentication |
 
-**Parameters:**
+### Parameters
 
 | Parameter | Type | Modes | Description |
 |-----------|------|-------|-------------|
 | `mode` | string | all | **Required.** Operation mode: `status` or `logout` |
+
+
+## Pagination
+
+Paginated modes are `portfolio holdings` (`full` and `compact`), `portfolio positions`,
+`orders list`, `orders all_trades`, `gtt list`, `market search`, and `market option_chain` (strike rows).
+
+- `from` is an integer from 0 to 2147483647, default 0.
+- `limit` is an integer from 1 to 500, default 100. Zero, negative, fractional,
+  string, and null values are rejected rather than coerced or treated as unlimited.
+- These modes always return `data` and `pagination`, including when pagination
+  arguments are omitted. An offset beyond the end returns an empty array and
+  `has_more: false`. Continue with `from + returned` while `has_more` is true.
+- Exact symbol matches appear first in text searches, followed by `id` and
+  `instrument_token`. Pages are stable for an unchanged instrument catalog and
+  query; a catalog refresh can change matches.
+
+```json
+{
+  "data": [],
+  "pagination": {
+    "from": 0,
+    "limit": 100,
+    "total": 0,
+    "returned": 0,
+    "has_more": false
+  }
+}
+```
+
+Read paginated rows from `data` and page information from `pagination`. Holdings
+`summary`, profile, and margins are unpaginated. Market quote/LTP/OHLC use the
+`data`/`meta` envelope in [Quote responses](#quote-responses).

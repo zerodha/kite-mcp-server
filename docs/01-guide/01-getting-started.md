@@ -1,78 +1,77 @@
 ---
 title: Quick Start
-description: Set up Kite MCP with your AI assistant
+description: Connect an AI assistant to your Zerodha account
 ---
 
 # Quick Start
 
-## Prerequisites
+Connect your Zerodha account, sign in through Kite, and start with a read-only
+request such as checking your holdings or account balances.
 
-- A Zerodha account with Kite
-- An MCP-compatible AI client
+## What you need
 
-Optional, depending on client:
+- A Zerodha account with Kite.
+- An AI client that supports remote MCP connections.
+- [Node.js](https://nodejs.org/) only if your chosen setup uses `mcp-remote`.
 
-- [Node.js](https://nodejs.org/) if your client needs `mcp-remote`
-- A desktop MCP client such as Claude Desktop, Claude Code, VS Code, or Cursor if you are not using a hosted web client
+## Connect your client
 
-## Supported clients
+1. Choose a setup guide: [[ChatGPT Web]], [[Claude Web]], [[Claude Desktop]],
+   [[Claude Code]], [[Codex CLI]], [[Pi]], [[Cursor]], [[VS Code]], [[Windsurf]], [[Cline]], or [[JetBrains]].
+   See [[Other Clients]] for additional options.
+2. Add the hosted Kite MCP endpoint using your client's connector or MCP settings:
 
-If you want the easiest setup, start with hosted remote clients:
-
-- [[ChatGPT Web]]
-- [[Claude Web]]
-
-Detailed setup instructions are also available for:
-
-- [[Claude Desktop]]
-- [[Claude Code]]
-- [[Cursor]]
-- [[VS Code]]
-- [[Windsurf]]
-- [[Cline]]
-- [[JetBrains]]
-- [[Other Clients]]
-
-## Server URL
-
-All clients connect to the same endpoint:
-
-```
+```text
 https://mcp.kite.trade/mcp
 ```
 
-If your client supports project-local MCP config, this is a standard setup:
+3. Choose OAuth sign-in and complete the Kite login flow in your browser.
+4. Open a conversation with the connection enabled and try:
 
-```json
-{
-  "mcpServers": {
-    "kite-mcp": {
-      "type": "http",
-      "url": "https://mcp.kite.trade/mcp"
-    }
-  }
-}
-```
+> Use Kite MCP to show my holdings and total P&L. Do not place any orders.
 
-### Fastest setup path
+Check that the assistant actually calls a Kite tool and uses its returned data.
+A plausible answer alone does not confirm that the connection works.
 
-For most users, [[ChatGPT Web]] and [[Claude Web]] are the fastest setup path because they use a hosted remote MCP flow and handle OAuth in the UI.
-
-Clients with native HTTP transport support (VS Code, Claude Code, Windsurf) can connect directly. Clients that use stdio transport (Claude Desktop, Cursor) require [mcp-remote](https://www.npmjs.com/package/mcp-remote) as a bridge.
+Clients have different configuration formats. Use your client's setup guide
+rather than copying JSON from another client. Clients with native Streamable
+HTTP support can connect directly; stdio-only setups use `mcp-remote` as a bridge.
 
 ## Authentication
 
-Most MCP clients handle OAuth automatically. On first use, the AI client will either open a browser window or show a login link. You will first see a consent form naming the client, its exact registered return address, and the account access it requests. Approve only a client and return address you recognize, then continue to Kite's login page in the same browser. The callback is bound to that browser and approval is single-use. After login, the client receives a temporary access token. Application sessions last up to seven days, unless the server restarts or you log out. Kite access is renewed automatically only when Kite issues a refresh token; otherwise another Kite login is required when its access token expires.
+Your client opens a browser or shows a sign-in link. First review the consent
+page, including the client name and registered return address. Continue only if
+you recognise both, then sign in on Kite's own login page. Your Zerodha password
+is not shared with the AI assistant.
 
-Your Zerodha credentials are never sent to the AI client or the MCP server. Authentication happens directly with Kite.
+The client receives a temporary access token after authorisation. Application
+sessions last up to seven days, unless the server restarts or you log out. Kite
+access is renewed automatically only when Kite issues a refresh token. Otherwise,
+you need to sign in again when Kite access expires.
 
-### Hosted remote MCP clients
+Hosted clients usually register their OAuth return address automatically. You do
+not normally need to create a client ID or paste credentials into a configuration
+file. If your organisation manages connections, an administrator may need to
+make the connector available first.
 
-Hosted clients such as [[ChatGPT Web]] and [[Claude Web]] usually use OAuth dynamic client registration automatically. In practice, this means:
+## Orders and interactive views
 
-- you provide the MCP server URL
-- the client registers its own redirect URI with the server
-- the server redirects you to Kite for login
-- the client completes the OAuth flow after the browser callback
+Reading data does not require an order approval. When you request order placement,
+modification, or cancellation, review the form in your client or follow the
+browser approval link. The browser page optionally lets you allow future orders
+from this client. See [[Order Approvals]] before enabling that permission.
 
-No manual client ID or JSON configuration is normally required on the user side.
+Supported clients can also show portfolio charts, instrument details, and other
+[MCP Apps](../../reference/mcp-apps/). Other clients receive text data.
+
+## If the connection fails
+
+- **Cannot add the server:** check the endpoint and your client's remote MCP
+  support. Use the client-specific guide or the stdio bridge where needed.
+- **Sign-in expired:** reconnect through your client's OAuth flow.
+- **No tools appear:** enable the connection in the current conversation and
+  check your organisation's connector settings.
+- **Order form unavailable:** ask for a browser approval link and open it in
+  the browser used to sign in to Kite MCP.
+
+See the [FAQ](../../reference/faq/) for more troubleshooting.

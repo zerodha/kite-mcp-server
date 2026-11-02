@@ -24,3 +24,9 @@ These remain Zerodha brand assets. Conversation prompts are HTML text, adapted
 from the product page so they remain readable and accessible at every screen size.
 The prompts and illustrations are examples, not live account data.
 Fonts and runtime assets are served locally, without requests to third-party CDNs.
+
+## Documentation controls
+
+`icons/copy.svg` and `icons/check.svg` are unmodified Lucide icons from
+https://github.com/lucide-icons/lucide/tree/main/icons, downloaded on 2026-11-02.
+See `icons/LICENSE` for their ISC license and attribution.

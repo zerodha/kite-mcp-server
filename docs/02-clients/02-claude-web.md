@@ -28,4 +28,13 @@ https://mcp.kite.trade/mcp
 
 ## Troubleshooting
 
-Client registration is open and rate limited; HTTPS callback URIs need no approval.
+If you cannot add a connector, check whether your organisation allows custom connectors. If sign-in fails, reconnect through the client settings.
+
+See [Claude’s official connector guide](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp) for the current settings flow.
+
+## Verify the connection
+
+> Use Kite MCP to show my account profile. Do not place any orders.
+
+Inspect the tool result to confirm that the answer comes from Kite. If no tool
+is called, check that the connection is enabled for this conversation.

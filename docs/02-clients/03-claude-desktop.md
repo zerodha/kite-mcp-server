@@ -1,41 +1,50 @@
 ---
 title: Claude Desktop
-description: Set up Kite MCP with Claude Desktop
+description: Connect Claude Desktop to Kite MCP
 ---
 
 # Claude Desktop
 
-Claude Desktop uses stdio-based MCP transport and requires [mcp-remote](https://www.npmjs.com/package/mcp-remote) to connect to remote servers.
+Claude Desktop can use a remote connector directly. A local `mcp-remote` bridge
+is an alternative for setups that use the desktop developer configuration.
 
-## Prerequisites
+## Remote connector
 
-- [Claude Desktop](https://claude.ai/download)
-- [Node.js](https://nodejs.org/)
+1. Open Claude's connector settings and add a custom connector.
+2. Enter the server URL:
 
-## Configuration
+```text
+https://mcp.kite.trade/mcp
+```
 
-1. Open Claude Desktop > Settings > Developer > Edit Config
-2. Add the following configuration:
+3. Complete OAuth sign-in through Kite, then enable the connection in your chat.
+
+Connector availability may depend on your account or organisation settings.
+See [Claude's official connector guide](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)
+for the current settings flow.
+
+## Local bridge alternative
+
+This option requires [Node.js](https://nodejs.org/). Open Claude Desktop's
+**Settings > Developer > Edit Config** and add:
 
 ```json
 {
-    "mcpServers": {
-        "kite": {
-            "command": "npx",
-            "args": ["mcp-remote", "https://mcp.kite.trade/mcp"]
-        }
+  "mcpServers": {
+    "kite": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.kite.trade/mcp"]
     }
+  }
 }
 ```
 
-3. Save and restart Claude Desktop
+Save the file, restart Claude Desktop, and follow the browser sign-in flow when
+the bridge starts. Check the tool list in a new conversation.
 
-The hammer icon in the chat window indicates available tools. Kite tools should be listed there.
+## Verify the connection
 
-A [video walkthrough](https://www.youtube.com/watch?v=tD1z8lR0CDE) of the setup process is available.
+> Use Kite MCP to show my account profile. Do not place any orders.
 
-## Linux
-
-There is no official Linux build. Community options include [claude-desktop-debian](https://github.com/aaddrick/claude-desktop-debian) for Debian/Ubuntu and [claude-desktop-linux-flake](https://github.com/k3d3/claude-desktop-linux-flake) for Nix.
-
-The configuration file is located at `~/.config/Claude/claude_desktop_config.json`.
+Expand the tool call and check that it returns account data from Kite.
+For other platforms, [[Claude Web]] and [[Claude Code]] are alternatives.

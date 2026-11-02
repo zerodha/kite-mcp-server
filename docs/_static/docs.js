@@ -25,29 +25,44 @@ document.addEventListener('DOMContentLoaded', function () {
     table.before(frame);
     frame.appendChild(table);
   });
-  function addCopyButton(container, text, label) {
+  function addCopyButton(container, source, label) {
     var button = document.createElement('button');
-    button.className = 'copy-button outline small';
+    button.className = 'copy-button';
     button.type = 'button';
-    button.textContent = 'Copy';
+    button.title = label;
     button.setAttribute('aria-label', label);
-    button.setAttribute('aria-live', 'polite');
+    var icon = document.createElement('span');
+    icon.className = 'copy-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    button.appendChild(icon);
+    var feedback = document.createElement('span');
+    feedback.className = 'sr-only';
+    feedback.setAttribute('role', 'status');
+    var reset;
     button.addEventListener('click', async function () {
+      clearTimeout(reset);
       try {
-        await navigator.clipboard.writeText(text);
-        button.textContent = 'Copied';
+        await navigator.clipboard.writeText(source.tagName === 'PRE' ? source.textContent : source.textContent.trim());
+        button.dataset.state = 'copied';
+        button.title = 'Copied';
+        feedback.textContent = 'Copied to clipboard';
       } catch (error) {
-        button.textContent = 'Copy';
-        button.title = 'Text selected. Use your device’s Copy action.';
         var selection = window.getSelection();
         var range = document.createRange();
-        range.selectNodeContents(container.querySelector('pre, p'));
+        range.selectNodeContents(source);
         selection.removeAllRanges();
         selection.addRange(range);
+        button.title = 'Text selected. Use your device’s Copy action.';
+        feedback.textContent = 'Text selected. Use your device’s Copy action.';
       }
-      setTimeout(function () { button.textContent = 'Copy'; }, 2000);
+      reset = setTimeout(function () {
+        delete button.dataset.state;
+        button.title = label;
+        feedback.textContent = '';
+      }, 2000);
     });
     container.appendChild(button);
+    container.appendChild(feedback);
   }
   article.querySelectorAll('pre').forEach(function (block) {
     block.tabIndex = 0;
@@ -56,11 +71,15 @@ document.addEventListener('DOMContentLoaded', function () {
     frame.className = 'code-frame';
     block.before(frame);
     frame.appendChild(block);
-    addCopyButton(frame, block.textContent, 'Copy code example');
+    addCopyButton(frame, block, 'Copy code example');
   });
 
   article.querySelectorAll('blockquote').forEach(function (quote) {
-    addCopyButton(quote, quote.textContent.trim(), 'Copy example prompt');
+    var body = document.createElement('div');
+    body.className = 'prompt-text';
+    while (quote.firstChild) body.appendChild(quote.firstChild);
+    quote.appendChild(body);
+    addCopyButton(quote, body, 'Copy example prompt');
   });
 
   var drawer = document.querySelector('aside[data-sidebar]');
