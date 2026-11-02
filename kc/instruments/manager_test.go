@@ -933,7 +933,11 @@ func TestCatalogInputLimitAppliesAfterDecompression(t *testing.T) {
 				if compressed {
 					w.Header().Set("Content-Encoding", "gzip")
 					zip := gzip.NewWriter(w)
-					defer zip.Close()
+					defer func() {
+						if err := zip.Close(); err != nil {
+							t.Errorf("close gzip fixture: %v", err)
+						}
+					}()
 					output = zip
 				}
 				_, _ = io.WriteString(output, strings.Repeat(`{"instrument_token":1,"exchange":"NSE","tradingsymbol":"X","segment":"NSE"}`+"\n", 20))

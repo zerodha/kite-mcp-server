@@ -87,13 +87,23 @@ test('widgets only call explicitly allowed read modes and correlate their echoes
 });
 
 
-test('quote calls across widget slots are paced and queued cancellations do not call the host',async()=>{
+test('quote calls remain paced when a timer fires early and cancelled slots do not call the host',async t=>{
+  let now=1000;
+  t.mock.timers.enable({apis:['setTimeout']});
+  t.mock.method(performance,'now',()=>now);
   const starts=[];
-  const requests=new ProductionPanelRequests(async params=>{starts.push({name:params.name,time:Date.now()});return {structuredContent:{data:[]}};},()=>true,{quoteIntervalMs:25});
+  const requests=new ProductionPanelRequests(async params=>{starts.push({name:params.name,time:performance.now()});return {structuredContent:{data:[]}};},()=>true,{quoteIntervalMs:25});
   await requests.callTool({name:'market',arguments:{mode:'quote',instruments:['NSE:A']}});
   const cancelled=requests.run('prices','market',{mode:'quote',instruments:['NSE:B']});
   const checked=assert.rejects(cancelled,{name:'AbortError'});requests.cancel('prices');
-  await requests.run('chain-quotes','market',{mode:'quote',instruments:['NSE:C']});await checked;
+  const next=requests.run('chain-quotes','market',{mode:'quote',instruments:['NSE:C']});
+  await new Promise(setImmediate);
+  assert.equal(starts.length,1);
+  now+=24;t.mock.timers.tick(25);
+  await new Promise(setImmediate);
+  assert.equal(starts.length,1,'an early timer must not dispatch before the deadline');
+  now+=1;t.mock.timers.tick(1);
+  await next;await checked;
   assert.equal(starts.length,2);
   assert.ok(starts[1].time-starts[0].time>=25);
 });

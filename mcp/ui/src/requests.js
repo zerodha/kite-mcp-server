@@ -24,7 +24,7 @@ function resultKey(result) {
 // after the response or after cancellation. Keep a bounded history for this app.
 export class PanelRequests {
   constructor(call, canCall, {quoteIntervalMs=1100}={}) {
-    this.quoteIntervalMs=quoteIntervalMs;this.quoteTail=Promise.resolve();this.lastQuoteAt=0;
+    this.quoteIntervalMs=quoteIntervalMs;this.quoteTail=Promise.resolve();this.lastQuoteAt=-Infinity;
     this.call=call; this.canCall=canCall; this.slots=new Map();
     this.results=new Map();this.serial=0;
     this.session=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
@@ -51,27 +51,30 @@ export class PanelRequests {
     this.results.set(key,origins);
     if(this.results.size>64)this.results.delete(this.results.keys().next().value);
   }
-  async quoteTurn(operation){
+  async quoteTurn(operation,dispatch){
     const previous=this.quoteTail;
     let release;this.quoteTail=new Promise(resolve=>release=resolve);
     try{
       await previous;
       if(operation.controller.signal.aborted)throw new DOMException('Superseded request','AbortError');
-      const delay=Math.max(0,this.lastQuoteAt+this.quoteIntervalMs-Date.now());
-      if(delay)await new Promise((resolve,reject)=>{
+      let delay;
+      // Timers may fire early. Recheck a monotonic deadline before dispatch.
+      while((delay=this.lastQuoteAt+this.quoteIntervalMs-performance.now())>0)await new Promise((resolve,reject)=>{
         const signal=operation.controller.signal;
         const abort=()=>{clearTimeout(timer);reject(new DOMException('Superseded request','AbortError'));};
         const timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},delay);
         signal.addEventListener('abort',abort,{once:true});
       });
       if(operation.controller.signal.aborted)throw new DOMException('Superseded request','AbortError');
-      this.lastQuoteAt=Date.now();
+      // Dispatch while holding the queue turn, and measure after invocation so
+      // queued continuations cannot shorten the interval between host calls.
+      try{return dispatch();}finally{this.lastQuoteAt=performance.now();}
     }finally{release();}
   }
   async callTool(params,options={}){
     if(!readModes[params.name]?.has(params.arguments?.mode))throw new Error('Only supported read-only tool modes are allowed.');
     const signal=options.signal||new AbortController().signal;
-    if(params.name==='market'&&params.arguments.mode==='quote'&&this.quoteIntervalMs>0)await this.quoteTurn({controller:{signal}});
+    if(params.name==='market'&&params.arguments.mode==='quote'&&this.quoteIntervalMs>0)return this.quoteTurn({controller:{signal}},()=>this.call(params,options));
     if(signal.aborted)throw new DOMException('Superseded request','AbortError');
     return this.call(params,options);
   }
