@@ -111,7 +111,12 @@ func checkSessionID(sessionID string) error {
 		return nil
 	}
 
-	// Handle external format (plain UUID from SSE/stdio modes)
+	// mcp-go's stdio server always reports the fixed ID "stdio" (one client per process)
+	if sessionID == "stdio" {
+		return nil
+	}
+
+	// Handle external format (plain UUID from SSE modes)
 	if _, err := uuid.Parse(sessionID); err != nil {
 		return fmt.Errorf("%s: %w", errInvalidSessionIDFormat, err)
 	}
