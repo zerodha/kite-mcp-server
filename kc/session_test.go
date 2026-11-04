@@ -671,3 +671,12 @@ func TestExternalSessionIDFormat(t *testing.T) {
 		t.Errorf("Expected internal data['test'] to be 'data', got: %v", retrievedData2["test"])
 	}
 }
+
+func TestCheckSessionIDAcceptsStdio(t *testing.T) {
+	if err := checkSessionID("stdio"); err != nil {
+		t.Fatalf("stdio session ID rejected: %v", err)
+	}
+	if err := checkSessionID("not-a-uuid"); err == nil {
+		t.Fatal("invalid session ID accepted")
+	}
+}
