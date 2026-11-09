@@ -80,7 +80,7 @@ func TestInvalidTokenFormsDoNotConsumeCode(t *testing.T) {
 			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid_request") {
 				t.Fatalf("invalid form accepted: %d %s", w.Code, w.Body.String())
 			}
-			if _, exists := s.authCodes[code]; !exists {
+			if _, exists := s.authCodes.Lookup(code); !exists {
 				t.Fatal("invalid form consumed authorization code")
 			}
 		})

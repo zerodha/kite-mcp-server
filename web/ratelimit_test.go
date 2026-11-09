@@ -61,7 +61,7 @@ func TestPeerFloodDoesNotResetExistingRateLimits(t *testing.T) {
 	if got := request("192.0.2.1"); got != http.StatusTooManyRequests {
 		t.Fatalf("peer flood reset the existing client's quota: %d", got)
 	}
-	if got := len(limiter.limiters); got != maxRateLimitPeers {
+	if got := limiter.limiters.Len(); got != maxRateLimitPeers {
 		t.Fatalf("peer flood grew retained entries to %d", got)
 	}
 }

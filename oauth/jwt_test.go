@@ -239,7 +239,7 @@ func TestRateLimiterRemovesExpiredPeers(t *testing.T) {
 		if !limiter.Allow("new-peer") {
 			t.Fatal("new peer rejected")
 		}
-		if _, retained := limiter.requests["old-peer"]; retained {
+		if _, retained := limiter.requests.Lookup("old-peer"); retained {
 			t.Fatal("expired peer retained")
 		}
 	})
@@ -291,10 +291,10 @@ func TestRateLimiterEvictsLeastRecentlyUsedPeer(t *testing.T) {
 		if !limiter.Allow("new-peer") {
 			t.Fatal("new peer rejected at capacity")
 		}
-		if len(limiter.requests) != maxRateLimitPeers || limiter.peers.Len() != maxRateLimitPeers {
+		if limiter.requests.Len() != maxRateLimitPeers || limiter.peers.Len() != maxRateLimitPeers {
 			t.Fatal("limiter exceeded capacity")
 		}
-		if _, retained := limiter.requests["peer-1"]; retained {
+		if _, retained := limiter.requests.Lookup("peer-1"); retained {
 			t.Fatal("least recently used peer retained")
 		}
 		if limiter.Allow("peer-0") {

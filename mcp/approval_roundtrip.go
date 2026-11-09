@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zerodha/kite-mcp-server/internal/storage"
 )
 
 type approvalContextKey struct{}
@@ -26,8 +27,9 @@ type pendingTradeApproval struct {
 }
 
 type tradeApprovals struct {
+	state storage.State
 	sync.Mutex
-	pending map[string]pendingTradeApproval
+	pending storage.Records[string, pendingTradeApproval]
 }
 
 func approvalOwner(req *mcp.CallToolRequest) string {
@@ -81,13 +83,19 @@ func approvalFromContext(ctx context.Context, req *mcp.CallToolRequest, operatio
 			store.Unlock()
 		}
 	}()
+	if err := storage.Check(store.state); err != nil {
+		return nil, err
+	}
 	now := time.Now()
 	if token := req.Params.RequestState; token != "" {
-		pending, found := store.pending[token]
+		pending, found := store.pending.Lookup(token)
 		if !found || pending.owner != approvalOwner(req) {
 			return approvalFailure("invalid_state", "Unknown or consumed approval; no transaction was executed."), nil
 		}
-		delete(store.pending, token)
+		if err := storage.Delete(store.state, "native_approvals", token); err != nil {
+			return nil, err
+		}
+		store.pending.Delete(token)
 		if now.After(pending.expires) {
 			return approvalFailure("timeout", "Approval deadline exceeded; no transaction was executed."), nil
 		}
@@ -120,9 +128,12 @@ func approvalFromContext(ctx context.Context, req *mcp.CallToolRequest, operatio
 	}
 	owner := approvalOwner(req)
 	ownerPending := 0
-	for token, pending := range store.pending {
+	for token, pending := range store.pending.All() {
 		if now.After(pending.expires) {
-			delete(store.pending, token)
+			if err := storage.Delete(store.state, "native_approvals", token); err != nil {
+				return nil, err
+			}
+			store.pending.Delete(token)
 			continue
 		}
 		if pending.owner == owner {
@@ -132,22 +143,30 @@ func approvalFromContext(ctx context.Context, req *mcp.CallToolRequest, operatio
 	if ownerPending >= maxPendingTradeApprovalsPerSession {
 		return approvalFailure("busy", "Too many pending approvals for this session; no transaction was executed."), nil
 	}
-	if len(store.pending) >= maxPendingTradeApprovals {
+	if store.pending.Len() >= maxPendingTradeApprovals {
 		return approvalFailure("busy", "Too many pending approvals; no transaction was executed."), nil
 	}
 	token := uuid.NewString()
-	store.pending[token] = pendingTradeApproval{owner, operation, snapshot, now.Add(tradeApprovalTimeout)}
+	pending := pendingTradeApproval{owner, operation, snapshot, now.Add(tradeApprovalTimeout)}
+	if err := storage.Put(store.state, "native_approvals", token, storedNativeApproval{pending.owner, pending.operation, pending.snapshot, pending.expires}); err != nil {
+		return nil, err
+	}
+	store.pending.Set(token, pending)
 	return &mcp.CallToolResult{
 		RequestState:  token,
 		InputRequests: mcp.InputRequestMap{"trade_approval": tradeApprovalForm(operation, snapshot)},
 	}, nil
 }
 
-func registerTradeApproval(server *mcp.Server) {
-	store := &tradeApprovals{pending: make(map[string]pendingTradeApproval)}
+func registerTradeApproval(server *mcp.Server, state storage.State) error {
+	store := &tradeApprovals{state: state, pending: storage.NewMemory[string, pendingTradeApproval]()}
+	if err := store.restoreState(); err != nil {
+		return err
+	}
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 			return next(context.WithValue(ctx, approvalContextKey{}, store), method, req)
 		}
 	})
+	return nil
 }

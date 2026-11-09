@@ -10,6 +10,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
+	"github.com/zerodha/kite-mcp-server/internal/storage"
 )
 
 func TestApprovalModernDiscoveryAndWire(t *testing.T) {
@@ -115,7 +116,7 @@ func TestApprovalModernDiscoveryAndWire(t *testing.T) {
 func TestApprovalRoundTripStateIntegrity(t *testing.T) {
 	for _, scenario := range []string{"accept", "decline", "false", "missing", "forged", "different owner", "changed", "expired", "cancelled"} {
 		t.Run(scenario, func(t *testing.T) {
-			store := &tradeApprovals{pending: make(map[string]pendingTradeApproval)}
+			store := &tradeApprovals{pending: storage.NewMemory[string, pendingTradeApproval]()}
 			ctx := context.WithValue(context.Background(), approvalContextKey{}, store)
 			req := &sdk.CallToolRequest{Params: &sdk.CallToolParamsRaw{}, Extra: &sdk.RequestExtra{Header: http.Header{"X-Kite-Session-Id": []string{"owner"}}}}
 			details := map[string]any{"quantity": 2}
@@ -142,9 +143,9 @@ func TestApprovalRoundTripStateIntegrity(t *testing.T) {
 			case "changed":
 				details["quantity"] = 3
 			case "expired":
-				pending := store.pending[first.RequestState]
+				pending := store.pending.Get(first.RequestState)
 				pending.expires = time.Now().Add(-time.Second)
-				store.pending[first.RequestState] = pending
+				store.pending.Set(first.RequestState, pending)
 			case "cancelled":
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithCancel(ctx)
@@ -167,7 +168,7 @@ func TestApprovalRoundTripStateIntegrity(t *testing.T) {
 }
 
 func TestApprovalCapacityIsolatesSessionsAndReclaimsSlots(t *testing.T) {
-	store := &tradeApprovals{pending: make(map[string]pendingTradeApproval)}
+	store := &tradeApprovals{pending: storage.NewMemory[string, pendingTradeApproval]()}
 	ctx := context.WithValue(context.Background(), approvalContextKey{}, store)
 	execute := func() (*sdk.CallToolResult, error) {
 		t.Fatal("capacity checks must not execute transactions")
@@ -192,7 +193,7 @@ func TestApprovalCapacityIsolatesSessionsAndReclaimsSlots(t *testing.T) {
 	}
 	require.True(t, create("session-a").IsError)
 	require.False(t, create("session-b").IsError, "one saturated session must not block another")
-	require.Len(t, store.pending, maxPendingTradeApprovalsPerSession+1)
+	require.Equal(t, maxPendingTradeApprovalsPerSession+1, store.pending.Len())
 
 	// Consuming an approval frees capacity for its owner, including declines.
 	req := request("session-a")
@@ -205,21 +206,21 @@ func TestApprovalCapacityIsolatesSessionsAndReclaimsSlots(t *testing.T) {
 	require.True(t, create("session-a").IsError)
 
 	// Expired state counts against neither the session nor the global limit.
-	for token, pending := range store.pending {
+	for token, pending := range store.pending.All() {
 		if pending.owner == "session-a" {
 			pending.expires = time.Now().Add(-time.Second)
-			store.pending[token] = pending
+			store.pending.Set(token, pending)
 			break
 		}
 	}
 	require.False(t, create("session-a").IsError)
-	require.Len(t, store.pending, maxPendingTradeApprovalsPerSession+1)
+	require.Equal(t, maxPendingTradeApprovalsPerSession+1, store.pending.Len())
 
 	// Keep the global bound as a backstop across distinct sessions.
-	for len(store.pending) < maxPendingTradeApprovals {
-		token := fmt.Sprintf("existing-%d", len(store.pending))
-		store.pending[token] = pendingTradeApproval{owner: token, expires: time.Now().Add(time.Minute)}
+	for store.pending.Len() < maxPendingTradeApprovals {
+		token := fmt.Sprintf("existing-%d", store.pending.Len())
+		store.pending.Set(token, pendingTradeApproval{owner: token, expires: time.Now().Add(time.Minute)})
 	}
 	require.True(t, create("session-c").IsError)
-	require.Len(t, store.pending, maxPendingTradeApprovals)
+	require.Equal(t, maxPendingTradeApprovals, store.pending.Len())
 }

@@ -21,7 +21,7 @@ func TestNewSessionManager(t *testing.T) {
 		t.Errorf("Expected default duration of %v, got %v", DefaultSessionDuration, manager.sessionDuration)
 	}
 
-	if len(manager.sessions) != 0 {
+	if manager.sessions.Len() != 0 {
 		t.Error("Expected empty sessions map")
 	}
 }
@@ -42,7 +42,7 @@ func TestGenerateSession(t *testing.T) {
 
 	// Should exist in sessions map
 	manager.mu.RLock()
-	session, exists := manager.sessions[sessionID]
+	session, exists := manager.sessions.Lookup(sessionID)
 	manager.mu.RUnlock()
 
 	if !exists {
@@ -73,7 +73,7 @@ func TestGenerateWithData(t *testing.T) {
 	sessionID := manager.GenerateWithData(testData)
 
 	manager.mu.RLock()
-	session, exists := manager.sessions[sessionID]
+	session, exists := manager.sessions.Lookup(sessionID)
 	manager.mu.RUnlock()
 
 	if !exists {
@@ -212,7 +212,7 @@ func TestTerminate(t *testing.T) {
 
 	// Verify session is removed
 	manager.mu.RLock()
-	_, exists := manager.sessions[sessionID]
+	_, exists := manager.sessions.Lookup(sessionID)
 	manager.mu.RUnlock()
 
 	if exists {
@@ -248,7 +248,7 @@ func TestCleanupExpiredSessions(t *testing.T) {
 		ExpiresAt: now.Add(-1 * time.Hour), // Expired 1 hour ago
 	}
 	manager.mu.Lock()
-	manager.sessions[expiredSessionID] = expiredSession
+	manager.sessions.Set(expiredSessionID, expiredSession)
 	manager.mu.Unlock()
 
 	// Now cleanup should find the expired session
@@ -259,7 +259,7 @@ func TestCleanupExpiredSessions(t *testing.T) {
 
 	// Verify expired session is removed
 	manager.mu.RLock()
-	_, exists := manager.sessions[expiredSessionID]
+	_, exists := manager.sessions.Lookup(expiredSessionID)
 	manager.mu.RUnlock()
 
 	if exists {
@@ -434,7 +434,7 @@ func TestConcurrentSessionTermination(t *testing.T) {
 
 	// Verify sessions are actually removed
 	manager.mu.RLock()
-	remaining := len(manager.sessions)
+	remaining := manager.sessions.Len()
 	manager.mu.RUnlock()
 
 	if remaining != 0 {
@@ -452,11 +452,11 @@ func TestConcurrentCleanup(t *testing.T) {
 	pastTime := time.Now().Add(-2 * time.Hour)
 	for i := 0; i < numSessions; i++ {
 		sessionID := fmt.Sprintf("expired-session-%d", i)
-		manager.sessions[sessionID] = &Session{
+		manager.sessions.Set(sessionID, &Session{
 			ID:        sessionID,
 			CreatedAt: pastTime,
 			ExpiresAt: pastTime.Add(time.Hour), // Expired 1 hour ago
-		}
+		})
 	}
 	manager.mu.Unlock()
 
@@ -488,7 +488,7 @@ func TestConcurrentCleanup(t *testing.T) {
 
 	// Verify no sessions remain
 	manager.mu.RLock()
-	remaining := len(manager.sessions)
+	remaining := manager.sessions.Len()
 	manager.mu.RUnlock()
 
 	if remaining != 0 {
@@ -522,7 +522,7 @@ func TestPendingAuthorizationCapacityAndExpiryRecovery(t *testing.T) {
 			t.Fatal("live pending flow was evicted", err)
 		}
 		secondActive := manager.Generate()
-		if len(manager.pendingAuth) != maxPendingAuthorizations || len(manager.sessions) != maxPendingAuthorizations+2 {
+		if manager.pendingAuth.Len() != maxPendingAuthorizations || manager.sessions.Len() != maxPendingAuthorizations+2 {
 			t.Fatal("capacity rejection changed session store")
 		}
 		if _, err := manager.Terminate(first); err != nil {
@@ -537,8 +537,8 @@ func TestPendingAuthorizationCapacityAndExpiryRecovery(t *testing.T) {
 		if _, err := manager.GeneratePendingAuthorization("new pending"); err != nil {
 			t.Fatal("expired flows did not release capacity", err)
 		}
-		if len(manager.pendingAuth) != 2 || len(manager.sessions) != 4 {
-			t.Fatal("expiry recovery removed wrong sessions", len(manager.pendingAuth), len(manager.sessions))
+		if manager.pendingAuth.Len() != 2 || manager.sessions.Len() != 4 {
+			t.Fatal("expiry recovery removed wrong sessions", manager.pendingAuth.Len(), manager.sessions.Len())
 		}
 		for _, id := range []string{active, secondActive, livePending} {
 			if _, err := manager.Get(id); err != nil {
@@ -568,7 +568,7 @@ func TestPendingAuthorizationAdmissionIsAtomic(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if accepted.Load() != 10 || len(manager.pendingAuth) != maxPendingAuthorizations || len(manager.sessions) != maxPendingAuthorizations {
+	if accepted.Load() != 10 || manager.pendingAuth.Len() != maxPendingAuthorizations || manager.sessions.Len() != maxPendingAuthorizations {
 		t.Fatal("concurrent admission exceeded capacity", accepted.Load())
 	}
 }
@@ -596,7 +596,7 @@ func TestPendingAuthorizationDeletionReleasesAdmission(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if len(manager.pendingAuth) != 0 {
+				if manager.pendingAuth.Len() != 0 {
 					t.Fatal("deleted authorization still occupies admission slot")
 				}
 			})

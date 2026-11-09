@@ -18,6 +18,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zerodha/kite-mcp-server/internal/audit"
+	"github.com/zerodha/kite-mcp-server/internal/storage"
 	"github.com/zerodha/kite-mcp-server/kc"
 	"github.com/zerodha/kite-mcp-server/kc/templates"
 	"github.com/zerodha/kite-mcp-server/oauth"
@@ -51,9 +52,10 @@ type clientOrderPermission struct {
 // BrowserApprovals keeps approval state separate from caller-controlled tool
 // arguments. All state ends with the application grant or server process.
 type BrowserApprovals struct {
+	state       storage.State
 	mu          sync.Mutex
-	pending     map[string]*browserOrder
-	permissions map[string]clientOrderPermission
+	pending     storage.Records[string, *browserOrder]
+	permissions storage.Records[string, clientOrderPermission]
 	manager     *kc.Manager
 	oauth       *oauth.Server
 	page        *template.Template
@@ -62,7 +64,7 @@ type BrowserApprovals struct {
 
 func NewBrowserApprovals(manager *kc.Manager, server *oauth.Server) *BrowserApprovals {
 	page := template.Must(template.New("order_approval.html").ParseFS(templates.FS, "base.html", "brand_assets.html", "order_approval.html"))
-	return &BrowserApprovals{pending: make(map[string]*browserOrder), permissions: make(map[string]clientOrderPermission), manager: manager, oauth: server, page: page, loginLimit: oauth.NewRateLimiter(30, time.Minute)}
+	return &BrowserApprovals{state: manager.StateStore(), pending: storage.NewMemory[string, *browserOrder](), permissions: storage.NewMemory[string, clientOrderPermission](), manager: manager, oauth: server, page: page, loginLimit: oauth.NewRateLimiter(30, time.Minute)}
 }
 
 func (b *BrowserApprovals) Attach(server *sdk.Server) {
@@ -79,6 +81,9 @@ func browserApprovalsFrom(ctx context.Context) *BrowserApprovals {
 }
 
 func (b *BrowserApprovals) identity(ctx context.Context, req *sdk.CallToolRequest) (*oauth.TokenClaims, string, error) {
+	if err := storage.Check(b.state); err != nil {
+		return nil, "", err
+	}
 	c := oauth.ClaimsFromContext(ctx)
 	if c == nil || c.ClientID == "" || c.SessionID == "" || c.KiteUserID == "" || c.SessionID != GetSessionID(req) {
 		return nil, "", fmt.Errorf("verified client identity unavailable")
@@ -107,13 +112,16 @@ func (b *BrowserApprovals) trusted(ctx context.Context, req *sdk.CallToolRequest
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	p, ok := b.permissions[c.SessionID]
+	p, ok := b.permissions.Lookup(c.SessionID)
 	if ok && !time.Now().Before(p.expires) {
 		if p.allowed {
 			b.metricEvent("permissions", "permission_expired")
 			audit.Record(b.manager.Logger, "order_permission_expired", audit.Actor{UserID: p.user, SessionID: c.SessionID, ClientID: p.client}, "scope", "all_orders", "expires_at", p.expires.UTC().Format(time.RFC3339))
 		}
-		delete(b.permissions, c.SessionID)
+		if err := storage.Delete(b.state, "order_permissions", c.SessionID); err != nil {
+			return false
+		}
+		b.permissions.Delete(c.SessionID)
 		return false
 	}
 	return ok && p.allowed && p.client == c.ClientID && p.user == c.KiteUserID
@@ -127,22 +135,31 @@ func randomApprovalSecret() string {
 	return hex.EncodeToString(value[:])
 }
 
-func (b *BrowserApprovals) cleanupLocked(now time.Time) {
-	for id, p := range b.pending {
-		b.expireOrderLocked(p, now)
+func (b *BrowserApprovals) cleanupLocked(now time.Time) error {
+	for id, p := range b.pending.All() {
+		if err := b.expireOrderLocked(p, now); err != nil {
+			return err
+		}
 		if !now.Before(p.retainUntil) && p.status != "submitting" {
-			delete(b.pending, id)
+			if err := storage.Delete(b.state, "browser_orders", id); err != nil {
+				return err
+			}
+			b.pending.Delete(id)
 		}
 	}
-	for id, p := range b.permissions {
+	for id, p := range b.permissions.All() {
 		if !now.Before(p.expires) {
 			if p.allowed {
 				b.metricEvent("permissions", "permission_expired")
 				audit.Record(b.manager.Logger, "order_permission_expired", audit.Actor{UserID: p.user, SessionID: id, ClientID: p.client}, "scope", "all_orders", "expires_at", p.expires.UTC().Format(time.RFC3339))
 			}
-			delete(b.permissions, id)
+			if err := storage.Delete(b.state, "order_permissions", id); err != nil {
+				return err
+			}
+			b.permissions.Delete(id)
 		}
 	}
+	return storage.Check(b.state)
 }
 
 func (b *BrowserApprovals) request(ctx context.Context, req *sdk.CallToolRequest, operation string, details any) (*sdk.CallToolResult, error) {
@@ -179,9 +196,11 @@ func (b *BrowserApprovals) request(ctx context.Context, req *sdk.CallToolRequest
 	p := &browserOrder{id: randomApprovalSecret(), session: c.SessionID, user: c.KiteUserID, client: c.ClientID, clientName: name, operation: operation, snapshot: snapshot, arguments: arguments, expires: expires, retainUntil: now.Add(15 * time.Minute), status: "approval_required"}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.cleanupLocked(now)
+	if err := b.cleanupLocked(now); err != nil {
+		return nil, err
+	}
 	active := 0
-	for _, existing := range b.pending {
+	for _, existing := range b.pending.All() {
 		if existing.session == c.SessionID && (existing.status == "approval_required" || existing.status == "approved_for_later") && now.Before(existing.expires) {
 			active++
 		}
@@ -191,11 +210,13 @@ func (b *BrowserApprovals) request(ctx context.Context, req *sdk.CallToolRequest
 	}
 	// Completed outcomes are retained for lookup, but must not consume every
 	// slot needed by new reviews. Reclaim the oldest terminal record at capacity.
-	if len(b.pending) >= maxPendingTradeApprovals {
+	if b.pending.Len() >= maxPendingTradeApprovals {
 		var oldest *browserOrder
-		for _, existing := range b.pending {
+		for _, existing := range b.pending.All() {
 			if existing.status == "approval_required" && !now.Before(existing.expires) {
-				b.expireOrderLocked(existing, now)
+				if err := b.expireOrderLocked(existing, now); err != nil {
+					return nil, err
+				}
 			}
 			if existing.status != "approval_required" && existing.status != "approved_for_later" && existing.status != "submitting" && (oldest == nil || existing.retainUntil.Before(oldest.retainUntil)) {
 				oldest = existing
@@ -204,12 +225,18 @@ func (b *BrowserApprovals) request(ctx context.Context, req *sdk.CallToolRequest
 		if oldest == nil {
 			return approvalFailure("busy", "Too many order approvals. Finish an existing request before starting another; no transaction was executed."), nil
 		}
-		delete(b.pending, oldest.id)
+		if err := storage.Delete(b.state, "browser_orders", oldest.id); err != nil {
+			return nil, err
+		}
+		b.pending.Delete(oldest.id)
 	}
 	if trace := traceFrom(ctx); trace != nil {
 		p.trace = *trace
 	}
-	b.pending[p.id] = p
+	if err := b.persistLocked([]*browserOrder{p}); err != nil {
+		return nil, err
+	}
+	b.pending.Set(p.id, p)
 	b.auditOrder(p, "order_approval_requested", "expires_at", p.expires.UTC().Format(time.RFC3339))
 	b.metricEvent(operation, "created")
 	data := map[string]any{"status": "approval_required", "approval_id": p.id, "approval_url": b.approvalURL(p.id), "expires_at": expires.Format(time.RFC3339), "message": "No order was submitted. Open the approval URL in any browser, sign in to the matching Kite account, then review and approve. Do not repeat the order request. After approval, use orders mode=approval_status with this approval_id to retrieve the outcome."}
@@ -237,13 +264,17 @@ func (b *BrowserApprovals) status(ctx context.Context, req *sdk.CallToolRequest,
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.cleanupLocked(time.Now())
-	p, ok := b.pending[id]
+	if err := b.cleanupLocked(time.Now()); err != nil {
+		return nil, err
+	}
+	p, ok := b.pending.Lookup(id)
 	if !ok || p.session != c.SessionID || p.client != c.ClientID || p.user != c.KiteUserID {
 		return NewToolResultError("Order approval not found for this connection."), nil
 	}
 	if p.status == "approval_required" && !time.Now().Before(p.expires) {
-		b.expireOrderLocked(p, time.Now())
+		if err := b.expireOrderLocked(p, time.Now()); err != nil {
+			return nil, err
+		}
 	}
 	data := map[string]any{"approval_id": id, "status": p.status, "result": p.result}
 	trace := p.trace
@@ -251,7 +282,7 @@ func (b *BrowserApprovals) status(ctx context.Context, req *sdk.CallToolRequest,
 		trace.Outcome = outcome
 	}
 	trace.add(data)
-	permission, allowed := b.permissions[c.SessionID]
+	permission, allowed := b.permissions.Lookup(c.SessionID)
 	allowed = allowed && permission.allowed && permission.client == c.ClientID && permission.user == c.KiteUserID && time.Now().Before(permission.expires)
 	data["future_orders_allowed"] = allowed
 	if p.status == "approved_for_later" {
@@ -345,6 +376,10 @@ func approvalHTTPHeaders(w http.ResponseWriter) {
 
 func (b *BrowserApprovals) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	approvalHTTPHeaders(w)
+	if storage.Check(b.state) != nil {
+		http.Error(w, "Storage unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	purpose := "review"
 	if strings.HasPrefix(r.URL.Path, "/order-approvals/manage/") {
 		purpose = "permissions"
@@ -375,8 +410,12 @@ func (b *BrowserApprovals) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.mu.Lock()
-	b.cleanupLocked(time.Now())
-	p := b.pending[id]
+	if err := b.cleanupLocked(time.Now()); err != nil {
+		b.mu.Unlock()
+		http.Error(w, "Storage unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	p := b.pending.Get(id)
 	var expires time.Time
 	if p != nil {
 		expires = p.expires
@@ -445,7 +484,7 @@ func (b *BrowserApprovals) orderPageLocked(p *browserOrder) browserOrderPage {
 			}
 		}
 	}
-	if permission, ok := b.permissions[p.session]; ok && permission.allowed && permission.client == p.client && permission.user == p.user && time.Now().Before(permission.expires) {
+	if permission, ok := b.permissions.Lookup(p.session); ok && permission.allowed && permission.client == p.client && permission.user == p.user && time.Now().Before(permission.expires) {
 		data.Allowed = true
 		data.ManageURL = b.manageURL(p.session)
 		data.Expiry = permission.expires.In(time.FixedZone("IST", 19800)).Format("02 Jan 2006, 15:04 IST")
@@ -483,6 +522,11 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 	}
 	if decision == "decline" {
 		p.status = "declined"
+		if err := b.persistLocked([]*browserOrder{p}); err != nil {
+			b.mu.Unlock()
+			http.Error(w, "Storage unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		b.auditOrder(p, "order_approval_declined", "outcome", "declined")
 		b.metricEvent(p.operation, "declined")
 		b.mu.Unlock()
@@ -501,16 +545,26 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 		p.expires = deadline
 		p.retainUntil = deadline.Add(15 * time.Minute)
 		p.trace.Outcome = "approved_for_later"
+		if err := b.persistLocked([]*browserOrder{p}); err != nil {
+			b.mu.Unlock()
+			http.Error(w, "Storage unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		b.auditOrder(p, "order_approval_saved", "scope", "exact_order_once", "expires_at", p.expires.UTC().Format(time.RFC3339))
 		b.mu.Unlock()
 		b.renderOrderOutcome(w, p)
 		return
 	}
-	permissionGeneration := b.permissions[p.session].generation
+	permissionGeneration := b.permissions.Get(p.session).generation
 	p.rememberRequested = r.PostForm.Get("remember") == "yes"
+	p.status = "submitting" // Single-use before fresh authentication and any API attempt.
+	if err := b.persistLocked([]*browserOrder{p}); err != nil {
+		b.mu.Unlock()
+		http.Error(w, "Storage unavailable. No order was submitted.", http.StatusServiceUnavailable)
+		return
+	}
 	b.auditOrder(p, "order_approval_accepted", "remember_requested", p.rememberRequested)
 	b.metricEvent(p.operation, "submission_started")
-	p.status = "submitting" // Single-use before fresh authentication and any API attempt.
 	b.mu.Unlock()
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
@@ -541,18 +595,23 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 	}
 	p.result = result
 	p.status = "failed"
+	permissionGranted := false
 	if result != nil && !result.IsError {
 		p.status = "submitted"
-		if r.PostForm.Get("remember") == "yes" && b.permissions[p.session].generation == permissionGeneration {
+		if r.PostForm.Get("remember") == "yes" && b.permissions.Get(p.session).generation == permissionGeneration {
 			if deadline, err := b.manager.SessionExpiry(p.session); err == nil {
-				current := b.permissions[p.session]
+				current := b.permissions.Get(p.session)
 				if !current.allowed || current.client != p.client || current.user != p.user || !time.Now().Before(current.expires) {
-					b.metricEvent("permissions", "permission_granted")
-					b.auditOrder(p, "order_permission_granted", "scope", "all_orders", "expires_at", deadline.UTC().Format(time.RFC3339))
+					permissionGranted = true
 				}
-				b.permissions[p.session] = clientOrderPermission{client: p.client, user: p.user, clientName: p.clientName, expires: deadline, allowed: true, generation: permissionGeneration}
+				b.permissions.Set(p.session, clientOrderPermission{client: p.client, user: p.user, clientName: p.clientName, expires: deadline, allowed: true, generation: permissionGeneration})
 			}
 		}
+	}
+	saveErr := b.persistLocked([]*browserOrder{p}, p.session)
+	if permissionGranted && saveErr == nil {
+		b.metricEvent("permissions", "permission_granted")
+		b.auditOrder(p, "order_permission_granted", "scope", "all_orders", "expires_at", b.permissions.Get(p.session).expires.UTC().Format(time.RFC3339))
 	}
 	submissionOutcome := "not_attempted"
 	if attempt.attempted {
@@ -561,10 +620,14 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 			submissionOutcome = "accepted"
 		}
 	}
-	b.auditOrder(p, "browser_approval_result", "status", p.status, "approval_outcome", p.trace.Outcome, "submission_attempted", attempt.attempted, "submission_outcome", submissionOutcome)
+	b.auditOrder(p, "browser_approval_result", "status", p.status, "approval_outcome", p.trace.Outcome, "submission_attempted", attempt.attempted, "submission_outcome", submissionOutcome, "result_persisted", saveErr == nil)
 	b.metricEvent(p.operation, p.status)
 	observeApproval(b.manager.Metrics(), p.operation, result, p.trace)
 	b.mu.Unlock()
+	if saveErr != nil {
+		http.Error(w, "Unable to save the outcome. Check orders and trades before trying again.", http.StatusServiceUnavailable)
+		return
+	}
 	b.renderOrderOutcome(w, p)
 }
 
@@ -585,21 +648,31 @@ func (b *BrowserApprovals) manage(w http.ResponseWriter, r *http.Request, sessio
 			return
 		}
 		b.mu.Lock()
-		permission := b.permissions[sessionID]
-		if permission.allowed {
-			b.metricEvent("permissions", "permission_revoked")
-			audit.Record(b.manager.Logger, "order_permission_revoked", audit.Actor{UserID: session.Credentials.UserID, SessionID: sessionID, ClientID: permission.client}, "scope", "all_orders")
-		}
-		for _, saved := range b.pending {
+		permission := b.permissions.Get(sessionID)
+		wasAllowed := permission.allowed
+		var revoked []*browserOrder
+		for _, saved := range b.pending.All() {
 			if saved.session == sessionID && saved.status == "approved_for_later" {
 				saved.status = "declined"
-				b.auditOrder(saved, "order_approval_revoked", "scope", "exact_order_once")
+				revoked = append(revoked, saved)
 			}
 		}
 		permission.allowed = false
 		permission.generation++
 		permission.expires = session.ExpiresAt
-		b.permissions[sessionID] = permission
+		b.permissions.Set(sessionID, permission)
+		if err := b.persistLocked(revoked, sessionID); err != nil {
+			b.mu.Unlock()
+			http.Error(w, "Unable to save permission changes", http.StatusServiceUnavailable)
+			return
+		}
+		if wasAllowed {
+			b.metricEvent("permissions", "permission_revoked")
+			audit.Record(b.manager.Logger, "order_permission_revoked", audit.Actor{UserID: session.Credentials.UserID, SessionID: sessionID, ClientID: permission.client}, "scope", "all_orders")
+		}
+		for _, saved := range revoked {
+			b.auditOrder(saved, "order_approval_revoked", "scope", "exact_order_once")
+		}
 		b.mu.Unlock()
 		b.render(w, http.StatusOK, browserOrderPage{Title: "Approval required for future orders", Message: "You must approve future orders from this app. Saved approvals have been removed. Existing orders have not been cancelled."})
 		return
@@ -632,12 +705,16 @@ func executeBrowserApproved(ctx context.Context, req *sdk.CallToolRequest, opera
 }
 
 // Called under b.mu; repeats and status polling must not count expiry twice.
-func (b *BrowserApprovals) expireOrderLocked(p *browserOrder, now time.Time) {
+func (b *BrowserApprovals) expireOrderLocked(p *browserOrder, now time.Time) error {
 	if (p.status == "approval_required" || p.status == "approved_for_later") && !now.Before(p.expires) {
 		p.status = "expired"
+		if err := b.persistLocked([]*browserOrder{p}); err != nil {
+			return err
+		}
 		b.auditOrder(p, "order_approval_expired", "expires_at", p.expires.UTC().Format(time.RFC3339))
 		b.metricEvent(p.operation, "expired")
 	}
+	return nil
 }
 
 func (b *BrowserApprovals) metricEvent(operation, event string) {
@@ -658,9 +735,12 @@ func (b *BrowserApprovals) executeSaved(ctx context.Context, req *sdk.CallToolRe
 		return nil, nil, false
 	}
 	b.mu.Lock()
-	b.cleanupLocked(time.Now())
+	if err := b.cleanupLocked(time.Now()); err != nil {
+		b.mu.Unlock()
+		return nil, err, true
+	}
 	var selected *browserOrder
-	for _, p := range b.pending {
+	for _, p := range b.pending.All() {
 		if p.status == "approved_for_later" && p.session == c.SessionID && p.client == c.ClientID && p.user == c.KiteUserID && p.operation == operation && bytes.Equal(p.snapshot, snapshot) {
 			selected = p
 			break
@@ -671,6 +751,10 @@ func (b *BrowserApprovals) executeSaved(ctx context.Context, req *sdk.CallToolRe
 		return nil, nil, false
 	}
 	selected.status = "submitting"
+	if err := b.persistLocked([]*browserOrder{selected}); err != nil {
+		b.mu.Unlock()
+		return nil, err, true
+	}
 	b.auditOrder(selected, "order_approval_consumed", "scope", "exact_order_once")
 	b.mu.Unlock()
 	traceMethod(ctx, "remembered_permission", "approved", "")
@@ -694,13 +778,17 @@ func (b *BrowserApprovals) executeSaved(ctx context.Context, req *sdk.CallToolRe
 		selected.status = "submitted"
 	}
 	selected.retainUntil = time.Now().Add(15 * time.Minute)
+	if saveErr := b.persistLocked([]*browserOrder{selected}); saveErr != nil {
+		b.mu.Unlock()
+		return nil, saveErr, true
+	}
 	b.mu.Unlock()
 	return result, err, true
 }
 
 func (b *BrowserApprovals) savedCountLocked(session, client, user string) int {
 	count := 0
-	for _, p := range b.pending {
+	for _, p := range b.pending.All() {
 		if p.session == session && p.client == client && p.user == user && p.status == "approved_for_later" && time.Now().Before(p.expires) {
 			count++
 		}

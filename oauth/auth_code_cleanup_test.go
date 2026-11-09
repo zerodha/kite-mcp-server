@@ -67,10 +67,10 @@ func TestAbandonedAuthCodesExpireOnActivity(t *testing.T) {
 						t.Fatal("unknown code accepted")
 					}
 				}
-				if _, exists := s.authCodes[abandoned]; exists {
+				if _, exists := s.authCodes.Lookup(abandoned); exists {
 					t.Fatal("expired abandoned code retained")
 				}
-				if _, exists := s.authCodes[live]; !exists {
+				if _, exists := s.authCodes.Lookup(live); !exists {
 					t.Fatal("live code removed by cleanup")
 				}
 			})
@@ -83,20 +83,20 @@ func TestAuthCodeCapacityPreservesOutstandingCodes(t *testing.T) {
 		s := New(Config{AuthCodeTTL: time.Minute})
 		for i := range maxPendingAuthCodes {
 			key := fmt.Sprint(i)
-			s.authCodes[key] = &AuthCode{Code: key, ExpiresAt: time.Now().Add(time.Minute)}
+			s.authCodes.Set(key, &AuthCode{Code: key, ExpiresAt: time.Now().Add(time.Minute)})
 		}
 		if code, err := s.CreateAuthCode("client", "https://example.com", "user", "session", "challenge"); err == nil || code != "" {
 			t.Fatal("full store accepted another code")
 		}
-		if len(s.authCodes) != maxPendingAuthCodes {
+		if s.authCodes.Len() != maxPendingAuthCodes {
 			t.Fatal("capacity rejection evicted outstanding codes")
 		}
 		time.Sleep(time.Minute)
 		if _, err := s.CreateAuthCode("client", "https://example.com", "user", "session", "challenge"); err != nil {
 			t.Fatal(err)
 		}
-		if len(s.authCodes) != 1 {
-			t.Fatalf("expired codes not reclaimed: %d", len(s.authCodes))
+		if s.authCodes.Len() != 1 {
+			t.Fatalf("expired codes not reclaimed: %d", s.authCodes.Len())
 		}
 	})
 }
@@ -105,14 +105,14 @@ func TestAuthCodeCleanupIsThrottled(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := New(Config{})
 		s.lastAuthCodeCleanup = time.Now()
-		s.authCodes["expired"] = &AuthCode{ExpiresAt: time.Now().Add(-time.Second)}
+		s.authCodes.Set("expired", &AuthCode{ExpiresAt: time.Now().Add(-time.Second)})
 		_, _ = s.ExchangeCode(&TokenRequest{Code: "unknown"})
-		if _, exists := s.authCodes["expired"]; !exists {
+		if _, exists := s.authCodes.Lookup("expired"); !exists {
 			t.Fatal("cleanup was not throttled")
 		}
 		time.Sleep(authCodeCleanupInterval)
 		_, _ = s.ExchangeCode(&TokenRequest{Code: "unknown"})
-		if len(s.authCodes) != 0 {
+		if s.authCodes.Len() != 0 {
 			t.Fatal("cleanup did not resume after interval")
 		}
 	})

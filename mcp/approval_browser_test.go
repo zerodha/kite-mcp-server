@@ -20,6 +20,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"github.com/zerodha/kite-mcp-server/app/metrics"
+	"github.com/zerodha/kite-mcp-server/internal/storage"
 	"github.com/zerodha/kite-mcp-server/kc"
 	"github.com/zerodha/kite-mcp-server/oauth"
 )
@@ -48,8 +49,12 @@ type browserApprovalFixture struct {
 }
 
 func newBrowserApprovalFixture(t *testing.T, metricManagers ...*metrics.Manager) *browserApprovalFixture {
+	return newBrowserApprovalFixtureWithState(t, nil, metricManagers...)
+}
+
+func newBrowserApprovalFixtureWithState(t *testing.T, state storage.State, metricManagers ...*metrics.Manager) *browserApprovalFixture {
 	f := &browserApprovalFixture{started: make(chan struct{}), release: make(chan struct{}), historyStarted: make(chan struct{}), historyStopped: make(chan struct{})}
-	f.manager = approvalTestManager(t, func(w http.ResponseWriter, r *http.Request) {
+	f.manager = approvalTestManagerWithState(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/session/token" {
 			_ = r.ParseForm()
@@ -76,9 +81,11 @@ func newBrowserApprovalFixture(t *testing.T, metricManagers ...*metrics.Manager)
 			return
 		}
 		_, _ = w.Write([]byte(`{"status":"success","data":{"order_id":"order-1"}}`))
-	}, metricManagers...)
-	s := oauth.New(oauth.Config{Issuer: "https://mcp.example", JWTSecret: []byte(strings.Repeat("s", 32)), SessionExpiry: f.manager.SessionExpiry})
+	}, state, metricManagers...)
+	s := oauth.New(oauth.Config{State: state, Issuer: "https://mcp.example", JWTSecret: []byte(strings.Repeat("s", 32)), SessionExpiry: f.manager.SessionExpiry})
+	require.NoError(t, s.RestoreState())
 	f.b = NewBrowserApprovals(f.manager, s)
+	require.NoError(t, f.b.RestoreState())
 	return f
 }
 
@@ -238,7 +245,7 @@ func TestUnavailableNativeApprovalFallsBackWithoutAnotherOrderCall(t *testing.T)
 					_, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "orders", Arguments: browserOrderArgs()})
 					require.ErrorContains(t, err, "native form unavailable")
 					require.Zero(t, f.calls.Load())
-					require.Empty(t, f.b.pending)
+					require.Zero(t, f.b.pending.Len())
 					return
 				}
 				result := callBrowserOrder(t, cs, browserOrderArgs())
@@ -266,7 +273,7 @@ func TestUnavailableNativeApprovalFallsBackWithoutAnotherOrderCall(t *testing.T)
 				}
 				if scenario != "transport-error" && scenario != "malformed-response" {
 					require.True(t, result.IsError)
-					require.Empty(t, f.b.pending, "explicit user decisions must not create another review")
+					require.Zero(t, f.b.pending.Len(), "explicit user decisions must not create another review")
 					return
 				}
 				id := browserApprovalID(t, result)
@@ -363,7 +370,7 @@ func TestBrowserApprovalRejectsUntrustedRequests(t *testing.T) {
 			case "decline":
 				form.Set("decision", "decline")
 			case "expired":
-				f.b.pending[id].expires = time.Now().Add(-time.Second)
+				f.b.pending.Get(id).expires = time.Now().Add(-time.Second)
 			case "logged-out":
 				_, err := f.manager.SessionManager().Terminate("approval-test")
 				require.NoError(t, err)
@@ -371,13 +378,13 @@ func TestBrowserApprovalRejectsUntrustedRequests(t *testing.T) {
 				require.NoError(t, f.manager.SessionManager().UpdateCredentials("approval-test", &kc.KiteCredentials{UserID: "other-account", AccessToken: "test-access", ExpiresAt: time.Now().Add(time.Hour)}))
 				require.Equal(t, http.StatusForbidden, browserPage(t, f.b, id, identity).Code)
 			case "changed-arguments":
-				f.b.pending[id].arguments = json.RawMessage(`{"mode":"place","exchange":"NSE","tradingsymbol":"INFY","transaction_type":"BUY","quantity":2,"product":"CNC","order_type":"LIMIT","price":1500}`)
+				f.b.pending.Get(id).arguments = json.RawMessage(`{"mode":"place","exchange":"NSE","tradingsymbol":"INFY","transaction_type":"BUY","quantity":2,"product":"CNC","order_type":"LIMIT","price":1500}`)
 			case "changed-history":
-				f.b.pending[id].snapshot = []byte(`{"order_id":"different"}`)
+				f.b.pending.Get(id).snapshot = []byte(`{"order_id":"different"}`)
 			}
 			postBrowserDecision(f.b, id, identity, form, origin)
 			require.Zero(t, f.calls.Load())
-			require.Empty(t, f.b.permissions)
+			require.Zero(t, f.b.permissions.Len())
 		})
 	}
 }
@@ -426,9 +433,9 @@ func TestExplicitBrowserApprovalAndExpiredPermission(t *testing.T) {
 	browserApprovalID(t, callBrowserOrder(t, cs, args))
 	require.EqualValues(t, 1, f.calls.Load())
 	f.b.mu.Lock()
-	permission := f.b.permissions["approval-test"]
+	permission := f.b.permissions.Get("approval-test")
 	permission.expires = time.Now().Add(-time.Second)
-	f.b.permissions["approval-test"] = permission
+	f.b.permissions.Set("approval-test", permission)
 	f.b.mu.Unlock()
 	// Native forms still work after remembered permission expires.
 	result := callBrowserOrder(t, cs, browserOrderArgs())
@@ -447,7 +454,7 @@ func TestBrowserApprovalFailedSubmissionNeverRetriesOrRemembers(t *testing.T) {
 	postBrowserDecision(f.b, id, identity, form, "")
 	postBrowserDecision(f.b, id, identity, form, "")
 	require.EqualValues(t, 1, f.calls.Load())
-	require.Empty(t, f.b.permissions)
+	require.Zero(t, f.b.permissions.Len())
 	result := callBrowserOrder(t, cs, map[string]any{"mode": "approval_status", "approval_id": id})
 	require.Contains(t, result.Content[0].(*sdk.TextContent).Text, `"status":"failed"`)
 }
@@ -494,7 +501,7 @@ func TestBrowserApprovalCompletedOutcomesDoNotBlockNewReviews(t *testing.T) {
 				if terminal {
 					status = "submitted"
 				}
-				f.b.pending[id] = &browserOrder{id: id, session: "other", status: status, expires: now.Add(time.Minute), retainUntil: now.Add(10 * time.Minute)}
+				f.b.pending.Set(id, &browserOrder{id: id, session: "other", status: status, expires: now.Add(time.Minute), retainUntil: now.Add(10 * time.Minute)})
 			}
 			result := callBrowserOrder(t, cs, browserOrderArgs())
 			if terminal {
@@ -503,7 +510,7 @@ func TestBrowserApprovalCompletedOutcomesDoNotBlockNewReviews(t *testing.T) {
 				require.True(t, result.IsError)
 				require.Contains(t, result.Content[0].(*sdk.TextContent).Text, "busy")
 			}
-			require.Len(t, f.b.pending, maxPendingTradeApprovals)
+			require.Equal(t, maxPendingTradeApprovals, f.b.pending.Len())
 			require.Zero(t, f.calls.Load())
 		})
 	}
@@ -556,7 +563,7 @@ func TestBrowserApprovalRejectsMalformedForms(t *testing.T) {
 			response := postBrowserDecision(f.b, id, identity, form, "")
 			require.GreaterOrEqual(t, response.Code, 400)
 			require.Zero(t, f.calls.Load())
-			require.Empty(t, f.b.permissions)
+			require.Zero(t, f.b.permissions.Len())
 		})
 	}
 }
@@ -570,7 +577,7 @@ func TestBrowserApprovalArgumentsCannotGrantPermission(t *testing.T) {
 	}
 	browserApprovalID(t, callBrowserOrder(t, cs, args))
 	require.Zero(t, f.calls.Load())
-	require.Empty(t, f.b.permissions)
+	require.Zero(t, f.b.permissions.Len())
 }
 
 func TestBrowserApprovalPermissionAndStatusRequireSameClient(t *testing.T) {
@@ -593,7 +600,7 @@ func TestBrowserApprovalDeadlineCancelsUpstreamWork(t *testing.T) {
 	id := browserApprovalID(t, callBrowserOrder(t, cs, map[string]any{"mode": "cancel", "order_id": "order-1"}))
 	csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
 	f.b.mu.Lock()
-	f.b.pending[id].expires = time.Now().Add(500 * time.Millisecond)
+	f.b.pending.Get(id).expires = time.Now().Add(500 * time.Millisecond)
 	f.b.mu.Unlock()
 	f.blockHistory.Store(true)
 	done := make(chan struct{})
@@ -609,7 +616,7 @@ func TestBrowserApprovalDeadlineCancelsUpstreamWork(t *testing.T) {
 		}
 	}
 	require.Zero(t, f.calls.Load())
-	require.Empty(t, f.b.permissions)
+	require.Zero(t, f.b.permissions.Len())
 }
 
 func TestBrowserApprovalRetainsNotesAndEscapesUntrustedText(t *testing.T) {
@@ -679,7 +686,7 @@ func TestBrowserApprovalSaveForLater(t *testing.T) {
 				cs, _ = f.connect(t, "approval-test", "Pi", "2025-11-25")
 			case "expired":
 				f.b.mu.Lock()
-				f.b.pending[id].expires = time.Now().Add(-time.Second)
+				f.b.pending.Get(id).expires = time.Now().Add(-time.Second)
 				f.b.mu.Unlock()
 			case "revoked":
 				path := "manage/approval-test"
@@ -714,7 +721,7 @@ func TestBrowserApprovalRejectsSaveWithBroadPermission(t *testing.T) {
 	page := postBrowserDecision(f.b, id, identity, url.Values{"csrf": {csrf}, "decision": {"save"}, "remember": {"yes"}}, "")
 	require.Equal(t, http.StatusBadRequest, page.Code)
 	require.Zero(t, f.calls.Load())
-	require.Empty(t, f.b.permissions)
+	require.Zero(t, f.b.permissions.Len())
 }
 
 func TestBrowserApprovalSavedOrderConcurrentUse(t *testing.T) {

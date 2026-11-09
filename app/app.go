@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"net"
@@ -17,6 +19,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zerodha/kite-mcp-server/app/metrics"
+	"github.com/zerodha/kite-mcp-server/internal/storage"
 	"github.com/zerodha/kite-mcp-server/kc"
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
 	"github.com/zerodha/kite-mcp-server/mcp"
@@ -26,6 +29,7 @@ import (
 
 // App represents the main application structure
 type App struct {
+	state            storage.State
 	Config           *Config
 	Version          string
 	startTime        time.Time
@@ -40,6 +44,7 @@ type App struct {
 
 // Config holds the application configuration
 type Config struct {
+	SQLitePath          string
 	KiteAPIKey          string
 	KiteAPISecret       string
 	KiteTradeAPIBaseURI string
@@ -64,6 +69,7 @@ const (
 func NewApp(logger *slog.Logger) *App {
 	return &App{
 		Config: &Config{
+			SQLitePath:          os.Getenv("SQLITE_PATH"),
 			KiteAPIKey:          os.Getenv("KITE_API_KEY"),
 			KiteAPISecret:       os.Getenv("KITE_API_SECRET"),
 			KiteTradeAPIBaseURI: os.Getenv("KITE_TRADE_API_BASE_URI"),
@@ -177,11 +183,26 @@ func (app *App) configureHTTPClient() {
 	http.DefaultClient.Timeout = 30 * time.Second
 }
 
-func (app *App) initializeServices() (*mcpsdk.Server, error) {
+func (app *App) initializeServices() (_ *mcpsdk.Server, err error) {
+	defer func() {
+		if err != nil {
+			app.shutdownServices()
+		}
+	}()
 	app.logger.Info("Initializing services...")
 	tokenTTL, err := time.ParseDuration(app.Config.OAuthTokenTTL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid OAUTH_TOKEN_TTL: %w", err)
+	}
+	if app.Config.SQLitePath != "" {
+		key := hmac.New(sha256.New, []byte(app.Config.JWTSecret))
+		_, _ = key.Write([]byte("kite-mcp/sqlite/v1\x00" + app.Config.OAuthIssuer + "\x00" + app.Config.KiteAPIKey))
+		state, openErr := storage.OpenSQLite(app.Config.SQLitePath, key.Sum(nil))
+		if openErr != nil {
+			return nil, fmt.Errorf("open SQLite state: %w", openErr)
+		}
+		app.state = state
+		app.logger.Info("SQLite state enabled")
 	}
 	// --- Instruments Manager ---
 	instManager, err := instruments.New(instruments.Config{Logger: app.logger})
@@ -199,6 +220,7 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 
 	// --- Kite Connect Manager ---
 	kcManager, err := kc.New(kc.Config{
+		State:           app.state,
 		APIKey:          app.Config.KiteAPIKey,
 		APISecret:       app.Config.KiteAPISecret,
 		KiteBaseURI:     app.Config.KiteTradeAPIBaseURI,
@@ -209,30 +231,42 @@ func (app *App) initializeServices() (*mcpsdk.Server, error) {
 	})
 	if err != nil {
 		instManager.Shutdown()
-		app.metrics.Shutdown()
 		return nil, fmt.Errorf("failed to create Kite Connect manager: %w", err)
 	}
 	app.kcManager = kcManager
 
 	// --- JWT OAuth Server ---
 	app.oauthServer = oauth.New(oauth.Config{
+		State:             app.state,
 		Issuer:            app.Config.OAuthIssuer,
 		JWTSecret:         []byte(app.Config.JWTSecret),
 		TokenTTL:          tokenTTL,
 		SessionExpiry:     kcManager.SessionExpiry,
 		TrustedProxyCIDRs: app.Config.TrustedProxyCIDRs,
 	})
+	if err := app.oauthServer.RestoreState(); err != nil {
+		return nil, fmt.Errorf("restore OAuth state: %w", err)
+	}
 	app.jwtOauthHandlers = oauth.NewHandlers(app.oauthServer, app.kcManager, app.logger)
+	if err := app.jwtOauthHandlers.RestoreState(); err != nil {
+		return nil, fmt.Errorf("restore consent state: %w", err)
+	}
 
 	app.logger.Info("Static docs site ready (moat-generated)")
 
 	// --- MCP Server & Tools ---
 	app.logger.Info("Creating MCP server and registering tools...")
-	mcpServer := mcp.NewServer(
-		&mcpsdk.Implementation{Name: "Kite MCP Server", Version: app.Version},
+	mcpServer, err := mcp.NewServerWithStorage(
+		&mcpsdk.Implementation{Name: "Kite MCP Server", Version: app.Version}, app.state,
 	)
+	if err != nil {
+		return nil, fmt.Errorf("restore native approvals: %w", err)
+	}
 	mcp.RegisterTools(mcpServer, kcManager, app.Config.ExcludedTools, app.logger)
 	app.browserApprovals = mcp.NewBrowserApprovals(kcManager, app.oauthServer)
+	if err := app.browserApprovals.RestoreState(); err != nil {
+		return nil, fmt.Errorf("restore browser approvals: %w", err)
+	}
 	app.browserApprovals.Attach(mcpServer)
 
 	app.logger.Info("All services initialized.")
@@ -285,6 +319,12 @@ func (app *App) shutdownServices() {
 	}
 	if app.rateLimiter != nil {
 		app.rateLimiter.Shutdown()
+	}
+	if app.state != nil {
+		if err := app.state.Close(); err != nil {
+			app.logger.Error("State store close failed", "error", err)
+		}
+		app.state = nil
 	}
 }
 
@@ -404,6 +444,12 @@ func (app *App) startServer(srv *http.Server, mcpServer *mcpsdk.Server, url stri
 	)
 	mux := app.setupMux()
 	mux.Handle("/mcp", validateMCPOrigin(app.Config.OAuthIssuer, app.oauthServer.Middleware(http.HandlerFunc(streamable.ServeHTTP))))
-	srv.Handler = securityHeaders(mux)
+	srv.Handler = securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if storage.Check(app.state) != nil {
+			http.Error(w, "Storage unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
 	return app.serveHTTPServer(srv)
 }

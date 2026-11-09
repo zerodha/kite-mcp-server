@@ -98,7 +98,7 @@ func TestForeignResourceDoesNotConsumeCode(t *testing.T) {
 	if _, err := s.ExchangeCode(&TokenRequest{Code: code, Resource: "https://other.example.com"}); err == nil {
 		t.Fatal("foreign resource accepted")
 	}
-	if _, exists := s.authCodes[code]; !exists {
+	if _, exists := s.authCodes.Lookup(code); !exists {
 		t.Fatal("invalid resource consumed outstanding grant")
 	}
 }

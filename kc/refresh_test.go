@@ -193,7 +193,7 @@ func TestNoRefreshForExpiredGrantOrMissingRefreshToken(t *testing.T) {
 		id := expiredCredentialSession(t, manager, refresh)
 		if expiredGrant {
 			manager.sessionManager.mu.Lock()
-			manager.sessionManager.sessions[id].ExpiresAt = time.Now().Add(-time.Second)
+			manager.sessionManager.sessions.Get(id).ExpiresAt = time.Now().Add(-time.Second)
 			manager.sessionManager.mu.Unlock()
 		}
 		if _, err := manager.GetAuthenticatedClient(id); err == nil {
@@ -359,7 +359,7 @@ func TestConcurrentRefreshFailureBackoff(t *testing.T) {
 	}
 	// Advance the stored retry deadline without slowing the test.
 	manager.sessionManager.mu.Lock()
-	manager.sessionManager.sessions[id].refreshRetryAt = time.Now().Add(-time.Second)
+	manager.sessionManager.sessions.Get(id).refreshRetryAt = time.Now().Add(-time.Second)
 	manager.sessionManager.mu.Unlock()
 	if _, err := manager.GetAuthenticatedClient(id); err != nil {
 		t.Fatal(err)

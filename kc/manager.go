@@ -15,12 +15,14 @@ import (
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 	"github.com/zerodha/kite-mcp-server/app/metrics"
 	"github.com/zerodha/kite-mcp-server/internal/audit"
+	"github.com/zerodha/kite-mcp-server/internal/storage"
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
 	"github.com/zerodha/kite-mcp-server/kc/templates"
 )
 
 // Config holds configuration for creating a new kc Manager
 type Config struct {
+	State       storage.State
 	APIKey      string
 	APISecret   string
 	Logger      *slog.Logger
@@ -66,6 +68,11 @@ func New(cfg Config) (*Manager, error) {
 	}
 
 	m.initializeSessionManager()
+	if err := m.restoreState(cfg.State); err != nil {
+		m.sessionManager.StopCleanupRoutine()
+		return nil, fmt.Errorf("restore session state: %w", err)
+	}
+	m.sessionManager.StartCleanupRoutine(context.Background())
 	return m, nil
 }
 
@@ -127,7 +134,6 @@ func (m *Manager) initializeSessionManager() {
 	sessionManager.AddCleanupHook(func(s *Session) {
 		m.Logger.Info("Cleaning up session", "session_id", s.ID)
 	})
-	sessionManager.StartCleanupRoutine(context.Background())
 	m.sessionManager = sessionManager
 }
 

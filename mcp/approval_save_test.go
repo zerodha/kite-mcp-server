@@ -69,7 +69,7 @@ func TestBrowserApprovalSaveExpiryConcurrentGET(t *testing.T) {
 	for attempt := 0; attempt < 30; attempt++ {
 		p := &browserOrder{id: randomApprovalSecret(), session: "approval-test", user: "user", clientName: "Pi", operation: "orders_place", status: "approval_required", expires: time.Now().Add(time.Minute), retainUntil: time.Now().Add(time.Hour), snapshot: []byte(`{"parameters":{"quantity":"1"}}`)}
 		f.b.mu.Lock()
-		f.b.pending[p.id] = p
+		f.b.pending.Set(p.id, p)
 		f.b.mu.Unlock()
 		var wg sync.WaitGroup
 		start := make(chan struct{})
@@ -114,15 +114,15 @@ func TestBrowserApprovalSaveDisclosesItsOwnDeadline(t *testing.T) {
 				// Distinct deadlines must not cause the broad permission's date to
 				// replace the exact-order deadline before or after saving.
 				f.b.mu.Lock()
-				permission := f.b.permissions["approval-test"]
+				permission := f.b.permissions.Get("approval-test")
 				permission.expires = sessionExpiry.Add(-time.Hour)
-				f.b.permissions["approval-test"] = permission
+				f.b.permissions.Set("approval-test", permission)
 				f.b.mu.Unlock()
 				args["approval_method"] = "browser"
 			}
 			id := browserApprovalID(t, callBrowserOrder(t, cs, args))
 			f.b.mu.Lock()
-			reviewExpiry := f.b.pending[id].expires
+			reviewExpiry := f.b.pending.Get(id).expires
 			f.b.mu.Unlock()
 			require.Greater(t, sessionExpiry.Sub(reviewExpiry), time.Hour)
 			page := browserPage(t, f.b, id, identity)

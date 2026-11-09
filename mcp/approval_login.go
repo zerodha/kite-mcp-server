@@ -70,6 +70,11 @@ func (f *reviewLogin) HandleKiteLoginCallback(w http.ResponseWriter, r *http.Req
 	valid := !f.consumed && time.Now().Before(f.expires) && len(q["session_id"]) == 1 && len(q["state"]) == 1 && len(q["request_token"]) == 1 && q.Get("request_token") != "" && len(q.Get("request_token")) <= 4096 && subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(f.state)) == 1
 	if valid {
 		f.consumed = true
+		if err := f.broker.manager.SessionManager().PersistSessionData(f.id); err != nil {
+			f.mu.Unlock()
+			http.Error(w, "Storage unavailable", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	f.mu.Unlock()
 	if !valid {
@@ -94,23 +99,28 @@ func (f *reviewLogin) HandleKiteLoginCallback(w http.ResponseWriter, r *http.Req
 	}
 	f.mu.Lock()
 	f.verified = true
+	if err := f.broker.manager.SessionManager().PersistSessionData(f.id); err != nil {
+		f.mu.Unlock()
+		http.Error(w, "Storage unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	event = "login_verified"
 	f.mu.Unlock()
 	b := f.broker
 	b.mu.Lock()
 	var data browserOrderPage
 	if strings.HasPrefix(f.target, "manage/") {
-		p, ok := b.permissions[f.session]
+		p, ok := b.permissions.Lookup(f.session)
 		allowed := ok && p.allowed && p.user == f.user && time.Now().Before(p.expires)
 		audit.Record(b.manager.Logger, "permission_review_login_succeeded", audit.Actor{UserID: f.user, SessionID: f.session, ClientID: p.client}, "source_ip", b.oauth.ClientIP(r))
 		data = browserOrderPage{Title: "Order approval settings", Account: f.user, ClientName: p.clientName, Manage: true, Allowed: allowed, Expiry: p.expires.In(time.FixedZone("IST", 19800)).Format("02 Jan 2006, 15:04 IST")}
-		for _, saved := range b.pending {
+		for _, saved := range b.pending.All() {
 			if saved.session == f.session && saved.user == f.user && saved.status == "approved_for_later" && time.Now().Before(saved.expires) {
 				data.Saved = true
 				data.ClientName = saved.clientName
 			}
 		}
-	} else if p := b.pending[f.target]; p != nil && p.session == f.session && p.user == f.user {
+	} else if p := b.pending.Get(f.target); p != nil && p.session == f.session && p.user == f.user {
 		data = b.orderPageLocked(p)
 		b.auditOrder(p, "order_review_login_succeeded", "outcome", "verified")
 	} else {
@@ -161,7 +171,7 @@ func (b *BrowserApprovals) reviewMetricOperation(target string) string {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if p := b.pending[target]; p != nil {
+	if p := b.pending.Get(target); p != nil {
 		return p.operation
 	}
 	return "other"

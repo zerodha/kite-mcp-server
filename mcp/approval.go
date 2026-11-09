@@ -12,6 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 	"github.com/zerodha/kite-mcp-server/internal/audit"
+	"github.com/zerodha/kite-mcp-server/internal/storage"
 )
 
 const tradeApprovalTimeout = 5 * time.Minute
@@ -185,6 +186,11 @@ func approvalFailure(code, message string) *mcp.CallToolResult {
 
 // NewServer supports both multi-round-trip and legacy nested elicitation.
 func NewServer(info *mcp.Implementation) *mcp.Server {
+	server, _ := NewServerWithStorage(info, nil)
+	return server
+}
+
+func NewServerWithStorage(info *mcp.Implementation, state storage.State) (*mcp.Server, error) {
 	versions := []string{"2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
 	//nolint:staticcheck // SA1019: Logging is retained for the negotiated pre-2026 protocol versions.
 	capabilities := &mcp.ServerCapabilities{Logging: &mcp.LoggingCapabilities{}}
@@ -195,7 +201,9 @@ func NewServer(info *mcp.Implementation) *mcp.Server {
 		SupportedProtocolVersions: versions, Capabilities: capabilities,
 		Instructions: "When open_kite_view is listed, use it to show interactive Kite views for portfolio allocation, positions, funds, order status and fills, GTT triggers, option chains, quotes, historical charts, or instrument search only when the user explicitly asks for an interactive view or a chart. Answer ordinary data questions and order updates in text. Do not open a widget after every data read or approval status check. Reuse an existing interactive view through its controls where possible. Select its matching view and supply the relevant instrument or underlying arguments. The view tool is read-only; use the existing data tools for text-only analysis and the existing transaction tools for separately authorized mutations. If open_kite_view is unavailable, return results through the ordinary data tools. Only request order mutations when the user asks for the action. Orders use a native approval form or a browser approval link unless the user explicitly allowed future orders for this account/client login session. Choose the approval method automatically from the client capabilities. Generic elicitation without explicit form support uses browser review when available. If future_orders_allowed=true, use approval_method=auto to honour that permission unless the user explicitly requests another review. When a saved exact-order approval exists and the user later asks to place it, use approval_method=auto to consume it once. For ChatGPT mobile or a client known not to display approval forms, set approval_method=browser on the first mutation call that needs a new approval. Do not ask the user to request an approval link. If a native form is unavailable, share the browser link returned by the server. An explicit decline, cancellation, or negative confirmation stops the request; do not start another approval without a new user request. When orders returns status=approval_required, no order has been submitted: share approval_url as a clickable link. The user can open it in any browser and must sign in to the matching Kite account before reviewing the order. Do not open or approve it for the user, and do not repeat the mutation. After the user reviews it, use orders mode=approval_status with approval_id to check its status and result. If approval_status returns approved_for_later, nothing was placed. Wait for a new user instruction to place that exact order. Never automatically resubmit after saving approval. Never fabricate approval, poll indefinitely, or automatically retry an uncertain mutation. Use orders mode=permissions when the user asks to view or revoke future order permission; share its browser link if permission is enabled. Revoking permission does not cancel existing orders. GTT and Alerts/ATO changes are outside the orders approval guard.",
 	})
-	registerTradeApproval(server)
+	if err := registerTradeApproval(server, state); err != nil {
+		return nil, err
+	}
 	registerAppResource(server)
 	registerSkills(server)
 	// go-sdk v1.8.0 retains the requested initialize version, then uses it
@@ -213,7 +221,7 @@ func NewServer(info *mcp.Implementation) *mcp.Server {
 			return next(ctx, method, request)
 		}
 	})
-	return server
+	return server, nil
 }
 
 // Marshal the same URL fields as gokiteconnect, including its omitempty rules.

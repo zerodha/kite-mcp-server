@@ -18,19 +18,32 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/zerodha/kite-mcp-server/internal/storage"
 	"github.com/zerodha/kite-mcp-server/kc"
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
 )
 
 func consentTestHandlers(t *testing.T, baseURL string) *Handlers {
+	return consentTestHandlersWithState(t, baseURL, nil)
+}
+
+func consentTestHandlersWithState(t *testing.T, baseURL string, state storage.State) *Handlers {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	manager, err := kc.New(kc.Config{APIKey: "test-key", APISecret: "test-secret", Logger: logger, Instruments: &instruments.Manager{}, KiteBaseURI: baseURL})
+	manager, err := kc.New(kc.Config{State: state, APIKey: "test-key", APISecret: "test-secret", Logger: logger, Instruments: &instruments.Manager{}, KiteBaseURI: baseURL})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(manager.SessionManager().StopCleanupRoutine)
-	return NewHandlers(New(Config{Issuer: "https://mcp.example", JWTSecret: []byte(strings.Repeat("s", 32)), SessionExpiry: manager.SessionExpiry}), manager, logger)
+	server := New(Config{State: state, Issuer: "https://mcp.example", JWTSecret: []byte(strings.Repeat("s", 32)), SessionExpiry: manager.SessionExpiry})
+	if err := server.RestoreState(); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandlers(server, manager, logger)
+	if err := h.RestoreState(); err != nil {
+		t.Fatal(err)
+	}
+	return h
 }
 
 func consentPage(t *testing.T, h *Handlers) (url.Values, *http.Cookie, string) {
@@ -246,7 +259,7 @@ func TestConsentCannotChangeRegisteredRecipient(t *testing.T) {
 	// No authorization code exists before upstream login.
 	h.server.mu.RLock()
 	defer h.server.mu.RUnlock()
-	if len(h.server.authCodes) != 0 {
+	if h.server.authCodes.Len() != 0 {
 		t.Fatal("premature authorization code")
 	}
 }

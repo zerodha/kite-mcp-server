@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 	"github.com/zerodha/kite-mcp-server/app/metrics"
+	"github.com/zerodha/kite-mcp-server/internal/storage"
 	"github.com/zerodha/kite-mcp-server/kc"
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
 )
@@ -298,6 +299,10 @@ func TestTradeApprovalNegotiatedInitialize(t *testing.T) {
 }
 
 func approvalTestManager(t *testing.T, upstream http.HandlerFunc, metricManagers ...*metrics.Manager) *kc.Manager {
+	return approvalTestManagerWithState(t, upstream, nil, metricManagers...)
+}
+
+func approvalTestManagerWithState(t *testing.T, upstream http.HandlerFunc, state storage.State, metricManagers ...*metrics.Manager) *kc.Manager {
 	t.Helper()
 	server := httptest.NewServer(upstream)
 	t.Cleanup(server.Close)
@@ -310,11 +315,13 @@ func approvalTestManager(t *testing.T, upstream http.HandlerFunc, metricManagers
 	if len(metricManagers) > 0 {
 		metricManager = metricManagers[0]
 	}
-	manager, err := kc.New(kc.Config{APIKey: "key", APISecret: "secret", Logger: logger, Instruments: catalog, KiteBaseURI: server.URL, Metrics: metricManager})
+	manager, err := kc.New(kc.Config{APIKey: "key", APISecret: "secret", Logger: logger, Instruments: catalog, KiteBaseURI: server.URL, Metrics: metricManager, State: state})
 	require.NoError(t, err)
 	t.Cleanup(manager.Shutdown)
-	_, _, err = manager.SessionManager().GetOrCreate("approval-test")
+	_, created, err := manager.SessionManager().GetOrCreate("approval-test")
 	require.NoError(t, err)
-	require.NoError(t, manager.SessionManager().UpdateCredentials("approval-test", &kc.KiteCredentials{UserID: "user", AccessToken: "test-access", ExpiresAt: time.Now().Add(time.Hour)}))
+	if created {
+		require.NoError(t, manager.SessionManager().UpdateCredentials("approval-test", &kc.KiteCredentials{UserID: "user", AccessToken: "test-access", ExpiresAt: time.Now().Add(time.Hour)}))
+	}
 	return manager
 }

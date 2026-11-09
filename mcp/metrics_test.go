@@ -178,7 +178,7 @@ func TestBrowserMetricsCountTransitionsNotPollsOrReplays(t *testing.T) {
 	require.EqualValues(t, 1, metricValue(t, m, "kite_mcp_browser_approval_events_total", map[string]string{"event": "permission_revoked"}))
 	id = browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
 	f.b.mu.Lock()
-	f.b.pending[id].expires = time.Now().Add(-time.Second)
+	f.b.pending.Get(id).expires = time.Now().Add(-time.Second)
 	f.b.mu.Unlock()
 	for range 2 {
 		callBrowserOrder(t, cs, map[string]any{"mode": "approval_status", "approval_id": id})

@@ -31,10 +31,12 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/modelcontextprotocol/go-sdk/auth"
+	"github.com/zerodha/kite-mcp-server/internal/storage"
 )
 
 // Config holds OAuth server configuration
 type Config struct {
+	State storage.State
 	// Issuer is the OAuth issuer URL (e.g., "https://mcp.kite.trade")
 	Issuer string
 	// JWTSecret is the secret for signing JWTs (must be 32+ bytes)
@@ -56,8 +58,8 @@ type Server struct {
 
 	// In-memory stores (replace with Redis/DB for production)
 	mu                  sync.RWMutex
-	authCodes           map[string]*AuthCode // code -> auth code data
-	pkceVerifiers       map[string]string    // code -> code_verifier hash
+	authCodes           storage.Records[string, *AuthCode] // code -> auth code data
+	pkceVerifiers       storage.Records[string, string]    // code -> code_verifier hash
 	trustedProxies      []netip.Prefix
 	lastAuthCodeCleanup time.Time
 }
@@ -103,8 +105,8 @@ func New(cfg Config) *Server {
 	}
 	return &Server{
 		config:         cfg,
-		authCodes:      make(map[string]*AuthCode),
-		pkceVerifiers:  make(map[string]string),
+		authCodes:      storage.NewMemory[string, *AuthCode](),
+		pkceVerifiers:  storage.NewMemory[string, string](),
 		trustedProxies: trustedProxies,
 	}
 }
@@ -114,7 +116,7 @@ func New(cfg Config) *Server {
 // RateLimiter provides simple IP-based rate limiting
 type RateLimiter struct {
 	mu          sync.Mutex
-	requests    map[string]*rateLimitEntry
+	requests    storage.Records[string, *rateLimitEntry]
 	limit       int
 	window      time.Duration
 	lastCleanup time.Time
@@ -145,7 +147,7 @@ func rateLimitKey(ip string) string {
 // NewRateLimiter creates a rate limiter
 func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	return &RateLimiter{
-		requests: make(map[string]*rateLimitEntry),
+		requests: storage.NewMemory[string, *rateLimitEntry](),
 		peers:    list.New(),
 		limit:    limit,
 		window:   window,
@@ -163,24 +165,24 @@ func (rl *RateLimiter) Allow(ip string) bool {
 
 	// Remove expired IP entries and bound memory even when peers rotate addresses.
 	if rl.lastCleanup.IsZero() || now.Sub(rl.lastCleanup) >= rl.window {
-		for key, entry := range rl.requests {
+		for key, entry := range rl.requests.All() {
 			if !entry.lastAccess.After(cutoff) {
-				delete(rl.requests, key)
+				rl.requests.Delete(key)
 				rl.peers.Remove(entry.position)
 			}
 		}
 		rl.lastCleanup = now
 	}
-	entry, exists := rl.requests[ip]
+	entry, exists := rl.requests.Lookup(ip)
 	if !exists {
-		if len(rl.requests) >= maxRateLimitPeers {
+		if rl.requests.Len() >= maxRateLimitPeers {
 			// Evict the least recently used peer instead of rejecting unrelated users.
 			oldest := rl.peers.Back()
-			delete(rl.requests, oldest.Value.(string))
+			rl.requests.Delete(oldest.Value.(string))
 			rl.peers.Remove(oldest)
 		}
 		entry = &rateLimitEntry{position: rl.peers.PushFront(ip)}
-		rl.requests[ip] = entry
+		rl.requests.Set(ip, entry)
 	}
 	rl.peers.MoveToFront(entry.position)
 	entry.lastAccess = now
@@ -411,16 +413,26 @@ const (
 // cleanupAuthCodesLocked lazily expires abandoned codes without a background
 // goroutine. Throttling keeps invalid token requests from repeatedly scanning
 // the entire store. Callers must hold s.mu.
-func (s *Server) cleanupAuthCodesLocked(now time.Time) {
+func (s *Server) cleanupAuthCodesLocked(now time.Time) error {
 	if !s.lastAuthCodeCleanup.IsZero() && now.Sub(s.lastAuthCodeCleanup) < authCodeCleanupInterval {
-		return
+		return nil
 	}
-	for code, pending := range s.authCodes {
+	var changes []storage.Change
+	for code, pending := range s.authCodes.All() {
 		if !now.Before(pending.ExpiresAt) {
-			delete(s.authCodes, code)
+			changes = append(changes, storage.Change{Bucket: "auth_codes", Key: code})
 		}
 	}
+	if s.config.State != nil && len(changes) > 0 {
+		if err := s.config.State.Apply(changes...); err != nil {
+			return err
+		}
+	}
+	for _, change := range changes {
+		s.authCodes.Delete(change.Key)
+	}
 	s.lastAuthCodeCleanup = now
+	return nil
 }
 
 // CreateAuthCode creates an authorization code after successful Kite login.
@@ -430,12 +442,17 @@ func (s *Server) CreateAuthCode(clientID, redirectURI, kiteUserID, sessionID, pk
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
-	s.cleanupAuthCodesLocked(now)
-	if len(s.authCodes) >= maxPendingAuthCodes {
+	if err := storage.Check(s.config.State); err != nil {
+		return "", err
+	}
+	if err := s.cleanupAuthCodesLocked(now); err != nil {
+		return "", err
+	}
+	if s.authCodes.Len() >= maxPendingAuthCodes {
 		return "", errors.New("too many pending authorization codes; please try again later")
 	}
 
-	s.authCodes[code] = &AuthCode{
+	value := &AuthCode{
 		Code:        code,
 		ClientID:    clientID,
 		RedirectURI: redirectURI,
@@ -444,6 +461,10 @@ func (s *Server) CreateAuthCode(clientID, redirectURI, kiteUserID, sessionID, pk
 		ExpiresAt:   now.Add(s.config.AuthCodeTTL),
 		PKCEHash:    pkceChallenge,
 	}
+	if err := storage.Put(s.config.State, "auth_codes", code, value); err != nil {
+		return "", err
+	}
+	s.authCodes.Set(code, value)
 
 	return code, nil
 }
@@ -505,10 +526,21 @@ func (s *Server) ExchangeCode(req *TokenRequest) (accessToken string, err error)
 		return "", err
 	}
 	s.mu.Lock()
-	s.cleanupAuthCodesLocked(time.Now())
-	authCode, ok := s.authCodes[req.Code]
+	if err := storage.Check(s.config.State); err != nil {
+		s.mu.Unlock()
+		return "", err
+	}
+	if err := s.cleanupAuthCodesLocked(time.Now()); err != nil {
+		s.mu.Unlock()
+		return "", err
+	}
+	authCode, ok := s.authCodes.Lookup(req.Code)
 	if ok {
-		delete(s.authCodes, req.Code) // One-time use
+		if err := storage.Delete(s.config.State, "auth_codes", req.Code); err != nil {
+			s.mu.Unlock()
+			return "", err
+		}
+		s.authCodes.Delete(req.Code) // One-time use
 	}
 	s.mu.Unlock()
 

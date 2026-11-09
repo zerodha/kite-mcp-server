@@ -222,7 +222,10 @@ func (h *Handlers) handleConsent(w http.ResponseWriter, r *http.Request) {
 	if r.PostForm.Get("decision") != "approve" {
 		pending.consumed = true
 		audit.Record(h.logger, "client_consent_declined", audit.Actor{SessionID: flow, ClientID: pending.ClientID}, "scope", "enabled_tools", "source_ip", h.server.ClientIP(r))
-		_, _ = h.kcManager.SessionManager().Terminate(flow)
+		if _, err := h.kcManager.SessionManager().Terminate(flow); err != nil {
+			h.browserError(w, r, "session error", http.StatusServiceUnavailable)
+			return
+		}
 		callback, _ := url.Parse(pending.RedirectURI)
 		q := callback.Query()
 		q.Set("error", "access_denied")
@@ -240,6 +243,10 @@ func (h *Handlers) handleConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pending.approved = true
+	if err := h.kcManager.SessionManager().PersistSessionData(flow); err != nil {
+		h.browserError(w, r, "session error", http.StatusServiceUnavailable)
+		return
+	}
 	audit.Record(h.logger, "client_consent_granted", audit.Actor{SessionID: flow, ClientID: pending.ClientID}, "scope", "enabled_tools", "source_ip", h.server.ClientIP(r))
 	h.setFlowCookie(w, flow, "state", pending.browserState, 600)
 	http.Redirect(w, r, loginURL, http.StatusSeeOther)
@@ -343,6 +350,11 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		valid := cookieErr == nil && pending.approved && !pending.consumed && sameSecret(cookie.Value, pending.browserState) && sameSecret(q.Get("state"), pending.browserState)
 		if valid {
 			pending.consumed = true
+			if err := h.kcManager.SessionManager().PersistSessionData(sessionID); err != nil {
+				pending.mu.Unlock()
+				h.browserError(w, r, "session error", http.StatusServiceUnavailable)
+				return
+			}
 		}
 		pending.mu.Unlock()
 		if !valid {

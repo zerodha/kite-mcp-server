@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zerodha/kite-mcp-server/internal/storage"
 	"golang.org/x/time/rate"
 )
 
@@ -20,7 +21,7 @@ type limiterEntry struct {
 
 // RateLimiter manages rate limiting for incoming requests.
 type RateLimiter struct {
-	limiters       map[string]*limiterEntry
+	limiters       storage.Records[string, *limiterEntry]
 	mu             sync.Mutex
 	cleanupCancel  context.CancelFunc
 	cleanupRunning bool
@@ -35,7 +36,7 @@ const maxRateLimitPeers = 10000
 // direct peer belongs to one of them, so clients cannot choose their own key.
 func NewRateLimiter(trustedProxyCIDRs ...string) *RateLimiter {
 	m := &RateLimiter{
-		limiters: make(map[string]*limiterEntry),
+		limiters: storage.NewMemory[string, *limiterEntry](),
 		overflow: rate.NewLimiter(rate.Every(12*time.Second), 5),
 	}
 	for _, cidr := range trustedProxyCIDRs {
@@ -78,11 +79,11 @@ func (m *RateLimiter) getLimiter(ip string) *rate.Limiter {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	entry, exists := m.limiters[ip]
+	entry, exists := m.limiters.Lookup(ip)
 	if !exists {
 		// Share a bounded overflow bucket instead of allocating indefinitely or
 		// evicting active peers and resetting their rate limits.
-		if len(m.limiters) >= maxRateLimitPeers {
+		if m.limiters.Len() >= maxRateLimitPeers {
 			return m.overflow
 		}
 		// Allow 5 requests every 12 seconds.
@@ -91,7 +92,7 @@ func (m *RateLimiter) getLimiter(ip string) *rate.Limiter {
 			limiter:    limiter,
 			lastAccess: time.Now(),
 		}
-		m.limiters[ip] = entry
+		m.limiters.Set(ip, entry)
 
 		// Start cleanup goroutine if not already running
 		if !m.cleanupRunning {
@@ -176,18 +177,18 @@ func (m *RateLimiter) cleanupInactive(maxIdleTime time.Duration) {
 	now := time.Now()
 	toDelete := make([]string, 0)
 
-	for ip, entry := range m.limiters {
+	for ip, entry := range m.limiters.All() {
 		if now.Sub(entry.lastAccess) > maxIdleTime {
 			toDelete = append(toDelete, ip)
 		}
 	}
 
 	for _, ip := range toDelete {
-		delete(m.limiters, ip)
+		m.limiters.Delete(ip)
 	}
 
 	// If no limiters left, stop the cleanup routine to save resources
-	if len(m.limiters) == 0 {
+	if m.limiters.Len() == 0 {
 		if m.cleanupCancel != nil {
 			m.cleanupCancel()
 			m.cleanupRunning = false
