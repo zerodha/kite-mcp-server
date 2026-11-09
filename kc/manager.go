@@ -14,6 +14,7 @@ import (
 
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 	"github.com/zerodha/kite-mcp-server/app/metrics"
+	"github.com/zerodha/kite-mcp-server/internal/audit"
 	"github.com/zerodha/kite-mcp-server/kc/instruments"
 	"github.com/zerodha/kite-mcp-server/kc/templates"
 )
@@ -299,7 +300,7 @@ func (m *Manager) CompleteLoginContext(ctx context.Context, requestToken string)
 		m.metrics.Increment("user_logins")
 	}
 
-	m.Logger.Info("Successfully completed login and created new Kite credentials", "user_id", creds.UserID, "duration_ms", time.Since(started).Milliseconds())
+	audit.Record(m.Logger, "kite_login_exchange_succeeded", audit.Actor{UserID: creds.UserID}, "duration_ms", time.Since(started).Milliseconds())
 	return creds, nil
 }
 

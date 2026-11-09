@@ -17,6 +17,7 @@ import (
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zerodha/kite-mcp-server/internal/audit"
 	"github.com/zerodha/kite-mcp-server/kc"
 	"github.com/zerodha/kite-mcp-server/kc/templates"
 	"github.com/zerodha/kite-mcp-server/oauth"
@@ -25,9 +26,9 @@ import (
 type browserApprovalsKey struct{}
 type approvedBrowserOrderKey struct{}
 type approvedBrowserOrder struct {
-	session, user, operation string
-	snapshot                 []byte
-	expires                  time.Time
+	session, user, client, operation, approvalID string
+	snapshot                                     []byte
+	expires                                      time.Time
 }
 
 type browserOrder struct {
@@ -67,7 +68,7 @@ func NewBrowserApprovals(manager *kc.Manager, server *oauth.Server) *BrowserAppr
 func (b *BrowserApprovals) Attach(server *sdk.Server) {
 	server.AddReceivingMiddleware(func(next sdk.MethodHandler) sdk.MethodHandler {
 		return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
-			return next(context.WithValue(ctx, browserApprovalsKey{}, b), method, req)
+			return next(audit.WithLogger(context.WithValue(ctx, browserApprovalsKey{}, b), b.manager.Logger), method, req)
 		}
 	})
 }
@@ -110,6 +111,7 @@ func (b *BrowserApprovals) trusted(ctx context.Context, req *sdk.CallToolRequest
 	if ok && !time.Now().Before(p.expires) {
 		if p.allowed {
 			b.metricEvent("permissions", "permission_expired")
+			audit.Record(b.manager.Logger, "order_permission_expired", audit.Actor{UserID: p.user, SessionID: c.SessionID, ClientID: p.client}, "scope", "all_orders", "expires_at", p.expires.UTC().Format(time.RFC3339))
 		}
 		delete(b.permissions, c.SessionID)
 		return false
@@ -136,6 +138,7 @@ func (b *BrowserApprovals) cleanupLocked(now time.Time) {
 		if !now.Before(p.expires) {
 			if p.allowed {
 				b.metricEvent("permissions", "permission_expired")
+				audit.Record(b.manager.Logger, "order_permission_expired", audit.Actor{UserID: p.user, SessionID: id, ClientID: p.client}, "scope", "all_orders", "expires_at", p.expires.UTC().Format(time.RFC3339))
 			}
 			delete(b.permissions, id)
 		}
@@ -207,6 +210,7 @@ func (b *BrowserApprovals) request(ctx context.Context, req *sdk.CallToolRequest
 		p.trace = *trace
 	}
 	b.pending[p.id] = p
+	b.auditOrder(p, "order_approval_requested", "expires_at", p.expires.UTC().Format(time.RFC3339))
 	b.metricEvent(operation, "created")
 	data := map[string]any{"status": "approval_required", "approval_id": p.id, "approval_url": b.approvalURL(p.id), "expires_at": expires.Format(time.RFC3339), "message": "No order was submitted. Open the approval URL in any browser, sign in to the matching Kite account, then review and approve. Do not repeat the order request. After approval, use orders mode=approval_status with this approval_id to retrieve the outcome."}
 	return browserApprovalResult(data), nil
@@ -479,6 +483,7 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 	}
 	if decision == "decline" {
 		p.status = "declined"
+		b.auditOrder(p, "order_approval_declined", "outcome", "declined")
 		b.metricEvent(p.operation, "declined")
 		b.mu.Unlock()
 		b.renderOrderOutcome(w, p)
@@ -496,12 +501,14 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 		p.expires = deadline
 		p.retainUntil = deadline.Add(15 * time.Minute)
 		p.trace.Outcome = "approved_for_later"
+		b.auditOrder(p, "order_approval_saved", "scope", "exact_order_once", "expires_at", p.expires.UTC().Format(time.RFC3339))
 		b.mu.Unlock()
 		b.renderOrderOutcome(w, p)
 		return
 	}
 	permissionGeneration := b.permissions[p.session].generation
 	p.rememberRequested = r.PostForm.Get("remember") == "yes"
+	b.auditOrder(p, "order_approval_accepted", "remember_requested", p.rememberRequested)
 	b.metricEvent(p.operation, "submission_started")
 	p.status = "submitting" // Single-use before fresh authentication and any API attempt.
 	b.mu.Unlock()
@@ -511,8 +518,10 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 	// the outbound request, rather than checking it only before execution.
 	ctx, expire := context.WithDeadline(ctx, p.expires)
 	defer expire()
-	ctx = context.WithValue(ctx, browserApprovalsKey{}, b)
-	ctx = context.WithValue(ctx, approvedBrowserOrderKey{}, approvedBrowserOrder{session: p.session, user: p.user, operation: p.operation, snapshot: p.snapshot, expires: p.expires})
+	attempt := &submissionAuditState{}
+	ctx = context.WithValue(ctx, submissionAuditStateKey{}, attempt)
+	ctx = audit.WithLogger(context.WithValue(ctx, browserApprovalsKey{}, b), b.manager.Logger)
+	ctx = context.WithValue(ctx, approvedBrowserOrderKey{}, approvedBrowserOrder{session: p.session, user: p.user, client: p.client, operation: p.operation, approvalID: p.id, snapshot: p.snapshot, expires: p.expires})
 	req := &sdk.CallToolRequest{Params: &sdk.CallToolParamsRaw{Name: "orders", Arguments: json.RawMessage(p.arguments)}, Extra: &sdk.RequestExtra{Header: http.Header{"X-Kite-Session-Id": {p.session}}}}
 	result, err := (&OrdersTool{}).Handler(b.manager)(ctx, req)
 	if err != nil {
@@ -539,11 +548,20 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 				current := b.permissions[p.session]
 				if !current.allowed || current.client != p.client || current.user != p.user || !time.Now().Before(current.expires) {
 					b.metricEvent("permissions", "permission_granted")
+					b.auditOrder(p, "order_permission_granted", "scope", "all_orders", "expires_at", deadline.UTC().Format(time.RFC3339))
 				}
 				b.permissions[p.session] = clientOrderPermission{client: p.client, user: p.user, clientName: p.clientName, expires: deadline, allowed: true, generation: permissionGeneration}
 			}
 		}
 	}
+	submissionOutcome := "not_attempted"
+	if attempt.attempted {
+		submissionOutcome = "unconfirmed"
+		if p.status == "submitted" {
+			submissionOutcome = "accepted"
+		}
+	}
+	b.auditOrder(p, "browser_approval_result", "status", p.status, "approval_outcome", p.trace.Outcome, "submission_attempted", attempt.attempted, "submission_outcome", submissionOutcome)
 	b.metricEvent(p.operation, p.status)
 	observeApproval(b.manager.Metrics(), p.operation, result, p.trace)
 	b.mu.Unlock()
@@ -570,10 +588,12 @@ func (b *BrowserApprovals) manage(w http.ResponseWriter, r *http.Request, sessio
 		permission := b.permissions[sessionID]
 		if permission.allowed {
 			b.metricEvent("permissions", "permission_revoked")
+			audit.Record(b.manager.Logger, "order_permission_revoked", audit.Actor{UserID: session.Credentials.UserID, SessionID: sessionID, ClientID: permission.client}, "scope", "all_orders")
 		}
 		for _, saved := range b.pending {
 			if saved.session == sessionID && saved.status == "approved_for_later" {
 				saved.status = "declined"
+				b.auditOrder(saved, "order_approval_revoked", "scope", "exact_order_once")
 			}
 		}
 		permission.allowed = false
@@ -615,6 +635,7 @@ func executeBrowserApproved(ctx context.Context, req *sdk.CallToolRequest, opera
 func (b *BrowserApprovals) expireOrderLocked(p *browserOrder, now time.Time) {
 	if (p.status == "approval_required" || p.status == "approved_for_later") && !now.Before(p.expires) {
 		p.status = "expired"
+		b.auditOrder(p, "order_approval_expired", "expires_at", p.expires.UTC().Format(time.RFC3339))
 		b.metricEvent(p.operation, "expired")
 	}
 }
@@ -650,8 +671,12 @@ func (b *BrowserApprovals) executeSaved(ctx context.Context, req *sdk.CallToolRe
 		return nil, nil, false
 	}
 	selected.status = "submitting"
+	b.auditOrder(selected, "order_approval_consumed", "scope", "exact_order_once")
 	b.mu.Unlock()
 	traceMethod(ctx, "remembered_permission", "approved", "")
+	if trace := traceFrom(ctx); trace != nil {
+		trace.auditRef = audit.Ref(selected.id)
+	}
 	var result *sdk.CallToolResult
 	if ctx.Err() != nil || !time.Now().Before(selected.expires) {
 		result = approvalFailure("timeout", "Saved approval expired; no order was submitted.")

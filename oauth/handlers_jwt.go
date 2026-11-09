@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zerodha/kite-mcp-server/internal/audit"
 	"github.com/zerodha/kite-mcp-server/kc"
 	"github.com/zerodha/kite-mcp-server/kc/templates"
 )
@@ -39,6 +40,7 @@ func NewHandlers(server *Server, kcManager *kc.Manager, logger *slog.Logger) *Ha
 // browserError gives browser-facing authorization failures the shared Kite layout.
 // Keep protocol endpoints on their existing OAuth JSON responses.
 func (h *Handlers) browserError(w http.ResponseWriter, r *http.Request, reason string, status int) {
+	audit.Record(h.logger, "oauth_flow_failed", audit.Actor{}, "reason", reason, "http_status", status, "source_ip", h.server.ClientIP(r))
 	h.logger.Warn("browser authorization failed", "path", r.URL.Path, "method", r.Method, "reason", reason, "status", status)
 	title := "Unable to sign in"
 	message := "We couldn't connect this app to Kite."
@@ -219,6 +221,7 @@ func (h *Handlers) handleConsent(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.PostForm.Get("decision") != "approve" {
 		pending.consumed = true
+		audit.Record(h.logger, "client_consent_declined", audit.Actor{SessionID: flow, ClientID: pending.ClientID}, "scope", "enabled_tools", "source_ip", h.server.ClientIP(r))
 		_, _ = h.kcManager.SessionManager().Terminate(flow)
 		callback, _ := url.Parse(pending.RedirectURI)
 		q := callback.Query()
@@ -237,6 +240,7 @@ func (h *Handlers) handleConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pending.approved = true
+	audit.Record(h.logger, "client_consent_granted", audit.Actor{SessionID: flow, ClientID: pending.ClientID}, "scope", "enabled_tools", "source_ip", h.server.ClientIP(r))
 	h.setFlowCookie(w, flow, "state", pending.browserState, 600)
 	http.Redirect(w, r, loginURL, http.StatusSeeOther)
 }
@@ -370,7 +374,7 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 			h.browserError(w, r, "session error", http.StatusInternalServerError)
 			return
 		}
-		h.logger.Info("login tool callback", "user_id", creds.UserID)
+		audit.Record(h.logger, "user_login_success", audit.Actor{UserID: creds.UserID, SessionID: sessionID}, "flow", "login_tool", "source_ip", h.server.ClientIP(r))
 		if err := h.kcManager.RenderSuccessTemplate(w); err != nil {
 			h.logger.Error("failed to render login success", "session_id", sessionID, "stage", "render_success", "error", err)
 			if templates.IsWriteError(err) {
@@ -411,7 +415,7 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Redirect back to client with code
 	redirectURL := BuildRedirectWithCode(pending.RedirectURI, code, pending.State)
-	h.logger.Info("OAuth callback complete", "client_id", pending.ClientID, "user_id", creds.UserID)
+	audit.Record(h.logger, "user_login_success", audit.Actor{UserID: creds.UserID, SessionID: userSessionID, ClientID: pending.ClientID}, "flow", "oauth", "consent_ref", audit.Ref(sessionID), "source_ip", h.server.ClientIP(r))
 	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
@@ -458,7 +462,7 @@ func (h *Handlers) HandleToken(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
 		return
 	}
-	h.logger.Info("token issued", "client_id", req.ClientID)
+	audit.Record(h.logger, "oauth_token_issued", audit.Actor{UserID: claims.KiteUserID, SessionID: claims.SessionID, ClientID: claims.ClientID}, "expires_at", claims.ExpiresAt.Time.UTC().Format(time.RFC3339))
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"access_token": accessToken,
 		"token_type":   "Bearer",

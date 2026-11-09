@@ -58,6 +58,10 @@ func (h *BaseToolHandler) WithKiteClientContext(ctx context.Context, request *mc
 	}
 
 	h.manager.Logger.Debug("Session validated successfully", "tool", toolName, "session_id", sessionID)
+	switch toolName {
+	case "gtt_place", "gtt_modify", "gtt_delete", "alerts_create", "alerts_modify", "alerts_delete":
+		return auditOtherMutation(h.manager, ctx, request, toolName, func() (*mcp.CallToolResult, error) { return fn(client) })
+	}
 	return fn(client)
 }
 

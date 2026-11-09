@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/google/go-querystring/query"
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	kiteconnect "github.com/zerodha/gokiteconnect/v4"
+	"github.com/zerodha/kite-mcp-server/internal/audit"
 )
 
 const tradeApprovalTimeout = 5 * time.Minute
@@ -18,20 +20,48 @@ const tradeApprovalTimeout = 5 * time.Minute
 // an explicitly remembered account/client permission. Tool arguments cannot
 // grant approval. details must contain normalized execution parameters.
 func withTradeApproval(ctx context.Context, request *mcp.CallToolRequest, operation string, details any, execute func() (*mcp.CallToolResult, error)) (*mcp.CallToolResult, error) {
+	requestID := uuid.NewString()
 	trace := &approvalTrace{Method: "none", Outcome: "unavailable"}
 	ctx = context.WithValue(ctx, approvalTraceKey{}, trace)
+	if request != nil && request.Params != nil {
+		trace.auditRef = audit.Ref(request.Params.RequestState)
+	}
 	trackedExecute := func() (*mcp.CallToolResult, error) {
 		trace.Outcome = "approved"
-		return execute()
+		if state, ok := ctx.Value(submissionAuditStateKey{}).(*submissionAuditState); ok {
+			state.attempted = true
+		}
+		return auditSubmission(audit.Logger(ctx), auditActor(ctx, request), operation, trace.Method, details, requestID, trace.auditRef, execute)
 	}
 	result, err := runTradeApproval(ctx, request, operation, details, trackedExecute)
 	result = approvalResultWithTrace(result, *trace)
 	observeApproval(metricsFromContext(ctx), operation, result, *trace)
+	if trace.auditRef == "" {
+		if id, ok := auditResultData(result)["approval_id"].(string); ok {
+			trace.auditRef = audit.Ref(id)
+		}
+	}
+	outcome := trace.Outcome
+	if value, ok := auditResultData(result)["approval_outcome"].(string); ok {
+		outcome = value
+	}
+	fields := []any{"request_id", requestID, "operation", operation, "approval_method", trace.Method, "outcome", outcome, "fallback_reason", trace.Fallback, "native_attempted", trace.NativeAttempted, "native_completed", trace.NativeCompleted, "order_snapshot_sha256", audit.Digest(details)}
+	if trace.auditRef != "" {
+		fields = append(fields, "approval_ref", trace.auditRef)
+	} else if result != nil && result.RequestState != "" {
+		fields = append(fields, "approval_ref", audit.Ref(result.RequestState))
+	} else if request != nil && request.Params != nil && request.Params.RequestState != "" {
+		fields = append(fields, "approval_ref", audit.Ref(request.Params.RequestState))
+	}
+	audit.Record(audit.Logger(ctx), "order_approval_resolved", auditActor(ctx, request), fields...)
 	return result, err
 }
 
 func runTradeApproval(ctx context.Context, request *mcp.CallToolRequest, operation string, details any, execute func() (*mcp.CallToolResult, error)) (*mcp.CallToolResult, error) {
-	if _, ok := ctx.Value(approvedBrowserOrderKey{}).(approvedBrowserOrder); ok {
+	if approved, ok := ctx.Value(approvedBrowserOrderKey{}).(approvedBrowserOrder); ok {
+		if trace := traceFrom(ctx); trace != nil {
+			trace.auditRef = audit.Ref(approved.approvalID)
+		}
 		traceMethod(ctx, "browser", "unavailable", "")
 	}
 	if result, err, handled := executeBrowserApproved(ctx, request, operation, details, execute); handled {

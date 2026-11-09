@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zerodha/kite-mcp-server/internal/audit"
 	"github.com/zerodha/kite-mcp-server/kc"
 )
 
@@ -89,6 +90,7 @@ func handleSessionStatus(handler *BaseToolHandler, sessionID string) (*mcp.CallT
 }
 
 func handleSessionLogout(handler *BaseToolHandler, sessionID string) (*mcp.CallToolResult, error) {
+	session, _ := handler.manager.SessionManager().Get(sessionID)
 	_, err := handler.manager.SessionManager().Terminate(sessionID)
 	if err != nil {
 		if err.Error() == "session ID not found" {
@@ -100,6 +102,12 @@ func handleSessionLogout(handler *BaseToolHandler, sessionID string) (*mcp.CallT
 		}
 		return NewToolResultError("Failed to logout current session"), nil
 	}
+
+	actor := audit.Actor{SessionID: sessionID}
+	if session != nil && session.Credentials != nil {
+		actor.UserID = session.Credentials.UserID
+	}
+	audit.Record(handler.manager.Logger, "session_logged_out", actor)
 
 	return handler.MarshalResponse(map[string]interface{}{
 		"success":    true,

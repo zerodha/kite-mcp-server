@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zerodha/kite-mcp-server/internal/audit"
 	"github.com/zerodha/kite-mcp-server/kc"
 )
 
@@ -79,6 +80,11 @@ func (f *reviewLogin) HandleKiteLoginCallback(w http.ResponseWriter, r *http.Req
 	defer cancel()
 	fresh, err := f.broker.manager.CompleteLoginContext(ctx, q.Get("request_token"))
 	if err != nil || fresh.UserID != f.user {
+		reason := "account_mismatch"
+		if err != nil {
+			reason = "token_exchange_failed"
+		}
+		audit.Record(f.broker.manager.Logger, "order_review_login_failed", audit.Actor{SessionID: f.session}, "expected_user_id", f.user, "approval_ref", audit.Ref(f.target), "reason", reason, "source_ip", f.broker.oauth.ClientIP(r))
 		f.broker.render(w, http.StatusForbidden, browserOrderPage{Title: "Sign-in could not be verified", Account: f.user, Message: "Sign in to the Kite account shown above to review this request. No request was sent to Kite.", RetryURL: f.broker.approvalURL(f.target)})
 		return
 	}
@@ -96,6 +102,7 @@ func (f *reviewLogin) HandleKiteLoginCallback(w http.ResponseWriter, r *http.Req
 	if strings.HasPrefix(f.target, "manage/") {
 		p, ok := b.permissions[f.session]
 		allowed := ok && p.allowed && p.user == f.user && time.Now().Before(p.expires)
+		audit.Record(b.manager.Logger, "permission_review_login_succeeded", audit.Actor{UserID: f.user, SessionID: f.session, ClientID: p.client}, "source_ip", b.oauth.ClientIP(r))
 		data = browserOrderPage{Title: "Order approval settings", Account: f.user, ClientName: p.clientName, Manage: true, Allowed: allowed, Expiry: p.expires.In(time.FixedZone("IST", 19800)).Format("02 Jan 2006, 15:04 IST")}
 		for _, saved := range b.pending {
 			if saved.session == f.session && saved.user == f.user && saved.status == "approved_for_later" && time.Now().Before(saved.expires) {
@@ -105,6 +112,7 @@ func (f *reviewLogin) HandleKiteLoginCallback(w http.ResponseWriter, r *http.Req
 		}
 	} else if p := b.pending[f.target]; p != nil && p.session == f.session && p.user == f.user {
 		data = b.orderPageLocked(p)
+		b.auditOrder(p, "order_review_login_succeeded", "outcome", "verified")
 	} else {
 		data = browserOrderPage{Title: "Approval unavailable", Message: "Ask your app to check the request status."}
 	}

@@ -10,6 +10,7 @@ import (
 type approvalTraceKey struct{}
 
 type approvalTrace struct {
+	auditRef        string
 	Method          string `json:"approval_method_used"`
 	Outcome         string `json:"approval_outcome"`
 	Fallback        string `json:"fallback_reason"`

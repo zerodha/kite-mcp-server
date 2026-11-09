@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 
@@ -18,7 +19,9 @@ var (
 	buildString = "dev build"
 )
 
-func initLogger() *slog.Logger {
+func initLogger() *slog.Logger { return configuredLogger(os.Stderr) }
+
+func configuredLogger(output io.Writer) *slog.Logger {
 	// Default to INFO level, can be overridden by LOG_LEVEL env var
 	// Valid levels: debug, info, warn, error
 	var level slog.Level
@@ -39,8 +42,10 @@ func initLogger() *slog.Logger {
 	opts := &slog.HandlerOptions{
 		Level: level,
 	}
-	handler := slog.NewTextHandler(os.Stderr, opts)
-	return slog.New(handler)
+	if os.Getenv("LOG_FORMAT") == "json" {
+		return slog.New(slog.NewJSONHandler(output, opts))
+	}
+	return slog.New(slog.NewTextHandler(output, opts))
 }
 
 func main() {

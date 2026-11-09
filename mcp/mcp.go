@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zerodha/kite-mcp-server/internal/audit"
 	"github.com/zerodha/kite-mcp-server/kc"
 )
 
@@ -86,6 +87,11 @@ func filterTools(allTools []Tool, excludedSet map[string]bool) ([]Tool, int, int
 func RegisterTools(srv *mcp.Server, manager *kc.Manager, excludedTools string, logger *slog.Logger) {
 	if manager != nil {
 		registerOperationMetrics(srv, manager.Metrics())
+		srv.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+			return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+				return next(audit.WithLogger(ctx, manager.Logger), method, req)
+			}
+		})
 	}
 	// Parse excluded tools list
 	excludedSet := parseExcludedTools(excludedTools)
