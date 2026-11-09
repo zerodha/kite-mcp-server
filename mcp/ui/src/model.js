@@ -55,9 +55,9 @@ export function formatValue(value) {
   return String(value);
 }
 
-const labels = { tradingsymbol: 'Symbol', instrument: 'Instrument', quantity: 'Qty', t1_quantity: 'T1 qty', average_price: 'Avg. price', last_price: 'Last price', pnl: 'P&L', net_change: 'Change', instrument_token: 'Instrument ID', ohlc: 'OHLC' };
+const labels = { oi: 'OI', isin: 'ISIN', m2m: 'M2M', filled_quantity: 'Executed qty', pending_quantity: 'Pending qty', cancelled_quantity: 'Cancelled qty', tradingsymbol: 'Symbol', instrument: 'Instrument', quantity: 'Qty', t1_quantity: 'T1 qty', average_price: 'Avg. price', last_price: 'Last price', pnl: 'P&L', net_change: 'Change', instrument_token: 'Instrument ID', ohlc: 'OHLC' };
 export function columnLabel(key) {
-  return labels[key] || key.replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+  return labels[key] || key.replaceAll('_', ' ').replace(/^\w/, c => c.toUpperCase());
 }
 export function isMoney(key) {
   return /price|pnl|profit|margin|balance|cash|debit|credit|^open$|^high$|^low$|^close$|net_change|^realised$|^unrealised$|^m2m$|^strike$|^value$|invested_amount|current_value/.test(key) && !/quantity|timestamp|percent|percentage/.test(key);
@@ -118,7 +118,7 @@ export function receivedTime(value = new Date()) {
   return new Intl.DateTimeFormat('en-IN', { timeZone:'Asia/Kolkata', hour:'2-digit', minute:'2-digit', second:'2-digit' }).format(new Date(value)) + ' IST';
 }
 export function historyArguments(token, from, to, interval = 'day') {
-  if (!Number.isInteger(token) || token <= 0) throw new Error('An instrument token is required for charts.');
+  if (!Number.isInteger(token) || token <= 0) throw new Error('The instrument ID needed for this chart is missing.');
   const validDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(Date.parse(value))&&new Date(value).toISOString().slice(0,10)===value;
   if (!validDate(from) || !validDate(to) || from > to) throw new Error('Choose a valid start date on or before the end date.');
   return { mode:'historical', instrument_token:token, from_date:from, to_date:to, interval };

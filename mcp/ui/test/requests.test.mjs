@@ -41,7 +41,7 @@ test('new snapshots cancel panel slots and unsupported hosts make no calls',asyn
   const check=assert.rejects(promise,{name:'AbortError'});
   requests.reset();finish({structuredContent:{data:[]}});await check;
   const unsupported=new PanelRequests(()=>{throw new Error('must not call');},()=>false);
-  await assert.rejects(unsupported.run('quote','market',{}),/host cannot/);
+  await assert.rejects(unsupported.run('quote','market',{}),/app cannot/);
 });
 
 test('cancelled panel echoes remain distinct after a newer selection completes',async()=>{

@@ -86,7 +86,7 @@ try{
  await page.setViewportSize({width:444,height:1100});await capture('price-refresh-mobile');await page.setViewportSize({width:1180,height:1050});
  await page.evaluate(()=>window.failQuote=true);
  await app.getByRole('button',{name:'Refresh prices',exact:true}).click();
- await app.locator('#price-status').filter({hasText:'previous snapshots'}).waitFor();
+ await app.locator('#price-status').filter({hasText:'last successful update'}).waitFor();
  assert.match(await app.locator('#content').textContent(),/1,600.00/);
  await page.evaluate(()=>delete window.depthPrice);
  // Summary input and metadata-free result echoes can arrive after its response.
@@ -199,7 +199,7 @@ try{
  // A failed refresh explicitly marks the old quote, then recovers.
  await page.evaluate(()=>window.failQuote=true);
  await app.getByRole('button',{name:'Refresh quote',exact:true}).click();
- await app.locator('#inspector .panel-error').filter({hasText:'previous snapshot'}).waitFor();
+ await app.locator('#inspector .panel-error').filter({hasText:'last successful update'}).waitFor();
  await app.getByRole('button',{name:'Refresh quote',exact:true}).click();
  await app.getByRole('button',{name:'Refresh quote',exact:true}).waitFor();
  await app.locator('#inspector').getByText('₹3,540.25',{exact:true}).waitFor();
@@ -234,7 +234,7 @@ try{
  // Full contracts can be filtered and opened without losing the finder.
  await page.setViewportSize({width:1180,height:1050});
  await page.evaluate(()=>{window.send('ui/notifications/host-context-changed',{theme:'light'});window.emit('market',{mode:'search',query:'NIFTY',verbosity:'full'},{data:window.contracts,pagination:{from:0,limit:100,total:3,returned:3,has_more:false}});});
- await app.getByRole('heading',{name:'Instrument finder',exact:true}).waitFor();
+ await app.getByRole('heading',{name:'Instrument search',exact:true}).waitFor();
  await app.locator('#contract-type').selectOption('CE');
  assert.equal(await app.locator('.primary .data-table tbody tr').count(),1);
  await app.locator('#contract-expiry').selectOption('2026-11-24');
@@ -242,7 +242,7 @@ try{
  await app.locator('#contract-expiry').selectOption('');
  await app.locator('.primary .data-table').getByRole('button',{name:'NIFTY26OCT25000CE',exact:true}).click();
  await app.locator('#inspector').getByText('₹125.50',{exact:true}).waitFor();
- assert.equal(await app.locator('#title').textContent(),'Instrument finder');
+ assert.equal(await app.locator('#title').textContent(),'Instrument search');
  await capture('explorer-contract-desktop');
  await app.getByRole('button',{name:'Back to list',exact:true}).click();
  await app.locator('#finder-query').fill('NIFTY26NOV');await app.locator('#finder-live').check();await app.getByRole('button',{name:'Search instruments',exact:true}).click();
@@ -291,7 +291,7 @@ try{
  // Funds render the actual segment values, including disabled segments.
  await page.evaluate(()=>{window.send('ui/notifications/tool-input',{arguments:{mode:'margins'}});const copy=structuredClone(window.responses.find(item=>item.args.mode==='quote').result);delete copy._meta;window.send('ui/notifications/tool-result',copy);});
  await page.waitForTimeout(50);
- await app.getByText('Loading snapshot',{exact:true}).waitFor();
+ await app.getByText('Loading data',{exact:true}).waitFor();
  await page.evaluate(()=>window.send('ui/notifications/tool-result',window.wrap('portfolio',{mode:'margins'},{equity:{enabled:true,net:23456.75,available:{cash:30000,collateral:1000},utilised:{debits:7543.25,span:5000}},commodity:{enabled:false,net:0}})));
  await app.getByRole('heading',{name:'Funds & margins',exact:true}).waitFor();
  await app.getByText('23,456.75',{exact:true}).waitFor();assert.equal(await app.locator('.funds-segment').count(),2);
@@ -304,7 +304,7 @@ try{
  await app.getByRole('heading',{name:'Quotes',exact:true}).waitFor();
  assert.equal(await app.getByRole('button',{name:'Refresh',exact:true}).isEnabled(),true);
  await page.evaluate(()=>window.send('ui/notifications/tool-input',{arguments:{mode:'quote',instruments:['NSE:INFY']}}));
- await app.getByText('Loading snapshot',{exact:true}).waitFor();
+ await app.getByText('Loading data',{exact:true}).waitFor();
  await page.evaluate(()=>{
   const previous=window.responses.find(item=>item.args.mode==='quote'&&item.args.instruments.length===1&&item.args.instruments[0]==='NSE:INFY');
   const copy=structuredClone(previous.result);delete copy._meta;window.send('ui/notifications/tool-result',copy);

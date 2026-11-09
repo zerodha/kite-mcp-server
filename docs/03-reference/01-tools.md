@@ -202,7 +202,9 @@ Use these when `trigger_type=two-leg`.
 ## open_kite_view
 
 Model-visible on Apps-capable clients. Opens a read-only interactive Kite view
-with initial data. Required `view`: `holdings`, `positions`, `funds`, `orders`,
+with initial data only when the user asks for an interactive view or chart.
+Ordinary portfolio and market reads do not open widgets. Use text for routine
+questions, order confirmations, and approval status updates. Required `view`: `holdings`, `positions`, `funds`, `orders`,
 `gtt`, `option_chain`, `quote`, `historical`, or `search`.
 
 - `option_chain`: `underlying` (default `NIFTY`), optional `exchange` and `expiry`.

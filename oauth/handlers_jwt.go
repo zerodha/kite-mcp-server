@@ -41,42 +41,42 @@ func NewHandlers(server *Server, kcManager *kc.Manager, logger *slog.Logger) *Ha
 func (h *Handlers) browserError(w http.ResponseWriter, r *http.Request, reason string, status int) {
 	h.logger.Warn("browser authorization failed", "path", r.URL.Path, "method", r.Method, "reason", reason, "status", status)
 	title := "Unable to sign in"
-	message := "We couldn't complete your authorization."
-	guidance := "Return to your MCP client and start a new login. Avoid refreshing this page."
+	message := "We couldn't connect this app to Kite."
+	guidance := "Return to your app and sign in again. Do not refresh this page."
 	switch reason {
 	case "too many requests":
 		title = "Too many login attempts"
 		message = "There have been too many login requests."
-		guidance = "Wait a few minutes, then start a new login from your MCP client."
+		guidance = "Wait a few minutes, then sign in again from your app."
 	case "authorization busy":
 		title = "Sign-in temporarily unavailable"
 		message = "Too many sign-in requests are in progress."
-		guidance = "Wait a few minutes, then start a new login from your MCP client."
+		guidance = "Wait a few minutes, then sign in again from your app."
 	case "kite rate limited":
 		title = "Kite login temporarily limited"
-		message = "The Kite Connect login request was rate limited."
-		guidance = "Wait a few minutes, then start a new login from your MCP client. Avoid refreshing this page or making repeated login attempts."
+		message = "There have been too many attempts to sign in to Kite."
+		guidance = "Wait a few minutes, then sign in again from your app. Do not refresh this page or keep trying to sign in."
 	case "authorization expired", "consent expired":
 		title = "Login expired"
 		message = "This login session has expired or is no longer available."
 	case "authorization browser mismatch or consent missing", "invalid consent":
 		title = "Login could not be verified"
 		message = "We couldn't verify this login in your browser."
-		guidance = "Start a new login from your MCP client and complete it in the same browser."
+		guidance = "Sign in again from your app. Use the same browser to complete the login."
 	case "invalid client", "invalid client or redirect_uri":
-		title = "Client could not be verified"
-		message = "The client or its return address could not be verified."
+		title = "App could not be verified"
+		message = "We couldn't verify this app or its return address."
 	case "invalid_target":
-		title = "Unsupported resource"
-		message = "This client requested access to an unsupported resource (invalid_target)."
-		guidance = "Check the server address configured in your MCP client, then start a new login."
+		title = "Server address not supported"
+		message = "This app requested access to a server address that is not supported (invalid_target)."
+		guidance = "Check the Kite MCP server address in your app settings, then sign in again."
 	case "invalid request", "method not allowed":
 		title = "Invalid login request"
 		message = "This login request is incomplete or unsupported."
 	case "kite unavailable":
 		title = "Unable to connect to Kite"
 		message = "We couldn't complete your login with Kite Connect."
-		guidance = "Wait a few minutes, then start a new login from your MCP client. If the problem continues, contact the server administrator."
+		guidance = "Wait a few minutes, then sign in again from your app. If the problem continues, contact the server administrator."
 	case "internal error", "session error":
 		message = "The server couldn't complete your login. Please try again later."
 	}
@@ -86,7 +86,7 @@ func (h *Handlers) browserError(w http.ResponseWriter, r *http.Request, reason s
 			return
 		}
 		// Template execution failed before the response was committed.
-		http.Error(w, "Unable to sign in. Return to your MCP client and start a new login.", http.StatusInternalServerError)
+		http.Error(w, "Unable to sign in. Return to your app and sign in again.", http.StatusInternalServerError)
 	}
 }
 
@@ -174,7 +174,7 @@ func (h *Handlers) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(clientName) == "" {
-		clientName = "Unnamed MCP client"
+		clientName = "Unnamed app"
 	}
 	if err := h.kcManager.RenderClientConsent(w, clientName, req.RedirectURI, tempSessionID, pending.csrf); err != nil {
 		h.logger.Error("failed to render consent", "error", err)

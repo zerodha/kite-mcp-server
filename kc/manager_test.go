@@ -150,10 +150,10 @@ func TestRenderAuthorizeInterstitial(t *testing.T) {
 	}
 
 	body := recorder.Body.String()
-	if !strings.Contains(body, "Authorize MCP client") {
+	if !strings.Contains(body, "Connect app to Kite") {
 		t.Error("Expected interstitial body to contain heading")
 	}
-	if !strings.Contains(body, "AI systems are unpredictable and non-deterministic") {
+	if !strings.Contains(body, "AI can make mistakes and give different results for the same instruction") {
 		t.Error("Expected interstitial body to contain disclaimer")
 	}
 	if !strings.Contains(body, "https://client.example/callback") {

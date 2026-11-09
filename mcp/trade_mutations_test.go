@@ -99,7 +99,7 @@ func TestOrderModifyTTLApprovalAndRequest(t *testing.T) {
 	cs := orderMutationSession(t, manager, &sdk.ClientOptions{ElicitationHandler: func(_ context.Context, req *sdk.ElicitRequest) (*sdk.ElicitResult, error) {
 		elicitations.Add(1)
 		require.Zero(t, mutations.Load())
-		require.Contains(t, req.Params.Message, "Validity TTL (minutes): 15")
+		require.Contains(t, req.Params.Message, "Validity in minutes (TTL): 15")
 		return &sdk.ElicitResult{Action: "accept", Content: map[string]any{"confirm": true}}, nil
 	}})
 	result, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "orders", Arguments: map[string]any{"mode": "modify", "order_id": "order-1", "order_type": "LIMIT", "validity": "TTL", "validity_ttl": 15}})

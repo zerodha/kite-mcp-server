@@ -83,13 +83,8 @@ func TestAppsMixedClientDiscoveryAndReads(t *testing.T) {
 					require.Equal(t, []any{map[string]any{"type": "global"}, map[string]any{"type": "thread"}}, tool.Meta["openai/ui"].(map[string]any)["entrypoints"])
 					continue
 				}
-				if (index == 0 || index == 3) && (tool.Name == "portfolio" || tool.Name == "market") {
-					ui := tool.Meta["ui"].(map[string]any)
-					require.Equal(t, appResourceURI, ui["resourceUri"])
-					require.Equal(t, appResourceURI, tool.Meta["ui/resourceUri"])
-				} else {
-					require.NotContains(t, tool.Meta, "ui")
-				}
+				require.NotContains(t, tool.Meta, "ui")
+				require.NotContains(t, tool.Meta, "ui/resourceUri")
 			}
 			result, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "portfolio", Arguments: map[string]any{"mode": "holdings", "limit": 1, "_app_request_id": "panel-test-1"}})
 			require.NoError(t, err)

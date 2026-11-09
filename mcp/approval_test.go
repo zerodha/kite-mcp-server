@@ -210,7 +210,7 @@ func TestOrderApprovalUsesKiteOmitRulesAndChecksLiveParams(t *testing.T) {
 	called := false
 	result, err := elicitTradeApproval(context.Background(), time.Second, func(_ context.Context, p *sdk.ElicitParams) (*sdk.ElicitResult, error) {
 		require.Contains(t, p.Message, "Order type: LIMIT")
-		require.Contains(t, p.Message, "Price: 1500")
+		require.Contains(t, p.Message, "Price (₹): 1500")
 		require.NotContains(t, p.Message, "Quantity:", "omitted quantity must not appear as a change to zero")
 		params.Price = 1600
 		return &sdk.ElicitResult{Action: "accept", Content: map[string]any{"confirm": true}}, nil

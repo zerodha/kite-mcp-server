@@ -2,26 +2,26 @@
 
 {{define "content"}}
 <div>
-    <h1>Authorize MCP client</h1>
-    <p class="consent-intro">Review this client’s access before signing in to Kite.</p>
+    <h1>Connect app to Kite</h1>
+    <p class="consent-intro">Check what this app can access before you sign in to Kite.</p>
     <dl class="client-details">
-        <dt>Client</dt>
-        <dd><strong>{{.ClientName}}</strong><small>This name is provided by the client.</small></dd>
+        <dt>App</dt>
+        <dd><strong>{{.ClientName}}</strong><small>This name is provided by the app.</small></dd>
         <dt>Return address</dt>
         <dd>{{.RedirectURI}}</dd>
     </dl>
     <h2>Requested access</h2>
-    <p>This client requests access to your profile, balances, holdings, positions, market data, and enabled trading tools through the Kite Connect API.</p>
-    <p>Approval grants access to all enabled tools. Orders require a separate approval in your client or browser unless you later allow future orders for this connection. GTT and Alerts/ATO changes do not use this order approval.</p>
-    <p>Continue only if you recognize this client and its return address. You’ll sign in to Kite next.</p>
+    <p>This app is asking to access your profile, funds, holdings, positions, market data, and enabled trading tools through the Kite Connect API.</p>
+    <p>This gives the app access to every enabled tool. You must approve order requests separately in your app or browser, unless you allow orders without asking. This order approval does not cover GTT or Alerts/ATO changes.</p>
+    <p>Continue only if you recognise this app and its return address. You will return to this address after signing in to Kite.</p>
     <p class="disclaimer">
         <strong>Disclaimer</strong>
-        AI systems are unpredictable and non-deterministic. By continuing, you agree to interact with your Zerodha account via AI at your own risk.
+        AI can make mistakes and give different results for the same instruction. By continuing, you agree to interact with your Zerodha account via AI at your own risk.
     </p>
     <form method="post" action="/authorize" class="actions">
         <input type="hidden" name="flow" value="{{.Flow}}">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <button type="submit" name="decision" value="approve" class="button">Approve and continue</button>
+        <button type="submit" name="decision" value="approve" class="button">Allow access and continue</button>
         <button type="submit" name="decision" value="deny" class="button button-secondary">Decline</button>
     </form>
 </div>

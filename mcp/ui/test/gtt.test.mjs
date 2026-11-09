@@ -16,7 +16,7 @@ test('quote rerender preserves trigger snapshot receipt time',async()=>{
   const container=new Node(),monitor=new GTTMonitor(container,{canCall:()=>true}),payload={data:[]};
   monitor.show(payload);monitor.receivedAt='original receipt';monitor.quoteMessage='Quotes received later';monitor.show(payload);
   assert.equal(monitor.receivedAt,'original receipt');
-  assert.equal(container.children[1].textContent,'Received original receipt · Read-only trigger snapshots');
+  assert.equal(container.children[1].textContent,'Received original receipt · View only');
   monitor.show({data:[]});assert.notEqual(monitor.receivedAt,'original receipt');
  }finally{globalThis.document=original;}
 });

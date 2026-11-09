@@ -17,7 +17,7 @@ export class Inspector {
     this.to=dateIST(); const start=new Date(`${this.to}T00:00:00Z`);start.setUTCDate(start.getUTCDate()-30);this.from=start.toISOString().slice(0,10);this.interval='day';
     // Only market snapshots may seed a quote; holdings.average_price means cost,
     // while quote.average_price means today's average traded price.
-    if(['quote','ltp','ohlc'].includes(mode)) { this.quote=row;this.quoteTime='From the main snapshot'; }
+    if(['quote','ltp','ohlc'].includes(mode)) { this.quote=row;this.quoteTime='From the last data update'; }
     this.container.hidden=false;this.onSelection(rowIdentity(row));this.render();
     this.container.querySelector('h2')?.focus({preventScroll:true});
     if(this.requests.canCall()&&!referenceOnly(row)) this.loadQuote();
@@ -55,7 +55,7 @@ export class Inspector {
   }
   renderDepth(target) {
     const quote=this.quote;
-    if(!quote?.depth) {target.append(el('p',this.quoteLoading?'Loading market depth…':'Market depth is not available in this snapshot.','muted'));return;}
+    if(!quote?.depth) {target.append(el('p',this.quoteLoading?'Loading market depth…':'Market depth is not available in this update.','muted'));return;}
     const sides=el('div',null,'depth-sides');
     for(const [key,label] of [['buy','Bids'],['sell','Offers']]) {
       const levels=(quote.depth[key]||[]).filter(level=>finite(level.price)&&level.price>0&&finite(level.quantity)&&level.quantity>=0).slice(0,5);
@@ -72,21 +72,21 @@ export class Inspector {
         }
         body.append(tr);
       }
-      table.append(body);side.append(table);if(!levels.length)side.append(el('p','No orders at this snapshot.','muted'));
+      table.append(body);side.append(table);if(!levels.length)side.append(el('p','No orders at this price level.','muted'));
       sides.append(side);
     }
-    target.append(sides,el('p','Displayed depth is a snapshot of up to five levels, not the entire order book.','muted'));
+    target.append(sides,el('p','Market depth shows up to five price levels from the last update. It does not show the full order book.','muted'));
     const totals=el('div',null,'metric-grid');totals.append(metric('Total buy quantity',quote.buy_quantity,'quantity'),metric('Total sell quantity',quote.sell_quantity,'quantity'));target.append(totals);
   }
   renderOverview(target) {
     const row=this.row,q=this.quote;
     if(this.mode==='holdings') {
       const values=holdingMetrics(row),grid=el('div',null,'metric-grid');
-      grid.append(metric('Total quantity',holdingQuantity(row),'quantity'),metric('Avg. cost (₹)',row.average_price,'average_price'),metric('Invested (₹)',values.invested,'invested_amount'),metric('Current (₹)',values.current,'current_value'),metric('P&L (₹)',row.pnl,'pnl',true),metric('Return',values.percent,'return_percent',true));if(finite(row.t1_quantity))grid.append(metric('T1 quantity',row.t1_quantity,'quantity'));target.append(grid,el('p','Holding values are from the portfolio snapshot. Quote prices below are fetched separately.','muted'));
+      grid.append(metric('Total quantity',holdingQuantity(row),'quantity'),metric('Avg. cost (₹)',row.average_price,'average_price'),metric('Invested (₹)',values.invested,'invested_amount'),metric('Current (₹)',values.current,'current_value'),metric('P&L (₹)',row.pnl,'pnl',true),metric('Return',values.percent,'return_percent',true));if(finite(row.t1_quantity))grid.append(metric('T1 quantity',row.t1_quantity,'quantity'));target.append(grid,el('p','Holding values are from your last portfolio update. Market prices below are loaded separately.','muted'));
     } else if(this.mode==='positions') {
       const grid=el('div',null,'metric-grid');
       for(const [label,key] of [['Net quantity','quantity'],['Average price (₹)','average_price'],['P&L (₹)','pnl'],['Realised (₹)','realised'],['Unrealised (₹)','unrealised'],['M2M (₹)','m2m']])grid.append(metric(label,row[key],key,['pnl','realised','unrealised','m2m'].includes(key)));
-      target.append(el('p',`${row.product||'Product unavailable'} · ${row.view==='day'?'Today’s activity':'Net exposure'} · ${row.quantity===0?'Closed':row.quantity>0?'Long':'Short'}`,'badge-line'),grid);
+      target.append(el('p',`${row.product||'Product unavailable'} · ${row.view==='day'?'Today’s positions':'Net positions'} · ${row.quantity===0?'Closed':row.quantity>0?'Long':'Short'}`,'badge-line'),grid);
     }
     if(q) {
       const range=rangeBar(q.ohlc,q.last_price);if(range)target.append(range);
@@ -110,7 +110,7 @@ export class Inspector {
     const save=()=>{this.from=from.value;this.to=to.value;this.interval=interval.value;};from.onchange=save;to.onchange=save;interval.onchange=save;
     button.onclick=event=>{event.preventDefault();save();this.loadHistory();};target.append(form);
     if(referenceOnly(this.row))target.append(el('p','This international instrument is reference data only. Kite quotes and historical charts are unavailable.','muted'));
-    else if(!this.ref.token)target.append(el('p','A chart needs an instrument token. Load a full quote or use instrument search.','muted'));
+    else if(!this.ref.token)target.append(el('p','The instrument ID needed for this chart is missing. Load a full quote or search for the instrument.','muted'));
     if(this.chartError)target.append(el('p',this.chartError,'panel-error'));
     if(this.chartLoading)target.append(el('p','Loading historical candles…','muted'));
     if(this.history) {
@@ -138,10 +138,10 @@ export class Inspector {
     if(finite(change))quoteLine.append(el('span',`Day change ${formatCell(change,'price_change')}${q.ohlc.close?` (${formatCell(change/q.ohlc.close*100,'return_percent')})`:''}`,tone(change)));
     const refresh=action(this.quoteLoading?'Loading quote…':'Refresh quote',()=>this.loadQuote(),'quiet');refresh.id='inspector-quote-refresh';refresh.disabled=this.quoteLoading||!this.requests.canCall()||referenceOnly(this.row);this.container.append(quoteLine);
     this.container.append(el('p',referenceOnly(this.row)?'International reference instrument. Kite quotes and historical charts are unavailable.':this.quoteTime||'Quote not loaded','muted'));
-    if(snapshotTime(q?.timestamp||q?.quote_timestamp))this.container.append(el('p',`Quote timestamp: ${snapshotTime(q.timestamp||q.quote_timestamp)}`,'muted'));
+    if(snapshotTime(q?.timestamp||q?.quote_timestamp))this.container.append(el('p',`Quote time: ${snapshotTime(q.timestamp||q.quote_timestamp)}`,'muted'));
     const quoteActions=el('div',null,'quote-actions');quoteActions.append(refresh);this.container.append(quoteActions);
-    if(this.quoteError)this.container.append(el('p',`${this.quoteError}${q?' Displayed quote is the previous snapshot.':''}`,'panel-error'));
-    if(!this.requests.canCall())this.container.append(el('p','This host cannot load additional data. Ask for quotes or historical prices in chat.','muted'));
+    if(this.quoteError)this.container.append(el('p',`${this.quoteError}${q?' The price shown is from the last successful update.':''}`,'panel-error'));
+    if(!this.requests.canCall())this.container.append(el('p','This app cannot load more data here. Ask for quotes or historical prices in chat.','muted'));
     const tabs=el('div',null,'inspector-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Instrument details');
     const names=['overview','chart','depth','details'];
     for(const name of names) {
@@ -157,7 +157,7 @@ export class Inspector {
     if(this.tab==='overview')this.renderOverview(body);
     if(this.tab==='depth')this.renderDepth(body);
     if(this.tab==='chart')this.renderHistory(body);
-    if(this.tab==='details'){body.append(el('h3','Source row'),detailList(this.row));if(this.quote)body.append(el('h3','Quote snapshot'),detailList(this.quote));}
+    if(this.tab==='details'){body.append(el('h3','Instrument details'),detailList(this.row));if(this.quote)body.append(el('h3','Quote details'),detailList(this.quote));}
     this.container.append(body);
     if(focused)document.getElementById(focused)?.focus({preventScroll:true});
     else if(focusedNode?.isConnected&&this.container.contains(focusedNode))focusedNode.focus({preventScroll:true});

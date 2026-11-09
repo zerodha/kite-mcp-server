@@ -48,7 +48,7 @@ func consentPage(t *testing.T, h *Handlers) (url.Values, *http.Cookie, string) {
 		t.Fatalf("consent GET: %d %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	for _, want := range []string{"Example &lt;Client&gt;", redirect, "Kite Connect API", "balances", "trading"} {
+	for _, want := range []string{"Example &lt;Client&gt;", redirect, "Kite Connect API", "funds", "trading"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing consent detail %q", want)
 		}
@@ -277,7 +277,7 @@ func TestHandlersRejectForeignResources(t *testing.T) {
 	if w.Code != 400 || !strings.Contains(w.Body.String(), "invalid_target") || len(w.Result().Cookies()) != 0 {
 		t.Fatal("foreign authorization resource accepted")
 	}
-	assertBrowserError(t, w, 400, "Unsupported resource")
+	assertBrowserError(t, w, 400, "Server address not supported")
 	q.Set("grant_type", "authorization_code")
 	q.Set("code", "unused")
 	q.Set("code_verifier", "verifier")

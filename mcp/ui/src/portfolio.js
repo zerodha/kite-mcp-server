@@ -21,7 +21,7 @@ export class PortfolioSummary {
         grid.append(item);
       }
       this.container.replaceChildren(heading,grid);
-      this.container.title='Account totals are fetched separately and are independent of the current page and filters.';
+      this.container.title='Account totals include all your holdings. Page filters do not change these totals.';
     }catch(error){
       if(version!==this.version||error.name==='AbortError')return;
       const line=el('div',null,'summary-error');line.append(el('span',`Account summary unavailable: ${error.message}`,'muted'));

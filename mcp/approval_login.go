@@ -32,12 +32,12 @@ func (b *BrowserApprovals) startReviewLogin(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if !time.Now().Before(expires) {
-		b.render(w, http.StatusGone, browserOrderPage{Title: "Approval expired", Message: "Check the outcome in your client before requesting another review."})
+		b.render(w, http.StatusGone, browserOrderPage{Title: "Approval expired", Message: "Ask your app to check the request status before starting another approval."})
 		return
 	}
 	current, err := b.manager.SessionManager().Get(session)
 	if err != nil || current.Credentials == nil || current.Credentials.UserID != user {
-		b.render(w, http.StatusForbidden, browserOrderPage{Title: "Connection unavailable", Message: "Reconnect Kite from your assistant before requesting another review."})
+		b.render(w, http.StatusForbidden, browserOrderPage{Title: "Connection unavailable", Message: "Reconnect Kite in your app, then request a new approval."})
 		return
 	}
 	flow := &reviewLogin{broker: b, target: target, session: session, user: user, state: randomApprovalSecret(), secret: randomApprovalSecret(), previous: current.Credentials, expires: expires}
@@ -50,7 +50,7 @@ func (b *BrowserApprovals) startReviewLogin(w http.ResponseWriter, r *http.Reque
 	loginURL, err := b.manager.GenerateLoginURL(id, flow.state)
 	if err != nil {
 		_, _ = b.manager.SessionManager().Terminate(id)
-		b.render(w, http.StatusServiceUnavailable, browserOrderPage{Title: "Sign-in unavailable", Message: "Try opening the approval link again shortly."})
+		b.render(w, http.StatusServiceUnavailable, browserOrderPage{Title: "Sign-in unavailable", Message: "Wait a few minutes, then open the approval link again."})
 		return
 	}
 	event = "login_started"
@@ -72,18 +72,18 @@ func (f *reviewLogin) HandleKiteLoginCallback(w http.ResponseWriter, r *http.Req
 	}
 	f.mu.Unlock()
 	if !valid {
-		f.broker.render(w, http.StatusForbidden, browserOrderPage{Title: "Sign-in link unavailable", Message: "This link has expired or was already used. Return to your assistant and check the request before starting another review."})
+		f.broker.render(w, http.StatusForbidden, browserOrderPage{Title: "Sign-in link unavailable", Message: "This link has expired or was already used. Ask your app to check the request status before starting another approval."})
 		return
 	}
 	ctx, cancel := context.WithDeadline(r.Context(), f.expires)
 	defer cancel()
 	fresh, err := f.broker.manager.CompleteLoginContext(ctx, q.Get("request_token"))
 	if err != nil || fresh.UserID != f.user {
-		f.broker.render(w, http.StatusForbidden, browserOrderPage{Title: "Sign-in could not be verified", Account: f.user, Message: "Sign in with this Kite account to review the request. Nothing was submitted.", RetryURL: f.broker.approvalURL(f.target)})
+		f.broker.render(w, http.StatusForbidden, browserOrderPage{Title: "Sign-in could not be verified", Account: f.user, Message: "Sign in to the Kite account shown above to review this request. No request was sent to Kite.", RetryURL: f.broker.approvalURL(f.target)})
 		return
 	}
 	if ctx.Err() != nil || !time.Now().Before(f.expires) || f.broker.manager.SessionManager().ReplaceApprovalCredentials(f.session, f.previous, fresh) != nil {
-		f.broker.render(w, http.StatusForbidden, browserOrderPage{Title: "Review unavailable", Message: "The sign-in changed or this review expired. Nothing was submitted. Return to your assistant to check the request."})
+		f.broker.render(w, http.StatusForbidden, browserOrderPage{Title: "Review unavailable", Message: "The login changed or this approval expired. No request was sent to Kite. Ask your app to check the request status."})
 		return
 	}
 	f.mu.Lock()
@@ -97,10 +97,16 @@ func (f *reviewLogin) HandleKiteLoginCallback(w http.ResponseWriter, r *http.Req
 		p, ok := b.permissions[f.session]
 		allowed := ok && p.allowed && p.user == f.user && time.Now().Before(p.expires)
 		data = browserOrderPage{Title: "Order approval settings", Account: f.user, ClientName: p.clientName, Manage: true, Allowed: allowed, Expiry: p.expires.In(time.FixedZone("IST", 19800)).Format("02 Jan 2006, 15:04 IST")}
+		for _, saved := range b.pending {
+			if saved.session == f.session && saved.user == f.user && saved.status == "approved_for_later" && time.Now().Before(saved.expires) {
+				data.Saved = true
+				data.ClientName = saved.clientName
+			}
+		}
 	} else if p := b.pending[f.target]; p != nil && p.session == f.session && p.user == f.user {
 		data = b.orderPageLocked(p)
 	} else {
-		data = browserOrderPage{Title: "Approval unavailable", Message: "Check the outcome in your client."}
+		data = browserOrderPage{Title: "Approval unavailable", Message: "Ask your app to check the request status."}
 	}
 	b.mu.Unlock()
 	data.CSRF = f.id + "." + f.secret
@@ -129,7 +135,7 @@ func (b *BrowserApprovals) verifyReviewForm(w http.ResponseWriter, r *http.Reque
 	valid := f.broker == b && f.target == target && f.session == session && f.user == user && f.verified && time.Now().Before(f.expires) && validApprovalCSRF(r, f.id+"."+f.secret)
 	f.mu.Unlock()
 	if !valid {
-		b.render(w, http.StatusForbidden, browserOrderPage{Title: "Review unavailable", Message: "This review expired or could not be verified. Ask your assistant to check the request before starting another review."})
+		b.render(w, http.StatusForbidden, browserOrderPage{Title: "Review unavailable", Message: "This approval expired or we couldn't verify it. Ask your app to check the request status before starting another approval."})
 	}
 	return valid
 }

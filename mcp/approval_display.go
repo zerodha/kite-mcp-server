@@ -65,7 +65,7 @@ func tradeApprovalForm(operation string, snapshot []byte) *mcp.ElicitParams {
 	for _, note := range tradeApprovalNotes(operation, fields) {
 		body.WriteString("\n" + note + "\n")
 	}
-	body.WriteString("\nApproval allows one submission of this transaction.")
+	body.WriteString("\nApproval lets the app send this request to Kite once.")
 	schema, _ := json.Marshal(map[string]any{
 		"type": "object", "properties": map[string]any{"confirm": map[string]any{
 			"type": "boolean", "title": confirm,
@@ -82,16 +82,16 @@ func tradeApprovalNotes(operation string, fields map[string]any) []string {
 	case "orders_place":
 		notes = append(notes, "Other order settings use Kite's defaults.")
 	case "orders_modify":
-		notes = append(notes, "Only the listed changes will be sent. Other fields stay unchanged.")
+		notes = append(notes, "Only the changes shown above will be sent. Other order details will stay the same.")
 	case "orders_cancel":
-		notes = append(notes, "Cancellation does not reverse any fills.")
+		notes = append(notes, "Cancelling an order does not undo trades already executed.")
 	}
 	params, _ := fields["parameters"].(map[string]any)
 	if changes, ok := fields["changes"].(map[string]any); ok {
 		params = changes
 	}
 	if params["order_type"] == "MARKET" || params["order_type"] == "SL-M" {
-		notes = append(notes, "Execution price is set by the market.")
+		notes = append(notes, "The market decides the execution price.")
 	}
 	return notes
 }
@@ -113,7 +113,7 @@ func writeApprovalFields(body *strings.Builder, fields map[string]any, indent st
 		}
 		return x - y
 	})
-	labels := map[string]string{"order_id": "Order ID", "tradingsymbol": "Symbol", "transaction_type": "Side", "order_type": "Order type", "validity_ttl": "Validity TTL (minutes)", "parameters": "Order details", "changes": "Requested changes", "current_order": "Current order"}
+	labels := map[string]string{"price": "Price (₹)", "trigger_price": "Trigger price (₹)", "average_price": "Avg. price (₹)", "filled_quantity": "Executed quantity", "order_id": "Order ID", "tradingsymbol": "Symbol", "transaction_type": "Side", "order_type": "Order type", "validity_ttl": "Validity in minutes (TTL)", "parameters": "Order details", "changes": "Requested changes", "current_order": "Current order"}
 	for _, key := range keys {
 		label := labels[key]
 		if label == "" {

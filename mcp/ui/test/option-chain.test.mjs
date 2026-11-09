@@ -35,7 +35,7 @@ test('dedicated chain API pages every strike with a pinned catalog snapshot and 
 test('catalog revision change between pages fails without publishing a mixed chain',async()=>{
  const requests={canCall:()=>true,cancel:()=>{},run:async(slot,name,args)=>args.from===0?catalog([{strike:25000,call:rows[0],put:null}],true):catalog([{strike:26000,call:rows[4],put:null}],false,'changed')};
  const chain=new HeadlessChain(null,requests);await chain.load();
- assert.match(chain.message,/catalog changed/);assert.deepEqual(chain.contracts,[]);assert.equal(chain.loaded,false);
+ assert.match(chain.message,/instrument list changed/);assert.deepEqual(chain.contracts,[]);assert.equal(chain.loaded,false);
 });
 test('model result seeds page zero then loads remaining pages and quotes without fetching page zero again',async()=>{
  const calls=[];
@@ -50,7 +50,7 @@ test('later model page restarts at zero and explicit expiry is forwarded',async(
  await chain.show(seed,{underlying:'NIFTY',expiry:'2026-10-27',from:500});
  assert.equal(calls[0].from,0);assert.equal(calls[0].expiry,'2026-10-27');
 });
-test('partial quote response clears omitted quotes on successful refresh, failure retains previous snapshots',async()=>{
+test('partial quote response clears omitted quotes on successful refresh, failure retains last successful update',async()=>{
  let fail=false;
  const requests={canCall:()=>true,cancel:()=>{},run:async()=>{
   if(fail)throw new Error('Unavailable');
@@ -59,7 +59,7 @@ test('partial quote response clears omitted quotes on successful refresh, failur
  const chain=new HeadlessChain(null,requests);chain.contracts=optionContracts(rows,'NFO');chain.expiry='2026-10-27';
  chain.quotes.set('NFO:NIFTYPE',{last_price:99});await chain.refresh();
  assert.equal(chain.quotes.has('NFO:NIFTYPE'),false);assert.match(chain.quoteMessage,/1\/2 contracts/);
- fail=true;await chain.refresh();assert.equal(chain.quotes.get('NFO:NIFTYCE').last_price,100);assert.match(chain.quoteMessage,/previous snapshots/);
+ fail=true;await chain.refresh();assert.equal(chain.quotes.get('NFO:NIFTYCE').last_price,100);assert.match(chain.quoteMessage,/last successful update/);
 });
 test('quotes include underlying and same-expiry future and batch no more than 500 identifiers',async()=>{
  const calls=[];const requests={canCall:()=>true,cancel:()=>{},run:async(slot,name,args)=>{calls.push(args);return {data:Object.fromEntries(args.instruments.map(instrument=>[instrument,{last_price:100}]))};}};
@@ -91,7 +91,7 @@ test('catalog revision token is forwarded separately from loaded_at and changes 
   }};
   const chain=new HeadlessChain(null,requests);await chain.load('NIFTY','NSE');
   assert.equal(calls[0].exchange,'NFO');assert.equal(calls[1].snapshot,'revision-a');
-  assert.equal(chain.loaded,!changed);if(changed)assert.match(chain.message,/catalog changed/);
+  assert.equal(chain.loaded,!changed);if(changed)assert.match(chain.message,/instrument list changed/);
  }
 });
 test('different underlying metadata or invalid option side across pages cannot produce a mixed chain',async()=>{
@@ -103,6 +103,6 @@ test('different underlying metadata or invalid option side across pages cannot p
   }};
   const chain=new HeadlessChain(null,requests);await chain.load();
   assert.equal(chain.loaded,false);assert.deepEqual(chain.strikes,[]);assert.deepEqual(chain.contracts,[]);
-  assert.match(chain.message,invalidSide?/inconsistent option contract/:/catalog changed/);
+  assert.match(chain.message,invalidSide?/inconsistent option contract/:/instrument list changed/);
  }
 });

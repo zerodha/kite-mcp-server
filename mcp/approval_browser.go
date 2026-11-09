@@ -94,7 +94,7 @@ func (b *BrowserApprovals) identity(ctx context.Context, req *sdk.CallToolReques
 		return nil, "", err
 	}
 	if strings.TrimSpace(name) == "" {
-		name = "Unnamed MCP client"
+		name = "Unnamed app"
 	}
 	return c, name, nil
 }
@@ -179,7 +179,7 @@ func (b *BrowserApprovals) request(ctx context.Context, req *sdk.CallToolRequest
 	b.cleanupLocked(now)
 	active := 0
 	for _, existing := range b.pending {
-		if existing.session == c.SessionID && existing.status == "approval_required" && now.Before(existing.expires) {
+		if existing.session == c.SessionID && (existing.status == "approval_required" || existing.status == "approved_for_later") && now.Before(existing.expires) {
 			active++
 		}
 	}
@@ -194,7 +194,7 @@ func (b *BrowserApprovals) request(ctx context.Context, req *sdk.CallToolRequest
 			if existing.status == "approval_required" && !now.Before(existing.expires) {
 				b.expireOrderLocked(existing, now)
 			}
-			if existing.status != "approval_required" && existing.status != "submitting" && (oldest == nil || existing.retainUntil.Before(oldest.retainUntil)) {
+			if existing.status != "approval_required" && existing.status != "approved_for_later" && existing.status != "submitting" && (oldest == nil || existing.retainUntil.Before(oldest.retainUntil)) {
 				oldest = existing
 			}
 		}
@@ -250,6 +250,11 @@ func (b *BrowserApprovals) status(ctx context.Context, req *sdk.CallToolRequest,
 	permission, allowed := b.permissions[c.SessionID]
 	allowed = allowed && permission.allowed && permission.client == c.ClientID && permission.user == c.KiteUserID && time.Now().Before(permission.expires)
 	data["future_orders_allowed"] = allowed
+	if p.status == "approved_for_later" {
+		data["expires_at"] = p.expires.Format(time.RFC3339)
+		data["permissions_url"] = b.manageURL(c.SessionID)
+		data["message"] = "Approval saved for one future request with exactly the same order details. No order was placed. Wait for the user to ask to place it; do not repeat the mutation automatically."
+	}
 	if allowed {
 		data["permissions_url"] = b.manageURL(c.SessionID)
 	}
@@ -263,7 +268,11 @@ func (b *BrowserApprovals) permissionStatus(ctx context.Context, req *sdk.CallTo
 	}
 	allowed := b.trusted(ctx, req)
 	data := map[string]any{"future_orders_allowed": allowed, "message": "This connection already requires approval for order requests. No permission change is needed."}
-	if allowed {
+	b.mu.Lock()
+	saved := b.savedCountLocked(c.SessionID, c.ClientID, c.KiteUserID)
+	b.mu.Unlock()
+	data["saved_order_approvals"] = saved
+	if allowed || saved > 0 {
 		data["permissions_url"] = b.manageURL(c.SessionID)
 		data["message"] = "Share permissions_url as a clickable link labelled Ask me before every order. The user can revoke future order permission after signing in to Kite. Do not open or submit the page on their behalf."
 	}
@@ -271,10 +280,10 @@ func (b *BrowserApprovals) permissionStatus(ctx context.Context, req *sdk.CallTo
 }
 
 type browserOrderPage struct {
-	Title, ClientName, Account, CSRF, FormAction, RetryURL, Message, ManageURL, Expiry, ApprovalExpiry, SubmitLabel, PermissionNote string
-	Sections                                                                                                                        []browserOrderSection
-	Notes                                                                                                                           []string
-	Pending, Manage, Allowed                                                                                                        bool
+	Title, ClientName, Account, CSRF, FormAction, RetryURL, Message, ManageURL, Expiry, SavedExpiry, ApprovalExpiry, SubmitLabel, PermissionNote string
+	Sections                                                                                                                                     []browserOrderSection
+	Notes                                                                                                                                        []string
+	SaveLater, Saved, Pending, Manage, Allowed                                                                                                   bool
 }
 type browserOrderSection struct {
 	Title string
@@ -306,7 +315,7 @@ func browserOrderSections(operation string, snapshot []byte) []browserOrderSecti
 			sections[len(sections)-1].Rows = append(sections[len(sections)-1].Rows, browserOrderRow{Label: label, Value: value})
 		}
 	}
-	priority := map[string]int{"Symbol": 1, "Exchange": 2, "Side": 3, "Quantity": 4, "Order type": 5, "Price": 6, "Trigger price": 7, "Product": 8, "Validity": 9, "Variety": 10}
+	priority := map[string]int{"Symbol": 1, "Exchange": 2, "Side": 3, "Quantity": 4, "Order type": 5, "Price (₹)": 6, "Trigger price (₹)": 7, "Product": 8, "Validity": 9, "Variety": 10}
 	for _, section := range sections {
 		sort.SliceStable(section.Rows, func(i, j int) bool {
 			left, right := priority[section.Rows[i].Label], priority[section.Rows[j].Label]
@@ -364,9 +373,13 @@ func (b *BrowserApprovals) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	b.cleanupLocked(time.Now())
 	p := b.pending[id]
+	var expires time.Time
+	if p != nil {
+		expires = p.expires
+	}
 	b.mu.Unlock()
 	if p == nil {
-		b.render(w, http.StatusNotFound, browserOrderPage{Title: "Approval unavailable", Message: "This order approval has expired or is no longer available. Return to your assistant and check the order status before starting another request."})
+		b.render(w, http.StatusNotFound, browserOrderPage{Title: "Approval unavailable", Message: "This approval has expired or is no longer available. Ask your app to check the order status before starting a new request."})
 		return
 	}
 	session, sessionErr := b.manager.SessionManager().Get(p.session)
@@ -381,7 +394,7 @@ func (b *BrowserApprovals) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		b.decide(w, r, p)
 		return
 	}
-	b.startReviewLogin(w, r, id, p.session, p.user, p.expires)
+	b.startReviewLogin(w, r, id, p.session, p.user, expires)
 }
 
 func (b *BrowserApprovals) orderPageLocked(p *browserOrder) browserOrderPage {
@@ -395,19 +408,26 @@ func (b *BrowserApprovals) orderPageLocked(p *browserOrder) browserOrderPage {
 	}
 	if p.status == "approval_required" {
 		data.Pending = true
+		data.SaveLater = p.operation == "orders_place"
 		data.SubmitLabel = map[string]string{"orders_place": "Place this order", "orders_modify": "Apply these changes", "orders_cancel": "Cancel this order"}[p.operation]
 		session, _ := b.manager.SessionManager().Get(p.session)
 		if session != nil {
 			data.Expiry = session.ExpiresAt.In(time.FixedZone("IST", 19800)).Format("02 Jan 2006, 15:04 IST")
+			data.SavedExpiry = data.Expiry
 		}
 		data.Message = map[string]string{
 			"orders_place":  "Check the details before placing this order.",
 			"orders_modify": "Check the current order and the changes below.",
-			"orders_cancel": "Cancelling this order does not reverse existing fills.",
+			"orders_cancel": "Cancelling this order does not undo trades already executed.",
 		}[p.operation]
 	} else {
-		data.Title = map[string]string{"submitted": "Request sent to Kite", "failed": "Check the order status", "declined": "Order not submitted", "expired": "Approval expired", "submitting": "Sending request to Kite"}[p.status]
-		data.Message = map[string]string{"submitted": "Kite accepted your request. Return to your assistant to check the order status and any executed trades. Acceptance does not guarantee execution. You can close this page.", "failed": "We could not confirm the request. Ask your assistant to check orders and executed trades before trying again.", "declined": "You declined this request. Nothing was submitted.", "expired": "This approval expired without submitting the order.", "submitting": "Return to your assistant to check the result. Do not submit this request again."}[p.status]
+		data.Title = map[string]string{"approved_for_later": "Approval saved. Order not placed", "submitted": "Request sent to Kite", "failed": "Check the order status", "declined": "Order not submitted", "expired": "Approval expired", "submitting": "Sending request to Kite"}[p.status]
+		data.Message = map[string]string{"approved_for_later": "No order was placed. This approval can be used once, for the same order details, before it expires. Ask your app to place the order when you are ready. Saving approval does not schedule an order.", "submitted": "Kite accepted your request. This does not mean the order was executed. Ask your app to check the order status and trades. You can close this page.", "failed": "We couldn't confirm whether Kite accepted your request. Ask your app to check orders and trades before trying again.", "declined": "You declined this request. Nothing was submitted.", "expired": "This approval expired without submitting the order.", "submitting": "Ask your app to check the request status. Do not send this request again."}[p.status]
+	}
+	if p.status == "approved_for_later" {
+		data.Saved = true
+		data.SavedExpiry = p.expires.In(time.FixedZone("IST", 19800)).Format("02 Jan 2006, 15:04 IST")
+		data.ManageURL = b.manageURL(p.session)
 	}
 	if p.status == "submitted" && p.result != nil {
 		for _, content := range p.result.Content {
@@ -421,11 +441,12 @@ func (b *BrowserApprovals) orderPageLocked(p *browserOrder) browserOrderPage {
 			}
 		}
 	}
-	if permission, ok := b.permissions[p.session]; ok && permission.allowed && permission.client == p.client && time.Now().Before(permission.expires) {
+	if permission, ok := b.permissions[p.session]; ok && permission.allowed && permission.client == p.client && permission.user == p.user && time.Now().Before(permission.expires) {
+		data.Allowed = true
 		data.ManageURL = b.manageURL(p.session)
 		data.Expiry = permission.expires.In(time.FixedZone("IST", 19800)).Format("02 Jan 2006, 15:04 IST")
 	} else if p.rememberRequested && (p.status == "failed" || p.status == "submitted") {
-		data.PermissionNote = "Future orders still require approval. This request did not enable permission to act without asking."
+		data.PermissionNote = "Future orders still require approval. This request did not allow orders without asking."
 	}
 	return data
 }
@@ -441,8 +462,12 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 		return
 	}
 	decision := r.PostForm.Get("decision")
-	if len(r.PostForm["decision"]) != 1 || (decision != "approve" && decision != "decline") || len(r.PostForm["remember"]) > 1 || (r.PostForm.Has("remember") && r.PostForm.Get("remember") != "yes") {
+	if len(r.PostForm["decision"]) != 1 || (decision != "approve" && decision != "decline" && decision != "save") || len(r.PostForm["remember"]) > 1 || (r.PostForm.Has("remember") && r.PostForm.Get("remember") != "yes") {
 		http.Error(w, "Invalid approval decision", http.StatusBadRequest)
+		return
+	}
+	if decision == "save" && (p.operation != "orders_place" || r.PostForm.Has("remember")) {
+		http.Error(w, "Save approval only applies to this exact new order", http.StatusBadRequest)
 		return
 	}
 	b.mu.Lock()
@@ -455,6 +480,22 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 	if decision == "decline" {
 		p.status = "declined"
 		b.metricEvent(p.operation, "declined")
+		b.mu.Unlock()
+		b.renderOrderOutcome(w, p)
+		return
+	}
+	if decision == "save" {
+		deadline, err := b.manager.SessionExpiry(p.session)
+		if err != nil {
+			b.mu.Unlock()
+			http.Error(w, "Connection expired", http.StatusForbidden)
+			return
+		}
+		// Saving permission is terminal for this form. It never calls Kite.
+		p.status = "approved_for_later"
+		p.expires = deadline
+		p.retainUntil = deadline.Add(15 * time.Minute)
+		p.trace.Outcome = "approved_for_later"
 		b.mu.Unlock()
 		b.renderOrderOutcome(w, p)
 		return
@@ -530,12 +571,17 @@ func (b *BrowserApprovals) manage(w http.ResponseWriter, r *http.Request, sessio
 		if permission.allowed {
 			b.metricEvent("permissions", "permission_revoked")
 		}
+		for _, saved := range b.pending {
+			if saved.session == sessionID && saved.status == "approved_for_later" {
+				saved.status = "declined"
+			}
+		}
 		permission.allowed = false
 		permission.generation++
 		permission.expires = session.ExpiresAt
 		b.permissions[sessionID] = permission
 		b.mu.Unlock()
-		b.render(w, http.StatusOK, browserOrderPage{Title: "Approval required for future orders", Message: "Future orders from this connection require approval. Existing orders have not been cancelled."})
+		b.render(w, http.StatusOK, browserOrderPage{Title: "Approval required for future orders", Message: "You must approve future orders from this app. Saved approvals have been removed. Existing orders have not been cancelled."})
 		return
 	}
 	b.startReviewLogin(w, r, "manage/"+sessionID, sessionID, session.Credentials.UserID, time.Now().Add(tradeApprovalTimeout))
@@ -567,7 +613,7 @@ func executeBrowserApproved(ctx context.Context, req *sdk.CallToolRequest, opera
 
 // Called under b.mu; repeats and status polling must not count expiry twice.
 func (b *BrowserApprovals) expireOrderLocked(p *browserOrder, now time.Time) {
-	if p.status == "approval_required" && !now.Before(p.expires) {
+	if (p.status == "approval_required" || p.status == "approved_for_later") && !now.Before(p.expires) {
 		p.status = "expired"
 		b.metricEvent(p.operation, "expired")
 	}
@@ -577,4 +623,62 @@ func (b *BrowserApprovals) metricEvent(operation, event string) {
 	if m := b.manager.Metrics(); m != nil {
 		m.RecordBrowserApprovalEvent(operation, event)
 	}
+}
+
+// Saved approvals authorize one later exact match, never an automatic submission.
+// Consume under the lock before execution, including uncertain/failed attempts.
+func (b *BrowserApprovals) executeSaved(ctx context.Context, req *sdk.CallToolRequest, operation string, details any, execute func() (*sdk.CallToolResult, error)) (*sdk.CallToolResult, error, bool) {
+	c, _, err := b.identity(ctx, req)
+	if err != nil || operation != "orders_place" || ctx.Err() != nil {
+		return nil, nil, false
+	}
+	snapshot, err := json.MarshalIndent(details, "", "  ")
+	if err != nil {
+		return nil, nil, false
+	}
+	b.mu.Lock()
+	b.cleanupLocked(time.Now())
+	var selected *browserOrder
+	for _, p := range b.pending {
+		if p.status == "approved_for_later" && p.session == c.SessionID && p.client == c.ClientID && p.user == c.KiteUserID && p.operation == operation && bytes.Equal(p.snapshot, snapshot) {
+			selected = p
+			break
+		}
+	}
+	if selected == nil {
+		b.mu.Unlock()
+		return nil, nil, false
+	}
+	selected.status = "submitting"
+	b.mu.Unlock()
+	traceMethod(ctx, "remembered_permission", "approved", "")
+	var result *sdk.CallToolResult
+	if ctx.Err() != nil || !time.Now().Before(selected.expires) {
+		result = approvalFailure("timeout", "Saved approval expired; no order was submitted.")
+	} else {
+		result, err = execute()
+	}
+	b.mu.Lock()
+	if trace := traceFrom(ctx); trace != nil {
+		selected.trace = *trace
+		result = approvalResultWithTrace(result, *trace)
+	}
+	selected.result = result
+	selected.status = "failed"
+	if err == nil && result != nil && !result.IsError {
+		selected.status = "submitted"
+	}
+	selected.retainUntil = time.Now().Add(15 * time.Minute)
+	b.mu.Unlock()
+	return result, err, true
+}
+
+func (b *BrowserApprovals) savedCountLocked(session, client, user string) int {
+	count := 0
+	for _, p := range b.pending {
+		if p.session == session && p.client == client && p.user == user && p.status == "approved_for_later" && time.Now().Before(p.expires) {
+			count++
+		}
+	}
+	return count
 }

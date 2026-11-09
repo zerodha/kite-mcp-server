@@ -205,18 +205,18 @@ h3 { font-size:13px; font-weight:600; margin:18px 0 12px; }
 <!-- APP_STYLES -->
 </head>
 <body>
-<header><div class="heading"><img class="brand" src="data:image/svg+xml;base64,PHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA5MCA2MCI+PGRlZnM+PHN0eWxlPi5jbHMtMXtmaWxsOiNmNjQ2MWE7fS5jbHMtMntmaWxsOiNkYjM0MmM7fTwvc3R5bGU+PC9kZWZzPjx0aXRsZT5LaXRlIGxvZ28gdHJpbW1lZDwvdGl0bGU+PHBvbHlnb24gY2xhc3M9ImNscy0xIiBwb2ludHM9IjMwIDAgMCAzMCAzMCA2MCA2MCAzMCA5MCAwIDMwIDAiLz48cG9seWdvbiBjbGFzcz0iY2xzLTIiIHBvaW50cz0iMzAgNjAgNjAgMzAgOTAgNjAgMzAgNjAiLz48L3N2Zz4=" alt="Kite" width="30" height="20"><h1 id="title">Kite</h1></div><div class="header-actions"><span id="price-refresh" hidden><button id="refresh-prices" type="button">Refresh prices</button></span><button id="refresh" disabled>Refresh</button></div></header>
+<header><div class="heading"><h1 id="title">Kite</h1></div><div class="header-actions"><span id="price-refresh" hidden><button id="refresh-prices" type="button">Refresh prices</button></span><button id="refresh" disabled>Refresh</button></div></header>
 <nav id="widget-nav" aria-label="Kite views">
 <button data-widget="holdings" aria-pressed="true">Holdings</button><button data-widget="positions" aria-pressed="false">Positions</button><button data-widget="margins" aria-pressed="false">Funds</button><button data-widget="orders" aria-pressed="false">Orders</button><button data-widget="gtt" aria-pressed="false">GTT</button><button data-widget="options" aria-pressed="false">Option chain</button>
 </nav>
 <div id="snapshot-view">
 <p id="price-status" class="muted" role="status" aria-live="polite" hidden></p>
-<p id="status" role="status" aria-live="polite">Connecting to your MCP client…</p>
+<p id="status" role="status" aria-live="polite">Connecting to your app…</p>
 <section id="account-summary" aria-label="Account-wide portfolio summary" hidden></section>
-<div id="finder-form" class="finder-form" role="group" aria-label="Find instruments" hidden><label>Find an instrument<input id="finder-query" type="search" placeholder="Enter text for the selected search field" required maxlength="200"></label><label>Search by<select id="finder-field"><option value="id">Instrument ID (exchange:symbol)</option><option value="name">Company / instrument name</option><option value="tradingsymbol">Trading symbol</option><option value="isin">ISIN</option><option value="underlying">Underlying</option></select></label><label class="inline-label"><input id="finder-live" type="checkbox">Include current quotes</label><button id="search-submit" type="button">Search instruments</button></div>
+<div id="finder-form" class="finder-form" role="group" aria-label="Find instruments" hidden><label>Find an instrument<input id="finder-query" type="search" placeholder="Enter text for the selected search field" required maxlength="200"></label><label>Search by<select id="finder-field"><option value="id">Instrument ID (e.g. NSE:INFY)</option><option value="name">Company / instrument name</option><option value="tradingsymbol">Trading symbol</option><option value="isin">ISIN</option><option value="underlying">Underlying</option></select></label><label class="inline-label"><input id="finder-live" type="checkbox">Include current quotes</label><button id="search-submit" type="button">Search instruments</button></div>
 <div class="controls" id="controls" hidden>
 <label>Filter this page<input id="filter" type="search" placeholder="Symbol, exchange, value…"></label>
-<label id="view-label" hidden>Position view<select id="view"><option value="net">Net exposure</option><option value="day">Today's activity</option></select></label>
+<label id="view-label" hidden>Position view<select id="view"><option value="net">Net positions</option><option value="day">Today's positions</option></select></label>
 <details id="view-options"><summary>View &amp; sort</summary><div class="advanced-controls"><label id="position-state-label" hidden>Position status<select id="position-state"><option value="">All positions</option><option value="open">Open</option><option value="closed">Closed</option><option value="long">Long</option><option value="short">Short</option></select></label><label id="display-label">Display<select id="display"><option value="adaptive">Auto</option><option value="list">List</option><option value="table">Table</option></select></label>
 <label id="list-sort-label">Sort this page<select id="list-sort"><option value="">Original order</option></select></label><button id="sort-direction">Ascending</button>
 <button id="columns" aria-pressed="false">More columns</button>
@@ -226,17 +226,17 @@ h3 { font-size:13px; font-weight:600; margin:18px 0 12px; }
 <p id="result-count" class="muted" aria-live="polite"></p>
 <div id="warning" role="status" hidden></div>
 <div id="workspace" class="workspace">
-<section class="primary" aria-label="Snapshot results">
+<section class="primary" aria-label="Results">
 <main id="content" aria-busy="true"></main>
 <div id="pagination" hidden><span id="page-label"></span><div><button id="previous">Previous</button><button id="next">Next</button></div></div>
 <p id="note"></p>
 </section>
-<aside id="inspector" aria-label="Instrument inspector" hidden></aside>
+<aside id="inspector" aria-label="Instrument details" hidden></aside>
 </div>
 </div>
 <section id="orders-view" aria-label="Order book" hidden></section>
 <section id="gtt-view" aria-label="GTT monitor" hidden></section>
 <section id="options-view" aria-label="Option chain" hidden></section>
-<footer>Read-only · Kite Connect. Prices and values are snapshots, not a live feed.</footer>
+<footer>View only · Kite Connect. Prices and values do not update automatically.</footer>
 <!-- APP_SCRIPT -->
 </body></html>

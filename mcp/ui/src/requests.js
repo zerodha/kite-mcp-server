@@ -79,7 +79,7 @@ export class PanelRequests {
     return this.call(params,options);
   }
   async run(slot,name,args) {
-    if(!this.canCall())throw new Error('This host cannot request additional data. Ask for it in chat.');
+    if(!this.canCall())throw new Error('This app cannot load more data here. Ask for it in chat.');
     if(!readModes[name]?.has(args.mode))throw new Error('Only supported read-only tool modes are allowed.');
     this.cancel(slot);
     const wireArgs={...args,_app_request_id:`${this.session}-${++this.serial}`};

@@ -48,7 +48,7 @@ func assertBrowserError(t *testing.T, w *httptest.ResponseRecorder, status int, 
 	if w.Header().Get("Content-Type") != "text/html; charset=utf-8" || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("incorrect headers: %v", w.Header())
 	}
-	for _, text := range []string{"<!doctype html>", want, "return to your MCP client", "data:image/svg+xml"} {
+	for _, text := range []string{"<!doctype html>", want, "return to your app", "data:image/svg+xml"} {
 		if !strings.Contains(w.Body.String(), text) {
 			t.Fatalf("missing %q", text)
 		}

@@ -78,9 +78,9 @@ try{
  await app.locator('#widget-nav').getByRole('button',{name:'Orders',exact:true}).click();
  await app.getByRole('heading',{name:'Order book',exact:true}).waitFor();assert.equal(await app.locator('.order-card').count(),2);
  await app.getByRole('button',{name:'Timeline',exact:true}).first().click();await app.getByRole('heading',{name:'Order timeline',exact:true}).waitFor();assert.equal(await app.locator('.order-timeline li').count(),2);await capture('order-timeline');
- await app.getByRole('button',{name:'Fills',exact:true}).first().click();await app.getByRole('heading',{name:'Order fills',exact:true}).waitFor();assert.match(await app.locator('.order-detail').first().textContent(),/1,600/);
+ await app.getByRole('button',{name:'Trades',exact:true}).first().click();await app.getByRole('heading',{name:'Trades',exact:true}).waitFor();assert.match(await app.locator('.order-detail').first().textContent(),/1,600/);
  await app.locator('#widget-nav').getByRole('button',{name:'GTT',exact:true}).click();await app.getByRole('heading',{name:'GTT monitor',exact:true}).waitFor();
- await app.getByRole('button',{name:'Refresh trigger prices',exact:true}).click();await app.getByText('Latest ₹1,600.00',{exact:false}).waitFor();assert.match(await app.locator('.gtt-card').textContent(),/-6.25% from quote/);assert.match(await app.locator('.gtt-card').textContent(),/\+6.25% from quote/);await capture('gtt-monitor');
+ await app.getByRole('button',{name:'Refresh market prices',exact:true}).click();await app.getByText('Latest ₹1,600.00',{exact:false}).waitFor();assert.match(await app.locator('.gtt-card').textContent(),/-6.25% from quote/);assert.match(await app.locator('.gtt-card').textContent(),/\+6.25% from quote/);await capture('gtt-monitor');
  await app.locator('#widget-nav').getByRole('button',{name:'Option chain',exact:true}).click();await app.getByRole('button',{name:'Load chain',exact:true}).click();
  await app.getByText('4/4 contracts.',{exact:false}).waitFor();assert.equal(await app.locator('.option-chain tbody tr').count(),2);await capture('option-chain');
  await app.getByRole('button',{name:'Refresh',exact:true}).click();await app.getByText('4/4 contracts.',{exact:false}).waitFor();
@@ -145,7 +145,7 @@ try{
  await capture('large-chain-bottom');
  assert.equal(await app.locator('.option-chain .scroll').evaluate(node=>node.querySelector('tbody tr:last-child').getBoundingClientRect().bottom<=node.getBoundingClientRect().bottom+1),true,'final strike must be reachable');
  await page.setViewportSize({width:390,height:1400});
- await app.getByRole('button',{name:'Near underlying',exact:true}).click();
+ await app.getByRole('button',{name:'Near current price',exact:true}).click();
  assert.equal(await app.locator('.option-chain .scroll').evaluate(node=>{const row=node.querySelector('.chain-nearest').getBoundingClientRect(),box=node.getBoundingClientRect();return row.top>box.top&&row.bottom<box.bottom;}),true);
  await capture('large-chain-mobile');
  assert.equal(await app.locator('body').evaluate(node=>node.scrollWidth>window.innerWidth),false);

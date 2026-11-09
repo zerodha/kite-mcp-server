@@ -31,7 +31,7 @@ export class OptionChain {
   async loadCatalog(query,exchange,expiry='',seed=null){
     query=String(query).trim().toUpperCase();
     exchange=String(exchange).trim().toUpperCase();exchange=({NSE:'NFO',BSE:'BFO'})[exchange]||exchange;
-    if(!query||query.length>100||!['NFO','BFO'].includes(exchange)){this.message='Enter an underlying symbol and select its derivatives exchange.';this.render();return;}
+    if(!query||query.length>100||!['NFO','BFO'].includes(exchange)){this.message='Enter a symbol such as NIFTY and select its F&O exchange.';this.render();return;}
     const generation=++this.generation;this.requests.cancel('chain-search');this.requests.cancel('chain-quotes');this.query=query;this.exchange=exchange;this.busy=true;this.contracts=[];this.strikes=[];this.expiries=[];this.catalog=null;this.quotes.clear();this.loaded=false;this.centerRequested=true;this.message='Loading option chain…';this.quoteMessage='';this.render();
     try {
       const contracts=[],strikes=[],seenStrikes=new Set(),seenContracts=new Set();let from=0,snapshot='',loadedAt='',identity='',selectedExpiry=expiry,catalog=null;
@@ -46,7 +46,7 @@ export class OptionChain {
         const revision=payload.meta?.catalog_revision||data.loaded_at;
         const pageIdentity=JSON.stringify([data.exchange,data.underlying_exchange,data.underlying_name,instrumentRef(data.underlying||{})?.id||null]);
         if(data.exchange!==exchange||(selectedExpiry&&data.expiry!==selectedExpiry))throw new Error('The server returned a different option chain. Reload the chain.');
-        if(snapshot&&(revision!==snapshot||data.loaded_at!==loadedAt||pageIdentity!==identity))throw new Error('Instrument catalog changed; reload the option chain to use one consistent snapshot.');
+        if(snapshot&&(revision!==snapshot||data.loaded_at!==loadedAt||pageIdentity!==identity))throw new Error('The instrument list changed. Reload the option chain to see updated contracts.');
         if(!catalog){catalog=data;snapshot=revision;loadedAt=data.loaded_at;identity=pageIdentity;selectedExpiry=data.expiry;}
         for(const strike of data.strikes){
           if(!finite(strike.strike)||strike.strike<=0||seenStrikes.has(strike.strike)||(!strike.call&&!strike.put))throw new Error('Option-chain pagination repeated an invalid strike. Reload the chain.');
@@ -88,7 +88,7 @@ export class OptionChain {
       const timestamps=[...new Set([...next.values()].map(q=>q.timestamp||q.quote_timestamp).filter(Boolean))].sort();
       const missing=instruments.filter(id=>!next.has(id));
       this.quoteMessage=`Quotes received ${receivedTime()} · ${instruments.length-missing.length}/${instruments.length} contracts.${missing.length?` ${missing.length} quotes unavailable; shown as —.`:''} Snapshots, not streaming prices.${timestamps.length?` Quote timestamps: ${snapshotTime(timestamps[0])||timestamps[0]}${timestamps.length>1?' to '+(snapshotTime(timestamps.at(-1))||timestamps.at(-1)):''}.`:' Quote timestamps unavailable.'}`;
-    }catch(error){if(generation===this.generation&&error.name!=='AbortError')this.quoteMessage=`Quote refresh failed: ${error.message}. Any displayed quotes are previous snapshots.`;}
+    }catch(error){if(generation===this.generation&&error.name!=='AbortError')this.quoteMessage=`Quote refresh failed: ${error.message}. Prices shown are from the last successful update.`;}
     finally{if(generation===this.generation){this.busy=false;this.render();}}
   }
   render(){
@@ -100,10 +100,10 @@ export class OptionChain {
     for(const name of ['NFO','BFO']){const option=el('option',name);option.value=name;exchange.append(option);}exchange.value=this.exchange;exchangeLabel.append(exchange);
     const search=action(this.busy?'Loading…':'Load chain',()=>this.load(input.value,exchange.value));search.disabled=this.busy||!this.requests.canCall();input.onkeydown=event=>{if(event.key==='Enter'&&!search.disabled){event.preventDefault();this.load(input.value,exchange.value);}};
     controls.append(queryLabel,exchangeLabel,search);root.append(controls);
-    const message=el('p',this.message||'Load a derivatives underlying to view its available option contracts.','muted');message.setAttribute('role','status');root.append(message);
+    const message=el('p',this.message||'Enter a symbol such as NIFTY to see its option contracts.','muted');message.setAttribute('role','status');root.append(message);
     if(this.catalog){
       const references=el('div',null,'metric-grid');
-      for(const [label,contract] of [['Underlying',this.catalog.underlying],['Same-expiry future',this.catalog.future]]){
+      for(const [label,contract] of [['Underlying',this.catalog.underlying],['Future with the same expiry',this.catalog.future]]){
         if(!contract)continue;
         const ref=instrumentRef(contract);if(!ref)continue;
         const quote=this.quotes.get(ref.id),block=el('div',null,'metric');block.append(el('span',`${label} · ${ref.id}`,'muted'),el('strong',quote?formatCell(quote.last_price,'last_price'):'—'));
@@ -119,21 +119,21 @@ export class OptionChain {
       const spot=this.quotes.get(instrumentRef(this.catalog?.underlying||{})?.id)?.last_price;
       const nearest=finite(spot)?this.strikes.reduce((best,row)=>!best||Math.abs(row.strike-spot)<Math.abs(best.strike-spot)?row:best,null):null;
       const center=()=>{const scroll=root.querySelector('.scroll'),row=root.querySelector('.chain-nearest');if(scroll&&row)scroll.scrollTop+=row.getBoundingClientRect().top-scroll.getBoundingClientRect().top-scroll.clientHeight/2+row.getBoundingClientRect().height/2;};
-      if(nearest)toolbar.append(action('Near underlying',center,'quiet'));
+      if(nearest)toolbar.append(action('Near current price',center,'quiet'));
       root.append(toolbar);
       const quoteMessage=el('p',this.quoteMessage||'Quotes have not been loaded.','muted');quoteMessage.setAttribute('role','status');root.append(quoteMessage);
-      const table=el('table');table.append(el('caption',`${this.exchange}:${this.query} · ${this.expiry} · prices in INR; OI and volume in upstream units`,'sr-only'));
+      const table=el('table');table.append(el('caption',`${this.exchange}:${this.query} · ${this.expiry} · prices in rupees; open interest and volume use the units returned by Kite`,'sr-only'));
       const head=el('thead'),group=el('tr',null,'chain-groups');for(const [text,span] of [['Calls',5],['Strike',1],['Puts',5]]){const th=el('th',text);th.colSpan=span;th.scope='colgroup';group.append(th);}const headings=el('tr');for(const [index,text] of ['OI','Volume','Bid','Ask','Call LTP','Strike','Put LTP','Bid','Ask','Volume','OI'].entries()){const th=el('th',text,[4,5,6].includes(index)?'':'chain-detail');th.scope='col';headings.append(th);}head.append(group,headings);table.append(head);
       const body=el('tbody');for(const row of this.strikes){const tr=el('tr',null,nearest?.strike===row.strike?'chain-nearest':'');tr.dataset.strike=String(row.strike);for(const type of ['CE','PE']){
         if(type==='PE'){const strike=el('th',formatCell(row.strike,'strike'),'chain-strike');strike.scope='row';tr.append(strike);}
         const contract=row[type==='CE'?'call':'put'],quote=contract?this.quotes.get(instrumentRef(contract).id):null;
-        const priceCell=()=>{const td=el('td');if(contract&&this.onSelect){const button=action(quote?formatCell(quote.last_price,'last_price'):'—',()=>this.onSelect(contract),'symbol-button');button.setAttribute('aria-label',`${instrumentRef(contract).symbol}: ${quote?formatCell(quote.last_price,'last_price'):'quote unavailable'}`);td.append(button);}else td.textContent=quote?formatCell(quote.last_price,'last_price'):'—';if(quote?.timestamp||quote?.quote_timestamp)td.title=`Quote timestamp: ${snapshotTime(quote.timestamp||quote.quote_timestamp)||quote.timestamp||quote.quote_timestamp}`;return td;};
+        const priceCell=()=>{const td=el('td');if(contract&&this.onSelect){const button=action(quote?formatCell(quote.last_price,'last_price'):'—',()=>this.onSelect(contract),'symbol-button');button.setAttribute('aria-label',`${instrumentRef(contract).symbol}: ${quote?formatCell(quote.last_price,'last_price'):'quote unavailable'}`);td.append(button);}else td.textContent=quote?formatCell(quote.last_price,'last_price'):'—';if(quote?.timestamp||quote?.quote_timestamp)td.title=`Quote time: ${snapshotTime(quote.timestamp||quote.quote_timestamp)||quote.timestamp||quote.quote_timestamp}`;return td;};
         const bid=quote?.depth?.buy?.[0]?.price,ask=quote?.depth?.sell?.[0]?.price;
         const cells=[el('td',formatCell(quote?.oi,'oi'),'chain-detail'),el('td',formatCell(quote?.volume,'volume'),'chain-detail'),el('td',formatCell(bid,'price'),'chain-detail'),el('td',formatCell(ask,'price'),'chain-detail'),priceCell()];if(finite(spot)&&(type==='CE'?row.strike<spot:row.strike>spot))for(const cell of cells)cell.classList.add('chain-itm');tr.append(...(type==='PE'?[cells[4],cells[2],cells[3],cells[1],cells[0]]:cells));
       }body.append(tr);}table.append(body);const scroll=el('div',null,'scroll');scroll.tabIndex=0;scroll.setAttribute('role','region');scroll.setAttribute('aria-label','Scrollable option chain');scroll.append(table);root.append(scroll);
-      root.append(el('p',`All strike pages for the selected expiry are loaded from one instrument catalog snapshot. Missing sides and unavailable quotes display —.${this.onSelect?' Select an LTP to inspect a contract.':''}`,'muted'));
+      root.append(el('p',`All strikes use the same instrument list for this expiry. A dash means a contract or price is unavailable.${this.onSelect?' Select a last traded price (LTP) to see contract details.':''}`,'muted'));
     }else if(this.loaded)root.append(el('div','No option contracts found for this underlying and exchange.','empty'));
-    if(!this.requests.canCall())root.append(el('p','This host cannot load additional data. Ask for option quotes in chat.','muted'));
+    if(!this.requests.canCall())root.append(el('p','This app cannot load more data here. Ask for option quotes in chat.','muted'));
     this.container.replaceChildren(root);
     const scroll=root.querySelector('.scroll');
     if(scroll){

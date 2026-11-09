@@ -36,6 +36,7 @@ var ordersOutputSchema = json.RawMessage(`{
 		"message":{"type":"string"},
 		"result":{"type":["object","null"]},
 		"future_orders_allowed":{"type":"boolean"},
+		"saved_order_approvals":{"type":"integer","minimum":0},
 		"permissions_url":{"type":"string"}
 	}
 }`)

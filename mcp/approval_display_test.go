@@ -17,7 +17,7 @@ func TestTradeApprovalReadableSummary(t *testing.T) {
 	snapshot, err := json.Marshal(map[string]any{"variety": "regular", "parameters": approvalOrderParams{&params}})
 	require.NoError(t, err)
 	form := tradeApprovalForm("orders_place", snapshot)
-	for _, detail := range []string{"Place order", "Exchange: NSE", "Symbol: INFY", "Side: BUY", "Quantity: 1", "Order type: MARKET", "Product: CNC", "Validity: DAY", "Variety: regular", "Market protection: 2.5", "Autoslice: true", `Tag: "test\nQuantity: 500"`, "Execution price is set by the market."} {
+	for _, detail := range []string{"Place order", "Exchange: NSE", "Symbol: INFY", "Side: BUY", "Quantity: 1", "Order type: MARKET", "Product: CNC", "Validity: DAY", "Variety: regular", "Market protection: 2.5", "Autoslice: true", `Tag: "test\nQuantity: 500"`, "The market decides the execution price."} {
 		require.Contains(t, form.Message, detail)
 	}
 	require.NotContains(t, form.Message, "orders_place")
@@ -42,14 +42,14 @@ func TestTradeApprovalSummaryKeepsAllPlacementFields(t *testing.T) {
 		require.Contains(t, form.Message, value)
 	}
 	require.Contains(t, form.Message, "New api field: 9007199254740993")
-	require.NotContains(t, form.Message, "Execution price is set by the market.")
+	require.NotContains(t, form.Message, "The market decides the execution price.")
 }
 
 func TestTradeApprovalHiddenBookkeepingStillChecked(t *testing.T) {
 	details := map[string]any{"order_id": "123", "current_order": map[string]any{"tradingsymbol": "INFY", "status": "OPEN", "filled_quantity": 1, "pending_quantity": 2, "account_id": "account-a"}, "changes": map[string]any{"quantity": "3"}}
 	executed := false
 	result, err := elicitTradeApproval(context.Background(), time.Second, func(_ context.Context, form *sdk.ElicitParams) (*sdk.ElicitResult, error) {
-		for _, text := range []string{"Modify order", "Current order:", "Symbol: INFY", "Status: OPEN", "Filled quantity: 1", "Pending quantity: 2", "Requested changes:", "Quantity: 3"} {
+		for _, text := range []string{"Modify order", "Current order:", "Symbol: INFY", "Status: OPEN", "Executed quantity: 1", "Pending quantity: 2", "Requested changes:", "Quantity: 3"} {
 			require.Contains(t, form.Message, text)
 		}
 		require.NotContains(t, form.Message, "account-a")

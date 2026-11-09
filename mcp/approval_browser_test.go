@@ -524,7 +524,7 @@ func TestBrowserApprovalResultMakesPermissionOutcomeExplicit(t *testing.T) {
 				require.Contains(t, page.Body.String(), "Future orders still require approval")
 				require.NotContains(t, page.Body.String(), "Ask me before every order")
 			} else {
-				require.Contains(t, page.Body.String(), "Pi can place, change and cancel orders without asking")
+				require.Contains(t, page.Body.String(), "Pi can place, modify, and cancel orders without asking")
 				require.Contains(t, page.Body.String(), "Ask me before every order")
 			}
 		})
@@ -624,7 +624,7 @@ func TestBrowserApprovalRetainsNotesAndEscapesUntrustedText(t *testing.T) {
 			page := browserPage(t, f.b, id, identity)
 			body := page.Body.String()
 			require.Contains(t, body, "Other order settings use Kite&#39;s defaults.")
-			require.Equal(t, orderType != "LIMIT", strings.Contains(body, "Execution price is set by the market."))
+			require.Equal(t, orderType != "LIMIT", strings.Contains(body, "The market decides the execution price."))
 			require.NotContains(t, body, "<script>")
 			require.Contains(t, body, "&lt;script&gt;")
 			require.NotContains(t, body, "\u202e")
@@ -646,4 +646,99 @@ func approvalObservation(t *testing.T, result *sdk.CallToolResult) map[string]an
 	require.NoError(t, json.Unmarshal(encoded, &structured))
 	require.Equal(t, data, structured, "text and structured observations must agree")
 	return data
+}
+
+func TestBrowserApprovalSaveForLater(t *testing.T) {
+	for _, scenario := range []string{"once", "changed", "other-client", "expired", "revoked", "failed", "browser-review"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newBrowserApprovalFixture(t)
+			cs, identity := f.connect(t, "approval-test", "Pi", "2025-11-25")
+			id := browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
+			page := browserPage(t, f.b, id, identity)
+			require.Contains(t, page.Body.String(), "Approve for later. Do not place now")
+			csrf := pageCSRF(t, page)
+			form := url.Values{"csrf": {csrf}, "decision": {"save"}}
+			outcome := postBrowserDecision(f.b, id, identity, form, "")
+			require.Equal(t, http.StatusOK, outcome.Code)
+			require.Contains(t, outcome.Body.String(), "Approval saved. Order not placed")
+			require.Zero(t, f.calls.Load())
+			// Replaying either decision on this completed form must not submit.
+			postBrowserDecision(f.b, id, identity, form, "")
+			postBrowserDecision(f.b, id, identity, url.Values{"csrf": {csrf}, "decision": {"approve"}}, "")
+			require.Zero(t, f.calls.Load())
+			status := callBrowserOrder(t, cs, map[string]any{"mode": "approval_status", "approval_id": id})
+			require.Contains(t, status.Content[0].(*sdk.TextContent).Text, `"status":"approved_for_later"`)
+			require.Contains(t, status.Content[0].(*sdk.TextContent).Text, `"future_orders_allowed":false`)
+			permission := callBrowserOrder(t, cs, map[string]any{"mode": "permissions"})
+			require.Contains(t, permission.Content[0].(*sdk.TextContent).Text, `"saved_order_approvals":1`)
+			args := browserOrderArgs()
+			switch scenario {
+			case "changed":
+				args["quantity"] = 2
+			case "other-client":
+				cs, _ = f.connect(t, "approval-test", "Pi", "2025-11-25")
+			case "expired":
+				f.b.mu.Lock()
+				f.b.pending[id].expires = time.Now().Add(-time.Second)
+				f.b.mu.Unlock()
+			case "revoked":
+				path := "manage/approval-test"
+				manage := browserPage(t, f.b, path, identity)
+				require.Contains(t, manage.Body.String(), "saved order approvals")
+				postBrowserDecision(f.b, path, identity, url.Values{"csrf": {pageCSRF(t, manage)}, "decision": {"revoke"}}, "")
+			case "failed":
+				f.failMutations.Store(true)
+			case "browser-review":
+				args["approval_method"] = "browser"
+			}
+			result := callBrowserOrder(t, cs, args)
+			if scenario == "once" || scenario == "failed" {
+				require.EqualValues(t, 1, f.calls.Load())
+				require.Equal(t, scenario == "failed", result.IsError)
+				// Permission is consumed even if the submission fails.
+				browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
+				require.EqualValues(t, 1, f.calls.Load())
+			} else {
+				browserApprovalID(t, result)
+				require.Zero(t, f.calls.Load())
+			}
+		})
+	}
+}
+
+func TestBrowserApprovalRejectsSaveWithBroadPermission(t *testing.T) {
+	f := newBrowserApprovalFixture(t)
+	cs, identity := f.connect(t, "approval-test", "Pi", "2025-11-25")
+	id := browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
+	csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
+	page := postBrowserDecision(f.b, id, identity, url.Values{"csrf": {csrf}, "decision": {"save"}, "remember": {"yes"}}, "")
+	require.Equal(t, http.StatusBadRequest, page.Code)
+	require.Zero(t, f.calls.Load())
+	require.Empty(t, f.b.permissions)
+}
+
+func TestBrowserApprovalSavedOrderConcurrentUse(t *testing.T) {
+	f := newBrowserApprovalFixture(t)
+	cs, identity := f.connect(t, "approval-test", "Pi", "2025-11-25")
+	id := browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
+	csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
+	postBrowserDecision(f.b, id, identity, url.Values{"csrf": {csrf}, "decision": {"save"}}, "")
+	f.blockMutations.Store(true)
+	done := make(chan *sdk.CallToolResult, 1)
+	go func() {
+		result, _ := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "orders", Arguments: browserOrderArgs()})
+		done <- result
+	}()
+	select {
+	case <-f.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("saved approval did not start submission")
+	}
+	// A second request cannot reuse approval while the first is in flight.
+	result, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "orders", Arguments: browserOrderArgs()})
+	close(f.release)
+	require.NoError(t, err)
+	browserApprovalID(t, result)
+	require.NotNil(t, <-done)
+	require.EqualValues(t, 1, f.calls.Load())
 }

@@ -36,15 +36,37 @@ The assistant must not start another review unless you ask it to.
 Links expire after five minutes. Approval permits one submission; it does not
 guarantee exchange execution. Cancelling an order does not reverse existing fills.
 
+## Approve an exact order for later
+
+For a new order, select **Approve for later. Do not place now** to
+save a one-time approval without sending an order to Kite. This is separate
+from the checkbox that allows any future order. Saving cannot enable that
+broader permission.
+
+The assistant must wait for a new instruction to place the order. A later
+request from the same client and Kite login can use the saved approval only
+when every reviewed order detail matches. Changed details need a new approval
+unless you have already allowed this client to place any future order without
+asking. Saving an exact-order approval does not turn off that wider permission.
+The approval is consumed by one submission attempt, including a failed or
+uncertain attempt. It expires with the login session or server restart and can
+be revoked in order approval settings. This does not schedule an order or
+monitor the market for a condition.
+
+`approval_status` returns `approved_for_later` while the approval is unused,
+with its expiry and a link to revoke it. This status means no order was placed.
+`permissions` reports `saved_order_approvals` separately from
+`future_orders_allowed`.
+
 ## Allow future orders from this client
 
-The browser page has an optional **Let this client place, change and cancel
+The browser page has an optional **Let this client place, modify, and cancel
 orders without asking** checkbox, with its expiry shown in the label. It is
 unchecked by default. If permission is already active, the page shows its scope
 and revocation link instead of another checkbox.
 
 Leaving it unchecked approves only the displayed action. If the submission
-succeeds, checking it also lets that client place, change, and cancel orders for
+succeeds, checking it also lets that client place, modify, and cancel orders for
 this account without individual approval, until the displayed expiry, logout,
 or revocation. If the request fails, the result page confirms that future orders still require approval. Instructions the
 client follows unintentionally can also lead to orders while this is enabled.

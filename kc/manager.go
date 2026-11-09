@@ -355,7 +355,7 @@ func (m *Manager) RenderSuccessTemplate(w http.ResponseWriter) error {
 	if !ok {
 		return errors.New("template not found")
 	}
-	return templates.RenderPage(w, http.StatusOK, templ, struct{ Title string }{"Login Successful"})
+	return templates.RenderPage(w, http.StatusOK, templ, struct{ Title string }{"Login successful"})
 }
 
 // RenderLoginError renders a browser error before committing its HTTP status.
@@ -363,7 +363,7 @@ func (m *Manager) RenderSuccessTemplate(w http.ResponseWriter) error {
 func (m *Manager) RenderLoginError(w http.ResponseWriter, status int, title, message, guidance string) error {
 	return templates.RenderError(w, status, templates.ErrorPage{
 		Title: title, Message: message, Guidance: guidance,
-		Footer: "You can close this tab and return to your MCP client.",
+		Footer: "You can close this tab and return to your app.",
 	})
 }
 
@@ -374,7 +374,7 @@ func (m *Manager) RenderClientConsent(w http.ResponseWriter, clientName, redirec
 		return errors.New("template not found")
 	}
 	return templates.RenderPage(w, http.StatusOK, templ, struct{ Title, ClientName, RedirectURI, Flow, CSRF string }{
-		"Authorize MCP client", clientName, redirectURI, flow, csrf,
+		"Connect app to Kite", clientName, redirectURI, flow, csrf,
 	})
 }
 

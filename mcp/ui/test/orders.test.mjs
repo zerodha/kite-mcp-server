@@ -16,13 +16,13 @@ test('switching order details cancels old request and clears its loading state',
   const a=orders.details('one','history',first);
   assert.equal(first.children[0].textContent,'Loading timeline…');
   const b=orders.details('two','trades',second);
-  assert.equal(first.children[0].textContent,'Select Timeline or Fills to load this order.');
-  assert.equal(second.children[0].textContent,'Loading fills…');
+  assert.equal(first.children[0].textContent,'Select Timeline or Trades to see more about this order.');
+  assert.equal(second.children[0].textContent,'Loading trades…');
   calls[0].resolve({data:[]});await a;
-  assert.equal(first.children[0].textContent,'Select Timeline or Fills to load this order.','late old response cannot restore old details');
+  assert.equal(first.children[0].textContent,'Select Timeline or Trades to see more about this order.','late old response cannot restore old details');
   calls[1].resolve({data:[]});await b;
-  assert.equal(second.children[0].textContent,'Order fills');
-  assert.equal(second.children[1].textContent,'No fills returned.');
+  assert.equal(second.children[0].textContent,'Trades');
+  assert.equal(second.children[1].textContent,'No trades found for this order.');
   assert.deepEqual(cancelled,['order-history','order-fills','order-history','order-fills']);
   assert.deepEqual(calls.map(call=>[call.name,call.args.mode]),[['orders_read','history'],['orders_read','trades']]);
  }finally{globalThis.document=original;}

@@ -51,8 +51,8 @@ export function portfolioChart(rows,mode,onSelect=null) {
   const toolbar=el('div',null,'chart-toolbar'),scope=el('span',null,'muted');
   const views=[...new Set(rows.map(row=>row.view).filter(Boolean))];
   // Defensive guard: a chart must never silently add day and net positions.
-  if(mode==='positions'&&views.length>1){root.append(el('p','Choose Day or Net exposure to chart one position view.','muted'));return root;}
-  scope.textContent=`Shown rows on this page${views.length?' · '+(views[0]==='net'?'Net exposure':"Today’s activity"):''}`;
+  if(mode==='positions'&&views.length>1){root.append(el('p','Choose Day or Net positions to show one view at a time.','muted'));return root;}
+  scope.textContent=`Shown rows on this page${views.length?' · '+(views[0]==='net'?'Net positions':"Today’s positions"):''}`;
   toolbar.append(scope);root.append(toolbar);
   const body=el('div'),readout=el('p',null,'chart-readout muted');readout.setAttribute('role','status');readout.setAttribute('aria-live','polite');root.append(body,readout);
   function show(item,button){
@@ -75,7 +75,7 @@ export function portfolioChart(rows,mode,onSelect=null) {
         button.append(el('strong',item.label),el('span',formatCell(item.value/total*100,'percentage')));map.append(button);tiles.push(button);
       }
       map.onkeydown=event=>{const index=tiles.indexOf(document.activeElement);if(index<0)return;const step=['ArrowRight','ArrowDown'].includes(event.key)?1:['ArrowLeft','ArrowUp'].includes(event.key)?-1:0;if(step){event.preventDefault();tiles[(index+step+tiles.length)%tiles.length].focus();}};
-      body.append(map,el('p',`Area: ${basis==='pnl'?'absolute P&L':basis==='invested'?'invested amount':'current value'}. Color: gain or loss. Values use the portfolio snapshot, independently of refreshed quotes. Select a tile for exact values.`,'muted'));
+      body.append(map,el('p',`Area: ${basis==='pnl'?'absolute P&L':basis==='invested'?'invested amount':'current value'}. Colour: profit or loss. Values use your last portfolio update. Refreshing quotes does not change them. Select a tile to see the amounts.`,'muted'));
     }else{
       const sorted=[...data].sort((a,b)=>b.value-a.value),max=Math.max(...sorted.map(item=>Math.abs(item.value)),1),bars=el('div',null,'pnl-bars');bars.setAttribute('role','list');bars.setAttribute('aria-label','Position profit and loss');
       for(const item of sorted){
@@ -84,7 +84,7 @@ export function portfolioChart(rows,mode,onSelect=null) {
         const track=el('div',null,'pnl-track');track.setAttribute('aria-hidden','true');const bar=el('span',null,`pnl-bar ${tone(item.value)}`),width=Math.abs(item.value)/max*50;
         Object.assign(bar.style,{left:`${item.value<0?50-width:50}%`,width:`${width}%`});track.append(bar);row.append(button,track,el('span',formatCell(item.value,'pnl'),`pnl-value ${tone(item.value)}`));bars.append(row);
       }
-      body.append(bars,el('p','P&L in INR · zero is the center line. Each product remains a separate position.','muted'));
+      body.append(bars,el('p','P&L in rupees · The centre line is zero. Each product is shown as a separate position.','muted'));
     }
   }
   if(mode==='holdings'){

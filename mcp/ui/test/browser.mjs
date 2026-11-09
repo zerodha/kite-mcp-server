@@ -92,8 +92,8 @@ try {
  await page.evaluate(() => window.send('ui/notifications/tool-input', {arguments:{mode:'margins'}}));
  await app.getByRole('heading', {name:'Funds & margins'}).waitFor();
  assert.equal(await app.locator('tbody tr').count(), 0, 'old snapshot must be cleared on a new request');
- await app.getByText('Loading snapshot', {exact:true}).waitFor();
- assert.equal(await app.locator('#content').getByText('Loading snapshot',{exact:true}).isVisible(),true);
+ await app.getByText('Loading data', {exact:true}).waitFor();
+ assert.equal(await app.locator('#content').getByText('Loading data',{exact:true}).isVisible(),true);
  assert.equal(await app.getByRole('button',{name:'Refresh',exact:true}).isDisabled(),true);
  await page.evaluate(() => window.release());
  await page.waitForTimeout(100);
@@ -163,7 +163,7 @@ try {
  assert.equal(await app.locator('body').evaluate(node=>node.scrollWidth > window.innerWidth), false);
  await page.screenshot({path:new URL('../test-artifacts/holdings-mobile.png',import.meta.url).pathname});
  await page.evaluate(() => window.send('ui/notifications/tool-input',{arguments:{mode:'margins'}}));
- await app.getByText('Loading snapshot',{exact:true}).waitFor();
+ await app.getByText('Loading data',{exact:true}).waitFor();
  await page.screenshot({path:new URL('../test-artifacts/loading-mobile.png',import.meta.url).pathname});
  await page.evaluate(() => window.send('ui/notifications/tool-result',{isError:true,content:[{type:'text',text:'Login required'}]}));
  await app.getByRole('button',{name:'Retry',exact:true}).waitFor();

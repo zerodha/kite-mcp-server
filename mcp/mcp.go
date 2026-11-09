@@ -105,11 +105,8 @@ func RegisterTools(srv *mcp.Server, manager *kc.Manager, excludedTools string, l
 		handler := tool.Handler(manager)
 		if def.Name == "portfolio" || def.Name == "market" {
 			def.Annotations = &mcp.ToolAnnotations{ReadOnlyHint: true}
-			def.Meta = mcp.Meta{
-				"ui": map[string]any{"resourceUri": appResourceURI, "visibility": []string{"model", "app"}},
-				// Match the official SDK helper's compatibility alias for older hosts.
-				"ui/resourceUri": appResourceURI,
-			}
+			// Ordinary data reads must not open another widget. The explicit
+			// view launcher owns the UI resource association.
 			handler = withAppData(def.Name, handler)
 		}
 		srv.AddTool(def, wrapHandler(handler))

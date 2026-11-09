@@ -30,11 +30,11 @@ try {
   frame.srcdoc=html;
  },{html,withToolInfo});
  const app=page.frameLocator('iframe');
- await app.getByText('Loading snapshot',{exact:true}).waitFor();
+ await app.getByText('Loading data',{exact:true}).waitFor();
  // Untagged snapshots cannot satisfy the launcher input, with or without toolInfo.
  await page.evaluate(()=>window.send('ui/notifications/tool-result',window.snapshot({mode:'holdings',type:'full',from:0,limit:100})));
  await page.waitForTimeout(100);
- assert.equal(await app.getByText('Loading snapshot',{exact:true}).isVisible(),true);
+ assert.equal(await app.getByText('Loading data',{exact:true}).isVisible(),true);
  await page.evaluate(()=>window.send('ui/notifications/tool-result',window.launch()));
  await app.getByRole('heading',{name:'Holdings',exact:true}).waitFor();
  await app.locator('tbody tr').first().waitFor();
@@ -57,9 +57,9 @@ try {
   window.send('ui/notifications/tool-input',{arguments:{mode:'positions'}});
   window.send('ui/notifications/tool-result',window.launch());
  });
- await app.getByText('Loading snapshot',{exact:true}).waitFor();
+ await app.getByText('Loading data',{exact:true}).waitFor();
  await page.waitForTimeout(100);
- assert.equal(await app.getByText('Loading snapshot',{exact:true}).isVisible(),true);
+ assert.equal(await app.getByText('Loading data',{exact:true}).isVisible(),true);
  await page.evaluate(()=>window.send('ui/notifications/tool-result',window.snapshot({mode:'positions'})));
  await app.locator('tbody tr').first().waitFor();
  assert.deepEqual(failures,[]);

@@ -18,6 +18,8 @@
 .remember-order { min-height: 24px; display: flex; align-items: flex-start; gap: 10px; margin: 0; }
 .remember-order input { width: 18px; height: 18px; flex-shrink: 0; margin-top: 3px; accent-color: #ff5722; }
 .permission-note { margin: 8px 0 0 28px; font-size: 12px; color: #666; }
+.save-order-form { margin-top:12px; }
+.save-order-form .button { width:100%; }
 .order-footnote { margin: 24px 0 0; font-size: 12px; color: #666; }
 .order-footnote a, .future-permission a { color: #2567ad; }
 @media (max-width:550px) { .order-section dl { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; } .card-order .actions { flex-direction: column; } }
@@ -29,25 +31,32 @@
 {{$notes := .Notes}}
 {{range $i, $section := .Sections}}
 <section class="order-section"><h2>{{.Title}}</h2><dl>
-{{range .Rows}}<div class="order-row{{if or (eq .Label "Symbol") (eq .Label "Side") (eq .Label "Quantity") (eq .Label "Price") (eq .Label "Trigger price")}} order-key{{end}}"><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}
+{{range .Rows}}<div class="order-row{{if or (eq .Label "Symbol") (eq .Label "Side") (eq .Label "Quantity") (eq .Label "Price (₹)") (eq .Label "Trigger price (₹)")}} order-key{{end}}"><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}
 </dl>{{if eq $i 0}}{{range $notes}}<p class="order-footnote">{{.}}</p>{{end}}{{end}}</section>
 {{end}}
 {{if .Pending}}
 <form action="{{.FormAction}}" method="post" aria-describedby="approval-deadline">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
-{{if not .ManageURL}}<div class="future-permission"><label class="remember-order"><input type="checkbox" name="remember" value="yes" aria-describedby="future-order-scope"><span>Let {{.ClientName}} place, change and cancel orders without asking until {{.Expiry}}</span></label>
-<p class="permission-note" id="future-order-scope">Starts only if Kite accepts this request. {{.ClientName}} could place orders you did not intend, for example if it misreads an instruction. You can turn this off at any time. Logging out also ends this permission.</p></div>{{end}}
+{{if not .ManageURL}}<div class="future-permission"><label class="remember-order"><input type="checkbox" name="remember" value="yes" aria-describedby="future-order-scope"><span>Let {{.ClientName}} place, modify, and cancel orders without asking until {{.Expiry}}</span></label>
+<p class="permission-note" id="future-order-scope">Applies only after Kite accepts this request. {{.ClientName}} may misunderstand your instructions and place an order you did not want. You can turn this off at any time. It also ends when you log out.</p></div>{{end}}
 <div class="actions"><button class="button" type="submit" name="decision" value="approve">{{.SubmitLabel}}</button><button class="button button-secondary" type="submit" name="decision" value="decline">Decline this request</button></div>
 </form>
-<p class="order-footnote" id="approval-deadline">This review expires at {{.ApprovalExpiry}}. Closing this page submits nothing.</p>
+{{if .SaveLater}}<form class="save-order-form" action="{{.FormAction}}" method="post" aria-describedby="save-order-scope approval-deadline">
+<p class="order-footnote" id="save-order-scope">Save approval for this exact order. No order will be placed now. If saved, this approval expires at {{.SavedExpiry}}. It also ends when you log out. {{if .Allowed}}Permission for other orders is already enabled. Saving this approval will not turn it off.{{else}}Changed order details will need a new approval.{{end}}</p>
+<input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button button-secondary" type="submit" name="decision" value="save">Approve for later. Do not place now</button></form>{{end}}
+<p class="order-footnote" id="approval-deadline">This review expires at {{.ApprovalExpiry}}. Closing this page will not send an order.</p>
 {{end}}
 {{if .Manage}}
+{{if or .Allowed .Saved}}
 {{if .Allowed}}
-<p>{{.ClientName}} can place, change and cancel orders in this account without asking until {{.Expiry}}.</p>
-<p>Turn this off to review each order. Orders already placed are not cancelled.</p>
+<p>{{.ClientName}} can place, modify, and cancel orders in this account without asking until {{.Expiry}}.</p>
+{{end}}
+{{if .Saved}}<p>You have saved order approvals. Saving approval does not place an order. Each approval can be used once, for the same order details.</p>{{end}}
+<p>Turn this off to approve each order separately. This will not cancel orders already placed.</p>
 <form action="{{.FormAction}}" method="post"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="button" type="submit" name="decision" value="revoke">Ask me before every order</button></form>
-{{else}}<p>Each order request requires approval.</p>{{end}}
+{{else}}<p>You must approve each order request.</p>{{end}}
 {{end}}
 {{if .PermissionNote}}<p class="order-footnote">{{.PermissionNote}}</p>{{end}}
-{{if .ManageURL}}<aside class="future-permission">{{.ClientName}} can place, change and cancel orders without asking until {{.Expiry}}. <a href="{{.ManageURL}}">Ask me before every order</a></aside>{{end}}
+{{if .Saved}}{{if not .Manage}}<p class="order-footnote">Saved approval expires at {{.SavedExpiry}}. <a href="{{.ManageURL}}">Manage saved approvals</a></p>{{end}}{{end}}
+{{if and .ManageURL .Allowed}}<aside class="future-permission">{{.ClientName}} can place, modify, and cancel orders without asking until {{.Expiry}}. {{if .Saved}}Saving this approval has not turned off that permission. {{end}}<a href="{{.ManageURL}}">Ask me before every order</a></aside>{{end}}
 {{end}}

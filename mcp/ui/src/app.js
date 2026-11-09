@@ -22,7 +22,7 @@ let sortKey='', direction=1, inFlight=false, waiting=false, cancelled=false, err
 let acceptedRevision=-1, refreshSummaryForRequest=true, countTimer;
 let priceBusy=false, priceGeneration=0, priceMessage='';
 let revision=0, expectedArgs=null, pendingCall=null, expandedColumns=false, selected=null, chartNode=null, chartRows=null;
-const modes={holdings:'Holdings',positions:'Positions',margins:'Funds & margins',profile:'Account',historical:'Historical candles',quote:'Quotes',ltp:'Last traded prices',ohlc:'OHLC',search:'Instrument finder'};
+const modes={holdings:'Holdings',positions:'Positions',margins:'Funds & margins',profile:'Account',historical:'Historical prices',quote:'Quotes',ltp:'Last traded prices',ohlc:'OHLC',search:'Instrument search'};
 const panelRequests=new PanelRequests((...params)=>app.callServerTool(...params),()=>connected&&hasResult&&!waiting&&!cancelled&&Boolean(app.getHostCapabilities()?.serverTools));
 let activeWidget='snapshot';
 const chartStates=new Map();
@@ -115,7 +115,7 @@ function renderTable(visible,container){
   const monetary=key=>isMoney(key)&&!(key==='value'&&fieldValueRows);
   const label=key=>args.mode==='holdings'&&key==='quantity'?'Settled qty':columnLabel(key);
   const numeric=new Set(columns.filter(key=>rows.some(row=>typeof row[key]==='number')));
-  const table=el('table');table.append(el('caption',`${$('title').textContent} · ${visible.length} rows on this page. Monetary values in INR.`,'sr-only'));
+  const table=el('table');table.append(el('caption',`${$('title').textContent} · ${visible.length} rows on this page. Amounts are in rupees (₹).`,'sr-only'));
   const head=el('thead'),tr=el('tr');
   for(const key of columns){
     const th=el('th');th.scope='col';if(numeric.has(key))th.className='numeric';
@@ -140,7 +140,7 @@ function renderTable(visible,container){
     }
     body.append(tr);
   }
-  table.append(body);const scroll=el('div',null,'scroll data-table');scroll.tabIndex=0;scroll.setAttribute('role','region');scroll.setAttribute('aria-label','Scrollable snapshot table');scroll.append(table);container.append(scroll);
+  table.append(body);const scroll=el('div',null,'scroll data-table');scroll.tabIndex=0;scroll.setAttribute('role','region');scroll.setAttribute('aria-label','Scrollable results table');scroll.append(table);container.append(scroll);
 }
 function render(){
   const previousChart=$('content').querySelector('.portfolio-chart');
@@ -165,9 +165,9 @@ function render(){
   if(!countText)$('result-count').textContent='';else countTimer=setTimeout(()=>{$('result-count').textContent=countText;},300);
   $('sort-direction').textContent=direction===1?'Ascending':'Descending';
   if(waiting||(!hasResult&&!errorMessage)){
-    const panel=statePanel('Loading snapshot','Waiting for data from Kite…');for(let i=0;i<3;i++)panel.append(el('div',null,'skeleton'));$('content').append(panel);
-  }else if(errorMessage||cancelled)$('content').append(statePanel(cancelled?'Request cancelled':'Could not load snapshot',cancelled?'Refresh to try this request again.':errorMessage,true));
-  else if(summaryOnly)$('content').append(el('p','Account-wide holdings summary. Ask for full holdings to inspect individual instruments.','muted'));
+    const panel=statePanel('Loading data','Waiting for data from Kite…');for(let i=0;i<3;i++)panel.append(el('div',null,'skeleton'));$('content').append(panel);
+  }else if(errorMessage||cancelled)$('content').append(statePanel(cancelled?'Request cancelled':'Could not load data',cancelled?'Refresh to try this request again.':errorMessage,true));
+  else if(summaryOnly)$('content').append(el('p','Summary of all your holdings. Ask for full holdings to see individual investments.','muted'));
   else if(args.mode==='margins'&&fundsView(payload))$('content').append(fundsView(payload));
   else {
     if(args.mode==='historical'){
@@ -184,7 +184,7 @@ function render(){
     if(visible.length&&visible.every(row=>finite(row.pnl))){
       const total=visible.reduce((sum,row)=>sum+row.pnl,0),block=el('div',null,'summary');block.append(el('span',`P&L · shown ${hasViews?$('view').value+' ':''}rows (INR)`,'muted'),el('strong',formatCell(total,'pnl'),tone(total)));$('content').append(block);
     }
-    if(!visible.length)$('content').append(statePanel(rows.length?'No matches on this page':`No ${['holdings','positions'].includes(args.mode)?args.mode:'data'} to display`,rows.length?'Try another search or clear the filters.':'This request returned no rows.'));
+    if(!visible.length)$('content').append(statePanel(rows.length?'No matches on this page':`No ${['holdings','positions'].includes(args.mode)?args.mode:'data'} to display`,rows.length?'Try another search or clear the filters.':'No results were returned.'));
     else{
       const group=el('div',null,`data-views ${instrumentRows?'has-instruments':''}`);group.dataset.display=instrumentRows?$('display').value:'table';
       if(instrumentRows)group.append(instrumentList(visible,args.mode,openInstrument,selected));
@@ -196,17 +196,17 @@ function render(){
   const page=payload?.pagination;$('pagination').hidden=!page||waiting||Boolean(errorMessage)||cancelled;
   if(page)$('page-label').textContent=page.returned?`Rows ${page.from+1}–${page.from+page.returned} of ${page.total} · ${visible.length} visible`:`No rows on this page · ${page.total} total`;
   const warnings=[];
-  if(payload?.meta?.missing_instruments?.length)warnings.push(`Missing instruments: ${payload.meta.missing_instruments.join(', ')}. These instruments are not included in this snapshot.`);
+  if(payload?.meta?.missing_instruments?.length)warnings.push(`Missing instruments: ${payload.meta.missing_instruments.join(', ')}. These instruments are not included in the results.`);
   if(payload?.meta?.missing_live_quotes?.length)warnings.push(`Current quote unavailable: ${payload.meta.missing_live_quotes.join(', ')}. Reference data is shown for these instruments.`);
   $('warning').hidden=!warnings.length;$('warning').textContent=warnings.join(' ');
   const notes=[];
-  if(hasViews)notes.push('Net shows current exposure; Day shows today’s activity. These are separate views and must not be added together. The selector filters this page.');
+  if(hasViews)notes.push('Net shows your current positions. Day shows today’s positions. Do not add these two views together. Your selection applies to this page.');
   if(payload?.meta?.timestamp_note)notes.push(payload.meta.timestamp_note);
   if(payload?.meta?.timezone)notes.push(`Timezone: ${payload.meta.timezone}.`);
-  if(args.mode==='historical')notes.push('Chart shows all candles in this snapshot, unaffected by table filters.');
+  if(args.mode==='historical')notes.push('The chart shows all prices returned for this request. Table filters do not change the chart.');
   if(payload?.meta?.reference_only_instruments?.length)notes.push(`International reference data only: ${payload.meta.reference_only_instruments.join(', ')}. Kite quotes and charts are unavailable.`);
-  if(args.mode==='search')notes.push('Instrument-master prices are reference values unless enriched with a timestamped quote. Contract filters apply to this page. Select an instrument for a fresh quote.');
-  if(connected&&!app.getHostCapabilities()?.serverTools)notes.push('This host does not support additional requests from the app. Ask for another snapshot in chat.');
+  if(args.mode==='search')notes.push('Prices from the instrument list may be old. Check the quote time for current prices. Contract filters apply to this page. Select an instrument to load a quote.');
+  if(connected&&!app.getHostCapabilities()?.serverTools)notes.push('This app cannot load more data here. Ask for an update in chat.');
   $('note').textContent=notes.join(' ');showWidget(activeWidget);setBusy();
 }
 function receive(result,fallbackArgs){
@@ -233,7 +233,7 @@ function receive(result,fallbackArgs){
     }
     rows=rowsFor(payload);populateFilters();render();
     const scope=args.mode==='margins'?`${rows.length} account segments`:args.mode==='holdings'&&args.type==='summary'?'Account-wide summary':args.mode==='historical'?`${rows.length} candles`:`${rows.length} rows on this page`;
-    status(`Received ${receivedTime()} · ${scope}. Monetary values in INR.`);
+    status(`Received ${receivedTime()} · ${scope}. Amounts are in rupees (₹).`);
     if(tool==='portfolio'&&args.mode==='holdings'){
       if(args.type==='summary')summary.load(payload);
       else if(!summary.data&&panelRequests.canCall())summary.load();
@@ -251,7 +251,7 @@ async function call(nextArgs,{refreshSummary=true}={}){
   const operation={arguments:args,controller:new AbortController()};pendingCall=operation;
   cancelled=false;errorMessage='';waiting=true;inFlight=true;payload=null;rows=[];resetPanels(!refreshSummary&&tool==='portfolio'&&args.mode==='holdings');render();status('Requesting data from Kite…');
   try{const result=await panelRequests.callTool({name:requestedTool,arguments:args},{signal:operation.controller.signal});if(revision===current)receive(result,operation.arguments);}
-  catch(error){if(revision===current){waiting=false;hasResult=true;errorMessage=error.message;payload=null;rows=[];render();status(`Could not load snapshot: ${error.message}`,true);}}
+  catch(error){if(revision===current){waiting=false;hasResult=true;errorMessage=error.message;payload=null;rows=[];render();status(`Could not load data: ${error.message}`,true);}}
   finally{if(pendingCall===operation){pendingCall=null;inFlight=false;setBusy();}}
 }
 $('refresh-prices').onclick=async()=>{
@@ -275,7 +275,7 @@ $('refresh-prices').onclick=async()=>{
     priceMessage=`Quotes received ${receivedTime()} · ${instruments.length-missing.length}/${instruments.length} instruments. Portfolio totals and P&L are unchanged.${missing.length?' Unavailable: '+missing.join(', ')+'.':''}`;
   }catch(error){
     if(generation!==priceGeneration||error.name==='AbortError')return;
-    priceMessage=`Price refresh failed: ${error.message}. Any displayed quotes are previous snapshots.`;
+    priceMessage=`Price refresh failed: ${error.message}. Prices shown are from the last successful update.`;
   }finally{if(generation===priceGeneration){priceBusy=false;render();}}
 };
 $('refresh').onclick=()=>{
@@ -336,4 +336,4 @@ app.ontoolresult=result=>{
 app.ontoolcancelled=()=>{orderBook.clear();gttMonitor.clear();optionChain.clear();showWidget('snapshot');++revision;waiting=false;hasResult=true;cancelled=true;pendingCall?.controller.abort();payload=null;rows=[];errorMessage='';resetPanels();render();status('Request cancelled. Refresh to retry.',true);};
 app.onhostcontextchanged=ctx=>hostContext({...app.getHostContext(),...ctx});
 app.onteardown=async()=>{orderBook.clear();gttMonitor.clear();optionChain.clear();++revision;connected=false;waiting=false;pendingCall?.controller.abort();clearTimeout(countTimer);resetPanels();setBusy();return {};};
-app.connect().then(()=>{connected=true;hostContext(app.getHostContext());setBusy();}).catch(error=>{errorMessage=`Could not connect to the MCP Apps host: ${error.message}`;hasResult=true;render();status('Connection failed.',true);});
+app.connect().then(()=>{connected=true;hostContext(app.getHostContext());setBusy();}).catch(error=>{errorMessage=`Could not connect to the app displaying this view: ${error.message}`;hasResult=true;render();status('Connection failed.',true);});
