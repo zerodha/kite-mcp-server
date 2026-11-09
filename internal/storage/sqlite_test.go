@@ -144,7 +144,7 @@ func TestSQLiteRejectsOtherApplicationsDatabase(t *testing.T) {
 	}
 	db, err = sql.Open("sqlite", sqliteURI(path))
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { require.NoError(t, db.Close()) }()
 	var mode string
 	require.NoError(t, db.QueryRow("PRAGMA journal_mode").Scan(&mode))
 	require.Equal(t, "delete", mode)

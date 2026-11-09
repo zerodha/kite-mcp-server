@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/zerodha/kite-mcp-server/internal/audit"
@@ -104,4 +105,17 @@ func TestBrowserAcceptedOutcomeIsAuditedWhenResultPersistenceFails(t *testing.T)
 	require.EqualValues(t, 1, f.calls.Load())
 	require.Len(t, logs.Events("browser_approval_result"), 1)
 	require.Empty(t, logs.Events("order_permission_granted"))
+}
+
+func TestExpiryPersistenceFailureShowsUnavailableApprovalPage(t *testing.T) {
+	f := newBrowserApprovalFixture(t)
+	f.b.state = &terminalResultFailureState{failed: errors.New("injected persistence failure")}
+	p := &browserOrder{status: "approval_required", expires: time.Now().Add(-time.Minute)}
+	f.b.mu.Lock()
+	page := f.b.orderPageLocked(p)
+	f.b.mu.Unlock()
+	require.Equal(t, "Approval unavailable", page.Title)
+	require.False(t, page.Pending)
+	require.False(t, page.SaveLater)
+	require.Zero(t, f.calls.Load())
 }

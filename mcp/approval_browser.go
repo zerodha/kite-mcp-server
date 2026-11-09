@@ -442,7 +442,10 @@ func (b *BrowserApprovals) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (b *BrowserApprovals) orderPageLocked(p *browserOrder) browserOrderPage {
 	if p.status == "approval_required" && !time.Now().Before(p.expires) {
-		b.expireOrderLocked(p, time.Now())
+		if err := b.expireOrderLocked(p, time.Now()); err != nil {
+			b.manager.Logger.Error("Approval expiry persistence failed", "error", err)
+			return browserOrderPage{Title: "Approval unavailable", Message: "Order approval is temporarily unavailable. Please try again later."}
+		}
 	}
 	data := browserOrderPage{Title: map[string]string{"orders_place": "Review order", "orders_modify": "Review order changes", "orders_cancel": "Review cancellation"}[p.operation], ClientName: p.clientName, Account: p.user, Sections: browserOrderSections(p.operation, p.snapshot), ApprovalExpiry: p.expires.In(time.FixedZone("IST", 19800)).Format("15:04 IST")}
 	var fields map[string]any

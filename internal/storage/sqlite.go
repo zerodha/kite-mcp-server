@@ -121,7 +121,7 @@ func OpenSQLite(path string, key []byte) (_ *SQLite, err error) {
 		if beginErr != nil {
 			return nil, beginErr
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }() // Already committed on success.
 		if _, err = tx.Exec("CREATE TABLE state (bucket TEXT NOT NULL, id TEXT NOT NULL, value BLOB NOT NULL, PRIMARY KEY(bucket, id))"); err != nil {
 			return nil, err
 		}
@@ -194,7 +194,7 @@ func (s *SQLite) Load(bucket string) (map[string]json.RawMessage, error) {
 	if err != nil {
 		return nil, s.fail(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Iteration errors are checked below.
 	values := make(map[string]json.RawMessage)
 	for rows.Next() {
 		var id string
@@ -231,7 +231,7 @@ func (s *SQLite) Apply(changes ...Change) error {
 	if err != nil {
 		return s.fail(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // Already committed on success.
 	if err := s.Check(); err != nil {
 		return err
 	}
@@ -265,7 +265,7 @@ func (s *SQLite) Apply(changes ...Change) error {
 }
 
 func (s *SQLite) Close() error {
-	s.fail(errors.New("state store closed"))
+	_ = s.fail(errors.New("state store closed"))
 	s.operations.Lock()
 	defer s.operations.Unlock()
 	// sql.DB.Close alone does not drain outstanding transactions. Retain
@@ -285,7 +285,7 @@ func inspectSQLite(uri string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	db.SetMaxOpenConns(1)
 	var version, appID int
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
