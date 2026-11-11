@@ -44,19 +44,20 @@ type App struct {
 
 // Config holds the application configuration
 type Config struct {
-	SQLitePath          string
-	KiteAPIKey          string
-	KiteAPISecret       string
-	KiteTradeAPIBaseURI string
-	AppPort             string
-	AppHost             string
-	ExcludedTools       string
-	AdminSecretPath     string
-	JWTSecret           string
-	OAuthIssuer         string
-	OAuthTokenTTL       string
-	MCPSessionTimeout   string
-	TrustedProxyCIDRs   []string
+	SQLitePath             string
+	KiteAPIKey             string
+	KiteAPISecret          string
+	KiteTradeAPIBaseURI    string
+	AppPort                string
+	AppHost                string
+	ExcludedTools          string
+	AdminSecretPath        string
+	JWTSecret              string
+	OAuthIssuer            string
+	OAuthTokenTTL          string
+	MCPSessionTimeout      string
+	TrustedProxyCIDRs      []string
+	DisableOAuthRateLimits bool
 }
 
 const (
@@ -69,19 +70,20 @@ const (
 func NewApp(logger *slog.Logger) *App {
 	return &App{
 		Config: &Config{
-			SQLitePath:          os.Getenv("SQLITE_PATH"),
-			KiteAPIKey:          os.Getenv("KITE_API_KEY"),
-			KiteAPISecret:       os.Getenv("KITE_API_SECRET"),
-			KiteTradeAPIBaseURI: os.Getenv("KITE_TRADE_API_BASE_URI"),
-			AppPort:             os.Getenv("APP_PORT"),
-			AppHost:             os.Getenv("APP_HOST"),
-			ExcludedTools:       os.Getenv("EXCLUDED_TOOLS"),
-			AdminSecretPath:     os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
-			JWTSecret:           os.Getenv("JWT_SECRET"),
-			OAuthIssuer:         os.Getenv("OAUTH_ISSUER"),
-			OAuthTokenTTL:       os.Getenv("OAUTH_TOKEN_TTL"),
-			MCPSessionTimeout:   os.Getenv("MCP_SESSION_TIMEOUT"),
-			TrustedProxyCIDRs:   parseCSVEnv(os.Getenv("TRUSTED_PROXY_CIDRS")),
+			SQLitePath:             os.Getenv("SQLITE_PATH"),
+			KiteAPIKey:             os.Getenv("KITE_API_KEY"),
+			KiteAPISecret:          os.Getenv("KITE_API_SECRET"),
+			KiteTradeAPIBaseURI:    os.Getenv("KITE_TRADE_API_BASE_URI"),
+			AppPort:                os.Getenv("APP_PORT"),
+			AppHost:                os.Getenv("APP_HOST"),
+			ExcludedTools:          os.Getenv("EXCLUDED_TOOLS"),
+			AdminSecretPath:        os.Getenv("ADMIN_ENDPOINT_SECRET_PATH"),
+			JWTSecret:              os.Getenv("JWT_SECRET"),
+			OAuthIssuer:            os.Getenv("OAUTH_ISSUER"),
+			OAuthTokenTTL:          os.Getenv("OAUTH_TOKEN_TTL"),
+			MCPSessionTimeout:      os.Getenv("MCP_SESSION_TIMEOUT"),
+			TrustedProxyCIDRs:      parseCSVEnv(os.Getenv("TRUSTED_PROXY_CIDRS")),
+			DisableOAuthRateLimits: os.Getenv("DISABLE_OAUTH_RATE_LIMITS") == "true",
 		},
 		Version:   "v0.0.0",
 		startTime: time.Now(),
@@ -217,6 +219,9 @@ func (app *App) initializeServices() (_ *mcpsdk.Server, err error) {
 		AutoCleanup:     true,
 	})
 	app.rateLimiter = web.NewRateLimiter(app.Config.TrustedProxyCIDRs...)
+	if app.Config.DisableOAuthRateLimits {
+		app.logger.Warn("OAuth IP rate limits disabled", "config", "DISABLE_OAUTH_RATE_LIMITS")
+	}
 
 	// --- Kite Connect Manager ---
 	kcManager, err := kc.New(kc.Config{
@@ -243,6 +248,7 @@ func (app *App) initializeServices() (_ *mcpsdk.Server, err error) {
 		TokenTTL:          tokenTTL,
 		SessionExpiry:     kcManager.SessionExpiry,
 		TrustedProxyCIDRs: app.Config.TrustedProxyCIDRs,
+		DisableRateLimits: app.Config.DisableOAuthRateLimits,
 	})
 	if err := app.oauthServer.RestoreState(); err != nil {
 		return nil, fmt.Errorf("restore OAuth state: %w", err)
@@ -346,8 +352,14 @@ func (app *App) setupMux() *http.ServeMux {
 		return app.metrics.HTTPMiddleware("oauth_http", mode, next)
 	}
 	mux.Handle("/callback", observeOAuth("callback", http.HandlerFunc(app.jwtOauthHandlers.HandleCallback)))
-	mux.Handle("/authorize", observeOAuth("authorize", app.rateLimiter.MiddlewareWithRejection(http.HandlerFunc(app.jwtOauthHandlers.HandleAuthorize), app.jwtOauthHandlers.HandleAuthorizeRateLimit)))
-	mux.Handle("/token", observeOAuth("token", app.rateLimiter.Middleware(http.HandlerFunc(app.jwtOauthHandlers.HandleToken))))
+	var authorize http.Handler = http.HandlerFunc(app.jwtOauthHandlers.HandleAuthorize)
+	var token http.Handler = http.HandlerFunc(app.jwtOauthHandlers.HandleToken)
+	if !app.Config.DisableOAuthRateLimits {
+		authorize = app.rateLimiter.MiddlewareWithRejection(authorize, app.jwtOauthHandlers.HandleAuthorizeRateLimit)
+		token = app.rateLimiter.Middleware(token)
+	}
+	mux.Handle("/authorize", observeOAuth("authorize", authorize))
+	mux.Handle("/token", observeOAuth("token", token))
 	mux.Handle("/.well-known/oauth-authorization-server", observeOAuth("discovery", http.HandlerFunc(app.jwtOauthHandlers.HandleDiscovery)))
 	mux.Handle("/.well-known/oauth-protected-resource", observeOAuth("protected_resource", http.HandlerFunc(app.jwtOauthHandlers.HandleProtectedResourceMetadata)))
 	mux.Handle("/register", observeOAuth("register", http.HandlerFunc(app.jwtOauthHandlers.HandleRegister)))

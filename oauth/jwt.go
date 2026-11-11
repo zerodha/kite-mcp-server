@@ -50,6 +50,8 @@ type Config struct {
 	// TrustedProxyCIDRs identifies reverse proxies allowed to supply
 	// X-Forwarded-For. With the default empty list, the direct peer is used.
 	TrustedProxyCIDRs []string
+	// DisableRateLimits bypasses the registration and callback IP limits.
+	DisableRateLimits bool
 }
 
 // Server is the simplified OAuth server

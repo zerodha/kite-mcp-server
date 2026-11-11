@@ -298,7 +298,7 @@ func (h *Handlers) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clientIP := h.server.ClientIP(r)
-	if !callbackRateLimiter.Allow(clientIP) {
+	if !h.server.config.DisableRateLimits && !callbackRateLimiter.Allow(clientIP) {
 		h.browserError(w, r, "too many requests", http.StatusTooManyRequests)
 		return
 	}
@@ -532,12 +532,12 @@ func (h *Handlers) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientIP := h.server.ClientIP(r)
-	if !h.registerHour.Allow(clientIP) {
+	if !h.server.config.DisableRateLimits && !h.registerHour.Allow(clientIP) {
 		w.Header().Set("Retry-After", "3600")
 		WriteJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate_limit_exceeded", "error_description": "Too many registration requests. Try again later."})
 		return
 	}
-	if !h.registerMinute.Allow(clientIP) {
+	if !h.server.config.DisableRateLimits && !h.registerMinute.Allow(clientIP) {
 		w.Header().Set("Retry-After", "60")
 		WriteJSON(w, http.StatusTooManyRequests, map[string]string{
 			"error":             "rate_limit_exceeded",
