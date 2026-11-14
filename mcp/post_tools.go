@@ -434,6 +434,11 @@ func (*ModifyGTTOrderTool) Tool() mcp.Tool {
 			mcp.Required(),
 			mcp.Enum("BUY", "SELL"),
 		),
+		mcp.WithString("product",
+			mcp.Description("Product type"),
+			mcp.Required(),
+			mcp.Enum("CNC", "NRML", "MIS", "MTF"),
+		),
 		mcp.WithString("trigger_type",
 			mcp.Description("GTT trigger type"),
 			mcp.Required(),
@@ -478,7 +483,7 @@ func (*ModifyGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		args := request.GetArguments()
 
 		// Validate required parameters
-		if err := ValidateRequired(args, "trigger_id", "exchange", "tradingsymbol", "last_price", "transaction_type", "trigger_type"); err != nil {
+		if err := ValidateRequired(args, "trigger_id", "exchange", "tradingsymbol", "last_price", "transaction_type", "product", "trigger_type"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
@@ -491,6 +496,7 @@ func (*ModifyGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			Tradingsymbol:   SafeAssertString(args["tradingsymbol"], ""),
 			LastPrice:       SafeAssertFloat64(args["last_price"], 0.0),
 			TransactionType: SafeAssertString(args["transaction_type"], ""),
+			Product:         SafeAssertString(args["product"], ""),
 		}
 
 		// Set up trigger based on trigger_type
