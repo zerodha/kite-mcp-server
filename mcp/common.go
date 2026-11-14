@@ -3,10 +3,12 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 	"github.com/zerodha/kite-mcp-server/kc"
 )
 
@@ -103,13 +105,33 @@ func (h *ToolHandler) MarshalResponse(data interface{}, toolName string) (*mcp.C
 	return mcp.NewToolResultText(string(v)), nil
 }
 
+// tokenExpiredMessage is returned when Kite rejects the access token, so the
+// client knows to re-authenticate instead of retrying.
+const tokenExpiredMessage = "Kite session expired or invalid. Please call the login tool to re-authenticate, then retry."
+
+// apiErrorResult maps an API error to a tool error result. Kite API errors
+// carry user-facing messages and are surfaced; token errors prompt a re-login.
+// Any other error is reduced to the generic message to avoid leaking internals.
+func apiErrorResult(err error, generic string) *mcp.CallToolResult {
+	var kerr kiteconnect.Error
+	if errors.As(err, &kerr) {
+		if kerr.ErrorType == kiteconnect.TokenError {
+			return mcp.NewToolResultError(tokenExpiredMessage)
+		}
+		if kerr.Message != "" {
+			return mcp.NewToolResultError(fmt.Sprintf("%s: %s", generic, kerr.Message))
+		}
+	}
+	return mcp.NewToolResultError(generic)
+}
+
 // HandleAPICall wraps common API call pattern with error handling and response marshalling
 func (h *ToolHandler) HandleAPICall(ctx context.Context, toolName string, apiCall func(*kc.KiteSessionData) (interface{}, error)) (*mcp.CallToolResult, error) {
 	return h.WithSession(ctx, toolName, func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
 		data, err := apiCall(session)
 		if err != nil {
 			h.manager.Logger.Error("API call failed", "tool", toolName, "error", err)
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to execute %s", toolName)), nil
+			return apiErrorResult(err, fmt.Sprintf("Failed to execute %s", toolName)), nil
 		}
 
 		return h.MarshalResponse(data, toolName)
@@ -355,7 +377,7 @@ func PaginatedToolHandler[T any](manager *kc.Manager, toolName string, apiCall f
 			if err != nil {
 				handler.manager.Logger.Error("API call failed", "tool", toolName, "error", err)
 				handler.trackToolError(ctx, toolName, "api_error")
-				return mcp.NewToolResultError(fmt.Sprintf("Failed to execute %s", toolName)), nil
+				return apiErrorResult(err, fmt.Sprintf("Failed to execute %s", toolName)), nil
 			}
 
 			// Parse pagination parameters

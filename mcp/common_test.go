@@ -1,10 +1,15 @@
 package mcp
 
 import (
+	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	kiteconnect "github.com/zerodha/gokiteconnect/v4"
 )
 
 // TestSafeAssertFunctions tests all SafeAssert utility functions
@@ -255,4 +260,53 @@ func TestRaceConditions(t *testing.T) {
 		}
 		wg.Wait()
 	})
+}
+
+// TestAPIErrorResult tests mapping of API errors to tool error results
+func TestAPIErrorResult(t *testing.T) {
+	const generic = "Failed to place order"
+
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "token error prompts login",
+			err:  kiteconnect.NewError(kiteconnect.TokenError, "Incorrect `api_key` or `access_token`.", nil),
+			want: tokenExpiredMessage,
+		},
+		{
+			name: "wrapped token error prompts login",
+			err:  fmt.Errorf("api call: %w", kiteconnect.NewError(kiteconnect.TokenError, "Token expired", nil)),
+			want: tokenExpiredMessage,
+		},
+		{
+			name: "order error message is surfaced",
+			err:  kiteconnect.NewError(kiteconnect.OrderError, "Insufficient funds. Required margin is 1000.00", nil),
+			want: generic + ": Insufficient funds. Required margin is 1000.00",
+		},
+		{
+			name: "input error message is surfaced",
+			err:  kiteconnect.NewError(kiteconnect.InputError, "Invalid `quantity`.", nil),
+			want: generic + ": Invalid `quantity`.",
+		},
+		{
+			name: "non-Kite error uses generic text",
+			err:  errors.New("dial tcp 10.0.0.1:443: connection refused"),
+			want: generic,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := apiErrorResult(tt.err, generic)
+			require.NotNil(t, result)
+			assert.True(t, result.IsError)
+			require.Len(t, result.Content, 1)
+			text, ok := result.Content[0].(mcp.TextContent)
+			require.True(t, ok)
+			assert.Equal(t, tt.want, text.Text)
+		})
+	}
 }

@@ -113,7 +113,7 @@ func (*PlaceOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			resp, err := session.Kite.Client.PlaceOrder(variety, orderParams)
 			if err != nil {
 				handler.manager.Logger.Error("Failed to place order", "error", err)
-				return mcp.NewToolResultError("Failed to place order"), nil
+				return apiErrorResult(err, "Failed to place order"), nil
 			}
 
 			return handler.MarshalResponse(resp, "place_order")
@@ -189,7 +189,7 @@ func (*ModifyOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			resp, err := session.Kite.Client.ModifyOrder(variety, orderID, orderParams)
 			if err != nil {
 				handler.manager.Logger.Error("Failed to modify order", "error", err)
-				return mcp.NewToolResultError("Failed to modify order"), nil
+				return apiErrorResult(err, "Failed to modify order"), nil
 			}
 
 			return handler.MarshalResponse(resp, "modify_order")
@@ -233,7 +233,7 @@ func (*CancelOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			resp, err := session.Kite.Client.CancelOrder(variety, orderID, nil)
 			if err != nil {
 				handler.manager.Logger.Error("Failed to cancel order", "error", err)
-				return mcp.NewToolResultError("Failed to cancel order"), nil
+				return apiErrorResult(err, "Failed to cancel order"), nil
 			}
 
 			return handler.MarshalResponse(resp, "cancel_order")
@@ -360,7 +360,7 @@ func (*PlaceGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			resp, err := session.Kite.Client.PlaceGTT(gttParams)
 			if err != nil {
 				handler.manager.Logger.Error("Failed to place GTT order", "error", err)
-				return mcp.NewToolResultError("Failed to place GTT order"), nil
+				return apiErrorResult(err, "Failed to place GTT order"), nil
 			}
 
 			return handler.MarshalResponse(resp, "place_gtt_order")
@@ -398,7 +398,7 @@ func (*DeleteGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			resp, err := session.Kite.Client.DeleteGTT(triggerID)
 			if err != nil {
 				handler.manager.Logger.Error("Failed to delete GTT order", "error", err)
-				return mcp.NewToolResultError("Failed to delete GTT order"), nil
+				return apiErrorResult(err, "Failed to delete GTT order"), nil
 			}
 
 			return handler.MarshalResponse(resp, "delete_gtt_order")
@@ -526,7 +526,7 @@ func (*ModifyGTTOrderTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 			resp, err := session.Kite.Client.ModifyGTT(triggerID, gttParams)
 			if err != nil {
 				handler.manager.Logger.Error("Failed to modify GTT order", "error", err)
-				return mcp.NewToolResultError("Failed to modify GTT order"), nil
+				return apiErrorResult(err, "Failed to modify GTT order"), nil
 			}
 
 			return handler.MarshalResponse(resp, "modify_gtt_order")
