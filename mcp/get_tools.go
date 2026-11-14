@@ -220,7 +220,7 @@ func (*OrderTradesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		return handler.WithSession(ctx, "get_order_trades", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
 			orderTrades, err := session.Kite.Client.GetOrderTrades(orderID)
 			if err != nil {
-				return mcp.NewToolResultError("Failed to get order trades"), nil
+				return apiErrorResult(err, "Failed to get order trades"), nil
 			}
 
 			return handler.MarshalResponse(orderTrades, "get_order_trades")
@@ -256,7 +256,7 @@ func (*OrderHistoryTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		return handler.WithSession(ctx, "get_order_history", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
 			orderHistory, err := session.Kite.Client.GetOrderHistory(orderID)
 			if err != nil {
-				return mcp.NewToolResultError("Failed to get order history"), nil
+				return apiErrorResult(err, "Failed to get order history"), nil
 			}
 
 			return handler.MarshalResponse(orderHistory, "get_order_history")

@@ -42,7 +42,7 @@ func (*QuotesTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		return handler.WithSession(ctx, "get_quotes", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
 			quotes, err := session.Kite.Client.GetQuote(instruments...)
 			if err != nil {
-				return mcp.NewToolResultError("Failed to get quotes"), nil
+				return apiErrorResult(err, "Failed to get quotes"), nil
 			}
 
 			return handler.MarshalResponse(quotes, "get_quotes")
@@ -233,7 +233,7 @@ func (*HistoricalDataTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 				oi,
 			)
 			if err != nil {
-				return mcp.NewToolResultError("Failed to get historical data"), nil
+				return apiErrorResult(err, "Failed to get historical data"), nil
 			}
 
 			return handler.MarshalResponse(historicalData, "get_historical_data")
@@ -275,7 +275,7 @@ func (*LTPTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		return handler.WithSession(ctx, "get_ltp", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
 			ltp, err := session.Kite.Client.GetLTP(instruments...)
 			if err != nil {
-				return mcp.NewToolResultError("Failed to get latest trading prices"), nil
+				return apiErrorResult(err, "Failed to get latest trading prices"), nil
 			}
 
 			return handler.MarshalResponse(ltp, "get_ltp")
@@ -317,7 +317,7 @@ func (*OHLCTool) Handler(manager *kc.Manager) server.ToolHandlerFunc {
 		return handler.WithSession(ctx, "get_ohlc", func(session *kc.KiteSessionData) (*mcp.CallToolResult, error) {
 			ohlc, err := session.Kite.Client.GetOHLC(instruments...)
 			if err != nil {
-				return mcp.NewToolResultError("Failed to get OHLC data"), nil
+				return apiErrorResult(err, "Failed to get OHLC data"), nil
 			}
 
 			return handler.MarshalResponse(ohlc, "get_ohlc")
