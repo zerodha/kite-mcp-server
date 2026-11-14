@@ -217,6 +217,15 @@ For other MCP-compatible clients, use the hosted endpoint `https://mcp.kite.trad
 - `modify_gtt_order` - Modify GTT orders
 - `delete_gtt_order` - Delete GTT orders
 
+### Alerts
+
+- `get_alerts` - List price alerts (optionally filtered by status)
+- `get_alert` - Get a specific alert by UUID
+- `get_alert_history` - Get the trigger history of an alert
+- `create_alert` - Create simple or ATO (Alert Triggers Order) alerts
+- `modify_alert` - Modify existing alerts
+- `delete_alerts` - Delete one or more alerts
+
 ## API Coverage
 
 This server implements the majority of Kite Connect API endpoints and also provides additional tools.
