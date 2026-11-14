@@ -33,6 +33,9 @@ func GetAllTools() []Tool {
 		&OrderTradesTool{},
 		&GTTOrdersTool{},
 		&MFHoldingsTool{},
+		&GetAlertsTool{},
+		&GetAlertTool{},
+		&GetAlertHistoryTool{},
 
 		// Tools for market data
 		&QuotesTool{},
@@ -48,6 +51,9 @@ func GetAllTools() []Tool {
 		&PlaceGTTOrderTool{},
 		&ModifyGTTOrderTool{},
 		&DeleteGTTOrderTool{},
+		&CreateAlertTool{},
+		&ModifyAlertTool{},
+		&DeleteAlertsTool{},
 	}
 }
 
