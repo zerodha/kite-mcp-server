@@ -39,6 +39,7 @@ type browserApprovalFixture struct {
 	b              *BrowserApprovals
 	manager        *kc.Manager
 	calls          atomic.Int32
+	loginCalls     atomic.Int32
 	failMutations  atomic.Bool
 	blockMutations atomic.Bool
 	blockHistory   atomic.Bool
@@ -57,6 +58,7 @@ func newBrowserApprovalFixtureWithState(t *testing.T, state storage.State, metri
 	f.manager = approvalTestManagerWithState(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/session/token" {
+			f.loginCalls.Add(1)
 			_ = r.ParseForm()
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]string{"user_id": r.PostForm.Get("request_token"), "access_token": "fresh-access"}})
 			return
@@ -212,7 +214,7 @@ func TestBrowserApprovalWithoutElicitation(t *testing.T) {
 			form := url.Values{"csrf": {csrf}, "decision": {"approve"}}
 			require.Equal(t, http.StatusOK, postBrowserDecision(f.b, id, identity, form, "").Code)
 			require.EqualValues(t, 1, f.calls.Load())
-			require.Equal(t, http.StatusOK, postBrowserDecision(f.b, id, identity, form, "").Code)
+			require.Equal(t, http.StatusForbidden, postBrowserDecision(f.b, id, identity, form, "").Code)
 			require.EqualValues(t, 1, f.calls.Load(), "browser refresh must not replay")
 			status := callBrowserOrder(t, cs, map[string]any{"mode": "approval_status", "approval_id": id})
 			require.Contains(t, status.Content[0].(*sdk.TextContent).Text, `"status":"submitted"`)
@@ -342,8 +344,8 @@ func TestBrowserApprovalTrustAndRevocation(t *testing.T) {
 	require.Equal(t, http.StatusOK, postBrowserDecision(f.b, "manage/approval-test", identity, revoke, "").Code)
 	browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
 	require.EqualValues(t, 2, f.calls.Load())
-	// A replayed management form can revoke but can never enable a permission.
-	require.Equal(t, http.StatusOK, postBrowserDecision(f.b, "manage/approval-test", identity, revoke, "").Code)
+	// A submitted management form cannot authorize another action.
+	require.Equal(t, http.StatusForbidden, postBrowserDecision(f.b, "manage/approval-test", identity, revoke, "").Code)
 }
 
 func TestBrowserApprovalRejectsUntrustedRequests(t *testing.T) {
@@ -376,7 +378,7 @@ func TestBrowserApprovalRejectsUntrustedRequests(t *testing.T) {
 				require.NoError(t, err)
 			case "changed-account":
 				require.NoError(t, f.manager.SessionManager().UpdateCredentials("approval-test", &kc.KiteCredentials{UserID: "other-account", AccessToken: "test-access", ExpiresAt: time.Now().Add(time.Hour)}))
-				require.Equal(t, http.StatusForbidden, browserPage(t, f.b, id, identity).Code)
+				require.Equal(t, http.StatusNotFound, browserPage(t, f.b, id, identity).Code)
 			case "changed-arguments":
 				f.b.pending.Get(id).arguments = json.RawMessage(`{"mode":"place","exchange":"NSE","tradingsymbol":"INFY","transaction_type":"BUY","quantity":2,"product":"CNC","order_type":"LIMIT","price":1500}`)
 			case "changed-history":
@@ -495,13 +497,16 @@ func TestBrowserApprovalCompletedOutcomesDoNotBlockNewReviews(t *testing.T) {
 			f := newBrowserApprovalFixture(t)
 			cs, _ := f.connect(t, "approval-test", "Pi", "2025-11-25")
 			now := time.Now()
+			_, _, err := f.manager.SessionManager().GetOrCreate("other")
+			require.NoError(t, err)
+			require.NoError(t, f.manager.SessionManager().UpdateCredentials("other", &kc.KiteCredentials{UserID: "other-user", AccessToken: "test-access", ExpiresAt: now.Add(time.Hour)}))
 			for i := 0; i < maxPendingTradeApprovals; i++ {
 				id := randomApprovalSecret()
 				status := "approval_required"
 				if terminal {
 					status = "submitted"
 				}
-				f.b.pending.Set(id, &browserOrder{id: id, session: "other", status: status, expires: now.Add(time.Minute), retainUntil: now.Add(10 * time.Minute)})
+				f.b.pending.Set(id, &browserOrder{id: id, session: "other", user: "other-user", status: status, expires: now.Add(time.Minute), retainUntil: now.Add(10 * time.Minute)})
 			}
 			result := callBrowserOrder(t, cs, browserOrderArgs())
 			if terminal {

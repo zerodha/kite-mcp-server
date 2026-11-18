@@ -16,8 +16,10 @@ import (
 type approvalContextKey struct{}
 
 const (
-	maxPendingTradeApprovals           = 1024
-	maxPendingTradeApprovalsPerSession = 8
+	maxPendingTradeApprovals             = 1024
+	maxSavedTradeApprovals               = 1024
+	maxPendingTradeApprovalsPerSession   = 8
+	maxPendingBrowserApprovalsPerAccount = 32
 )
 
 type pendingTradeApproval struct {

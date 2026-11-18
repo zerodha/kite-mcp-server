@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"hash/maphash"
 	"net"
 	"net/http"
 	"net/netip"
@@ -17,6 +18,7 @@ import (
 type limiterEntry struct {
 	limiter    *rate.Limiter
 	lastAccess time.Time
+	networks   [2]string
 }
 
 // RateLimiter manages rate limiting for incoming requests.
@@ -26,18 +28,23 @@ type RateLimiter struct {
 	cleanupCancel  context.CancelFunc
 	cleanupRunning bool
 	trustedProxies []netip.Prefix
-	overflow       *rate.Limiter
+	overflow       [1024]*rate.Limiter
+	seed           maphash.Seed
+	networkPeers   map[string]int
 }
 
 const maxRateLimitPeers = 10000
+const maxPeersPerNetwork = 256
+const maxPeersPerIPv6Subnet = 32
 
 // NewRateLimiter creates a new rate limiter manager.
 // Trusted proxy CIDRs are optional. X-Forwarded-For is used only when the
 // direct peer belongs to one of them, so clients cannot choose their own key.
 func NewRateLimiter(trustedProxyCIDRs ...string) *RateLimiter {
 	m := &RateLimiter{
-		limiters: storage.NewMemory[string, *limiterEntry](),
-		overflow: rate.NewLimiter(rate.Every(12*time.Second), 5),
+		limiters:     storage.NewMemory[string, *limiterEntry](),
+		seed:         maphash.MakeSeed(),
+		networkPeers: make(map[string]int),
 	}
 	for _, cidr := range trustedProxyCIDRs {
 		if prefix, err := netip.ParsePrefix(strings.TrimSpace(cidr)); err == nil {
@@ -78,21 +85,34 @@ func (m *RateLimiter) isTrustedProxy(peer netip.Addr) bool {
 func (m *RateLimiter) getLimiter(ip string) *rate.Limiter {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	ip = rateLimitKey(ip)
+	networks := rateLimitNetworks(ip)
 
 	entry, exists := m.limiters.Lookup(ip)
 	if !exists {
-		// Share a bounded overflow bucket instead of allocating indefinitely or
-		// evicting active peers and resetting their rate limits.
-		if m.limiters.Len() >= maxRateLimitPeers {
-			return m.overflow
+		// Limit table occupancy per /48 and /56 so address rotation in one
+		// allocation cannot consume all dedicated peer buckets. Spillover from
+		// a network uses one keyed bucket, rather than draining every shard.
+		if m.limiters.Len() >= maxRateLimitPeers || m.networkPeers[networks[0]] >= maxPeersPerNetwork || (networks[1] != "" && m.networkPeers[networks[1]] >= maxPeersPerIPv6Subnet) {
+			index := maphash.String(m.seed, networks[0]) % uint64(len(m.overflow))
+			if m.overflow[index] == nil {
+				m.overflow[index] = rate.NewLimiter(rate.Every(12*time.Second), 5)
+			}
+			return m.overflow[index]
 		}
-		// Allow 5 requests every 12 seconds.
+		// Refill one request every 12 seconds, with a burst of five.
 		limiter := rate.NewLimiter(rate.Every(12*time.Second), 5)
 		entry = &limiterEntry{
 			limiter:    limiter,
 			lastAccess: time.Now(),
+			networks:   networks,
 		}
 		m.limiters.Set(ip, entry)
+		for _, key := range networks {
+			if key != "" {
+				m.networkPeers[key]++
+			}
+		}
 
 		// Start cleanup goroutine if not already running
 		if !m.cleanupRunning {
@@ -104,6 +124,34 @@ func (m *RateLimiter) getLimiter(ip string) *rate.Limiter {
 	}
 
 	return entry.limiter
+}
+
+func rateLimitKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	addr = addr.Unmap()
+	if addr.Is6() {
+		return netip.PrefixFrom(addr, 64).Masked().String()
+	}
+	return addr.String()
+}
+
+func rateLimitNetworks(key string) [2]string {
+	addr, err := netip.ParseAddr(key)
+	if err != nil {
+		if prefix, parseErr := netip.ParsePrefix(key); parseErr == nil {
+			addr = prefix.Addr()
+		} else {
+			return [2]string{key}
+		}
+	}
+	addr = addr.Unmap()
+	if addr.Is6() {
+		return [2]string{netip.PrefixFrom(addr, 48).Masked().String(), netip.PrefixFrom(addr, 56).Masked().String()}
+	}
+	return [2]string{netip.PrefixFrom(addr, 24).Masked().String()}
 }
 
 // Shutdown stops background cleanup when the HTTP server is closed.
@@ -152,9 +200,10 @@ func (m *RateLimiter) startCleanup() {
 
 // cleanupRoutine periodically removes inactive rate limiters
 func (m *RateLimiter) cleanupRoutine(ctx context.Context) {
-	// Clean up limiters that haven't been used for 1 hour
-	const maxIdleTime = time.Hour
-	const cleanupInterval = 30 * time.Minute
+	// After a minute an idle bucket has refilled completely; forgetting it
+	// cannot grant additional requests and need not retain a slot for an hour.
+	const maxIdleTime = time.Minute
+	const cleanupInterval = time.Minute
 
 	ticker := time.NewTicker(cleanupInterval)
 	defer ticker.Stop()
@@ -184,6 +233,14 @@ func (m *RateLimiter) cleanupInactive(maxIdleTime time.Duration) {
 	}
 
 	for _, ip := range toDelete {
+		for _, key := range m.limiters.Get(ip).networks {
+			if key != "" {
+				m.networkPeers[key]--
+				if m.networkPeers[key] == 0 {
+					delete(m.networkPeers, key)
+				}
+			}
+		}
 		m.limiters.Delete(ip)
 	}
 

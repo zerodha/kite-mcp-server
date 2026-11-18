@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -52,6 +53,12 @@ func TestReviewLoginRejectsForgedExpiredAndReplayedCallbacks(t *testing.T) {
 				q.Add("request_token", "other")
 			case "expired":
 				flow.expires = time.Now().Add(-time.Second)
+				_, snapshot := flow.SessionData()
+				encoded, err := json.Marshal(snapshot)
+				require.NoError(t, err)
+				token, err := f.manager.SessionSigner().SealReviewAuthorization(encoded)
+				require.NoError(t, err)
+				q.Set("session_id", f.manager.SessionSigner().SignSessionID(token))
 			case "logout":
 				_, err = f.manager.SessionManager().Terminate("approval-test")
 				require.NoError(t, err)
@@ -74,7 +81,11 @@ func TestReviewLoginRejectsForgedExpiredAndReplayedCallbacks(t *testing.T) {
 				w = httptest.NewRecorder()
 				handlers.HandleCallback(w, req)
 			}
-			require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+			expected := http.StatusForbidden
+			if scenario == "expired" {
+				expected = http.StatusBadRequest
+			}
+			require.Equal(t, expected, w.Code)
 			require.NotContains(t, w.Body.String(), `name="csrf"`)
 			require.False(t, flow.verified && scenario != "replay")
 		})

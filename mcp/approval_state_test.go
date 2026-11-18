@@ -79,7 +79,7 @@ func TestBrowserReviewSurvivesRestartsBeforeCallbackAndBeforeSubmit(t *testing.T
 	require.Equal(t, "submitted", f.b.pending.Get(id).status)
 	require.NotNil(t, f.b.pending.Get(id).result)
 	require.Zero(t, f.b.permissions.Len(), "ordinary approval must not create an empty permission record")
-	require.Equal(t, http.StatusOK, postBrowserDecision(f.b, id, nil, url.Values{"csrf": {proof}, "decision": {"approve"}}, "").Code)
+	require.Equal(t, http.StatusForbidden, postBrowserDecision(f.b, id, nil, url.Values{"csrf": {proof}, "decision": {"approve"}}, "").Code)
 	require.Zero(t, f.calls.Load(), "replayed form after restart must not submit")
 	replay := httptest.NewRecorder()
 	oauth.NewHandlers(f.b.oauth, f.manager, f.manager.Logger).HandleCallback(replay, callback)

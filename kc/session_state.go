@@ -126,8 +126,20 @@ func (sm *SessionManager) RegisterSessionData(kind string, decode func(string, j
 			return err
 		}
 		session.OAuthData = decoded
+		if review, ok := decoded.(ReviewAuthorization); ok {
+			_, deadline := review.ReviewAuthorization()
+			if deadline.Before(session.ExpiresAt) {
+				session.ExpiresAt = deadline
+			}
+			if err := sm.persistLocked(session); err != nil {
+				return err
+			}
+			sm.pendingAuth.Delete(id)
+			sm.pendingReviews.Set(id, session.ExpiresAt)
+		}
 	}
-	return nil
+	_, err := sm.cleanupExpiredLocked(time.Now(), true)
+	return err
 }
 
 func (sm *SessionManager) PersistSessionData(id string) error {
@@ -181,9 +193,18 @@ func (sm *SessionManager) cleanupExpiredLocked(now time.Time, pendingOnly bool) 
 				next = expiry
 			}
 		}
+		for id := range sm.pendingReviews.All() {
+			session := sm.sessions.Get(id)
+			if session == nil || !sm.reviewActiveLocked(session, now) {
+				pendingIDs = append(pendingIDs, id)
+				if session != nil {
+					expired = append(expired, session)
+				}
+			}
+		}
 	} else {
 		for id, session := range sm.sessions.All() {
-			if !now.Before(session.ExpiresAt) {
+			if !now.Before(session.ExpiresAt) || !sm.reviewActiveLocked(session, now) {
 				expired = append(expired, session)
 				pendingIDs = append(pendingIDs, id)
 			}
@@ -209,9 +230,20 @@ func (sm *SessionManager) cleanupExpiredLocked(now time.Time, pendingOnly bool) 
 	}
 	for _, id := range pendingIDs {
 		sm.pendingAuth.Delete(id)
+		sm.pendingReviews.Delete(id)
 	}
 	if pendingOnly {
 		sm.nextAuthExpiry = next
 	}
 	return len(expired), nil
+}
+
+func (sm *SessionManager) reviewActiveLocked(session *Session, now time.Time) bool {
+	review, ok := session.OAuthData.(ReviewAuthorization)
+	if !ok {
+		return true
+	}
+	owner, deadline := review.ReviewAuthorization()
+	grant := sm.sessions.Get(owner)
+	return !session.Terminated && now.Before(session.ExpiresAt) && now.Before(deadline) && grant != nil && !grant.Terminated && grant.Credentials != nil && now.Before(grant.ExpiresAt)
 }

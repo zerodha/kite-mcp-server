@@ -63,14 +63,15 @@ func TestBrowserApprovalSaveKeepsExistingBroadPermissionVisible(t *testing.T) {
 }
 
 func TestBrowserApprovalSaveExpiryConcurrentGET(t *testing.T) {
-	f := newBrowserApprovalFixture(t)
 	// A save extends the mutable expiry while another browser opens the same
 	// approval. Run with -race to cover the GET handler's expiry snapshot.
 	for attempt := 0; attempt < 30; attempt++ {
+		f := newBrowserApprovalFixture(t)
 		p := &browserOrder{id: randomApprovalSecret(), session: "approval-test", user: "user", clientName: "Pi", operation: "orders_place", status: "approval_required", expires: time.Now().Add(time.Minute), retainUntil: time.Now().Add(time.Hour), snapshot: []byte(`{"parameters":{"quantity":"1"}}`)}
 		f.b.mu.Lock()
 		f.b.pending.Set(p.id, p)
 		f.b.mu.Unlock()
+		proof := pageCSRF(t, browserPage(t, f.b, p.id, &reviewTestIdentity{user: "user"}))
 		var wg sync.WaitGroup
 		start := make(chan struct{})
 		for i := 0; i < 20; i++ {
@@ -87,7 +88,7 @@ func TestBrowserApprovalSaveExpiryConcurrentGET(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			r := httptest.NewRequest(http.MethodPost, f.b.approvalURL(p.id), strings.NewReader("decision=save"))
+			r := httptest.NewRequest(http.MethodPost, f.b.approvalURL(p.id), strings.NewReader(url.Values{"decision": {"save"}, "csrf": {proof}}.Encode()))
 			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			f.b.decide(outcome, r, p)
 		}()
@@ -95,8 +96,8 @@ func TestBrowserApprovalSaveExpiryConcurrentGET(t *testing.T) {
 		wg.Wait()
 		require.Equal(t, http.StatusOK, outcome.Code)
 		require.Equal(t, "approved_for_later", p.status)
+		require.Zero(t, f.calls.Load())
 	}
-	require.Zero(t, f.calls.Load())
 }
 
 func TestBrowserApprovalSaveDisclosesItsOwnDeadline(t *testing.T) {

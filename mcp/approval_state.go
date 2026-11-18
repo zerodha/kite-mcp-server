@@ -99,16 +99,42 @@ func (b *BrowserApprovals) RestoreState() error {
 			return err
 		}
 	}
-	return b.manager.SessionManager().RegisterSessionData("order_review", func(id string, data json.RawMessage) (any, error) {
-		var p reviewLoginState
-		if json.Unmarshal(data, &p) != nil || p.Session == "" || p.Secret == "" || p.Expires.IsZero() {
-			return nil, errors.New("invalid stored order review login")
+	if err := b.manager.SessionManager().RegisterStatelessAuthorization(kc.ReviewAuthorizationPrefix, func(id string) (any, time.Time, error) {
+		data, err := b.manager.SessionSigner().OpenReviewAuthorization(id)
+		if err != nil {
+			return nil, time.Time{}, err
 		}
-		return &reviewLogin{broker: b, id: id, target: p.Target, session: p.Session, user: p.User, state: p.State, secret: p.Secret, previous: p.Previous.Restore(), expires: p.Expires, consumed: p.Consumed, verified: p.Verified}, nil
-	})
+		flow, err := b.decodeReviewLogin(id, data)
+		if err != nil {
+			return nil, time.Time{}, err
+		}
+		if flow.consumed || flow.verified {
+			return nil, time.Time{}, errors.New("invalid sealed review state")
+		}
+		return flow, flow.expires, nil
+	}); err != nil {
+		return err
+	}
+	return b.manager.SessionManager().RegisterSessionData("order_review", func(id string, data json.RawMessage) (any, error) { return b.decodeReviewLogin(id, data) })
+}
+
+func (b *BrowserApprovals) decodeReviewLogin(id string, data []byte) (*reviewLogin, error) {
+	var p reviewLoginState
+	if json.Unmarshal(data, &p) != nil || p.Session == "" || p.User == "" || p.Secret == "" || p.State == "" || p.Expires.IsZero() || p.Previous.Credentials == nil || p.Previous.Credentials.UserID != p.User {
+		return nil, errors.New("invalid stored order review login")
+	}
+	// Older formats allocated unauthenticated flows. Retire them on upgrade.
+	if p.Version < 3 {
+		p.Expires = time.Now().Add(-time.Second)
+		p.Verified = false
+	} else if p.Version != 3 {
+		return nil, errors.New("unsupported stored order review login version")
+	}
+	return &reviewLogin{broker: b, id: id, target: p.Target, session: p.Session, user: p.User, state: p.State, secret: p.Secret, previous: p.Previous.Restore(), expires: p.Expires, consumed: p.Consumed, verified: p.Verified}, nil
 }
 
 type reviewLoginState struct {
+	Version                              int
 	Target, Session, User, State, Secret string
 	Previous                             kc.CredentialSnapshot
 	Expires                              time.Time
@@ -116,5 +142,5 @@ type reviewLoginState struct {
 }
 
 func (f *reviewLogin) SessionData() (string, any) {
-	return "order_review", reviewLoginState{f.target, f.session, f.user, f.state, f.secret, kc.SnapshotCredentials(f.previous), f.expires, f.consumed, f.verified}
+	return "order_review", reviewLoginState{Version: 3, Target: f.target, Session: f.session, User: f.user, State: f.state, Secret: f.secret, Previous: kc.SnapshotCredentials(f.previous), Expires: f.expires, Consumed: f.consumed, Verified: f.verified}
 }

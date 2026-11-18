@@ -35,6 +35,8 @@ The assistant must not start another review unless you ask it to.
 
 Links expire after five minutes. Approval permits one submission; it does not
 guarantee exchange execution. Cancelling an order does not reverse existing fills.
+Each submitted review or revocation form can be used once. Open the link and
+sign in again to make another decision.
 
 ## Approve an exact order for later
 
@@ -49,9 +51,17 @@ when every reviewed order detail matches. Changed details need a new approval
 unless you have already allowed this client to place any future order without
 asking. Saving an exact-order approval does not turn off that wider permission.
 The approval is consumed by one submission attempt, including a failed or
-uncertain attempt. It expires with the login session or server restart and can
+uncertain attempt. It expires with the login session and can
 be revoked in order approval settings. This does not schedule an order or
 monitor the market for a condition.
+
+You can have up to eight pending or saved browser approvals per connection,
+and up to 32 across all connections for the same Kite account. Finish or revoke
+an existing approval before requesting another when you reach the limit.
+The service limits saved approvals separately, so they cannot occupy the
+capacity reserved for new browser reviews.
+Logging out removes unused approvals and future-order permission for that
+connection. Orders already submitted are unaffected.
 
 `approval_status` returns `approved_for_later` while the approval is unused,
 with its expiry and a link to revoke it. This status means no order was placed.

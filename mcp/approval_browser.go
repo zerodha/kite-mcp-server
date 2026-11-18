@@ -60,6 +60,7 @@ type BrowserApprovals struct {
 	oauth       *oauth.Server
 	page        *template.Template
 	loginLimit  *oauth.RateLimiter
+	loginLocks  [64]sync.Mutex
 }
 
 func NewBrowserApprovals(manager *kc.Manager, server *oauth.Server) *BrowserApprovals {
@@ -136,7 +137,25 @@ func randomApprovalSecret() string {
 }
 
 func (b *BrowserApprovals) cleanupLocked(now time.Time) error {
+	if err := storage.Check(b.state); err != nil {
+		return err
+	}
 	for id, p := range b.pending.All() {
+		// An approval cannot outlive its backing grant. Reclaim old persisted
+		// records too, without discarding in-flight or uncertain outcomes.
+		if p.status == "approval_required" || p.status == "approved_for_later" {
+			session, err := b.manager.SessionManager().Get(p.session)
+			if err != nil || session.Terminated || session.Credentials == nil || session.Credentials.UserID != p.user || !now.Before(session.ExpiresAt) {
+				if err := storage.Check(b.manager.StateStore()); err != nil {
+					return err
+				}
+				if err := storage.Delete(b.state, "browser_orders", id); err != nil {
+					return err
+				}
+				b.pending.Delete(id)
+				continue
+			}
+		}
 		if err := b.expireOrderLocked(p, now); err != nil {
 			return err
 		}
@@ -148,7 +167,11 @@ func (b *BrowserApprovals) cleanupLocked(now time.Time) error {
 		}
 	}
 	for id, p := range b.permissions.All() {
-		if !now.Before(p.expires) {
+		_, sessionErr := b.manager.SessionExpiry(id)
+		if !now.Before(p.expires) || sessionErr != nil {
+			if err := storage.Check(b.manager.StateStore()); err != nil {
+				return err
+			}
 			if p.allowed {
 				b.metricEvent("permissions", "permission_expired")
 				audit.Record(b.manager.Logger, "order_permission_expired", audit.Actor{UserID: p.user, SessionID: id, ClientID: p.client}, "scope", "all_orders", "expires_at", p.expires.UTC().Format(time.RFC3339))
@@ -199,18 +222,26 @@ func (b *BrowserApprovals) request(ctx context.Context, req *sdk.CallToolRequest
 	if err := b.cleanupLocked(now); err != nil {
 		return nil, err
 	}
-	active := 0
+	active, accountActive, reviewRecords := 0, 0, 0
 	for _, existing := range b.pending.All() {
-		if existing.session == c.SessionID && (existing.status == "approval_required" || existing.status == "approved_for_later") && now.Before(existing.expires) {
-			active++
+		if existing.status != "approved_for_later" {
+			reviewRecords++
+		}
+		if (existing.status == "approval_required" || existing.status == "approved_for_later") && now.Before(existing.expires) {
+			if existing.session == c.SessionID {
+				active++
+			}
+			if existing.user == c.KiteUserID {
+				accountActive++
+			}
 		}
 	}
-	if active >= maxPendingTradeApprovalsPerSession {
+	if active >= maxPendingTradeApprovalsPerSession || accountActive >= maxPendingBrowserApprovalsPerAccount {
 		return approvalFailure("busy", "Too many order approvals. Finish an existing request before starting another; no transaction was executed."), nil
 	}
 	// Completed outcomes are retained for lookup, but must not consume every
 	// slot needed by new reviews. Reclaim the oldest terminal record at capacity.
-	if b.pending.Len() >= maxPendingTradeApprovals {
+	if reviewRecords >= maxPendingTradeApprovals {
 		var oldest *browserOrder
 		for _, existing := range b.pending.All() {
 			if existing.status == "approval_required" && !now.Before(existing.expires) {
@@ -431,9 +462,6 @@ func (b *BrowserApprovals) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost {
-		if !b.verifyReviewForm(w, r, id, p.session, p.user) {
-			return
-		}
 		b.decide(w, r, p)
 		return
 	}
@@ -516,6 +544,9 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 		http.Error(w, "Save approval only applies to this exact new order", http.StatusBadRequest)
 		return
 	}
+	if !b.verifyReviewForm(w, r, p.id, p.session, p.user) {
+		return
+	}
 	b.mu.Lock()
 	if p.status != "approval_required" || !time.Now().Before(p.expires) {
 		data := b.orderPageLocked(p)
@@ -537,6 +568,17 @@ func (b *BrowserApprovals) decide(w http.ResponseWriter, r *http.Request, p *bro
 		return
 	}
 	if decision == "save" {
+		savedCount := 0
+		for _, existing := range b.pending.All() {
+			if existing.status == "approved_for_later" {
+				savedCount++
+			}
+		}
+		if savedCount >= maxSavedTradeApprovals {
+			b.mu.Unlock()
+			b.render(w, http.StatusTooManyRequests, browserOrderPage{Title: "Saved approval limit reached", Message: "There is no room for another saved approval. No order was placed. Reopen this review to place the order now, or try saving it later.", RetryURL: b.approvalURL(p.id)})
+			return
+		}
 		deadline, err := b.manager.SessionExpiry(p.session)
 		if err != nil {
 			b.mu.Unlock()
@@ -643,11 +685,15 @@ func (b *BrowserApprovals) manage(w http.ResponseWriter, r *http.Request, sessio
 
 	if r.Method == http.MethodPost {
 		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		if !b.verifyReviewForm(w, r, "manage/"+sessionID, sessionID, session.Credentials.UserID) {
+		if r.ParseForm() != nil {
+			http.Error(w, "Invalid permission form", http.StatusForbidden)
 			return
 		}
 		if len(r.PostForm["decision"]) != 1 || r.PostForm.Get("decision") != "revoke" {
 			http.Error(w, "Invalid permission form", http.StatusForbidden)
+			return
+		}
+		if !b.verifyReviewForm(w, r, "manage/"+sessionID, sessionID, session.Credentials.UserID) {
 			return
 		}
 		b.mu.Lock()

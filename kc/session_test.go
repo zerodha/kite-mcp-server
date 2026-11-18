@@ -603,3 +603,115 @@ func TestPendingAuthorizationDeletionReleasesAdmission(t *testing.T) {
 		})
 	}
 }
+
+type testReviewAuthorization struct {
+	owner   string
+	expires time.Time
+}
+
+func (r testReviewAuthorization) ReviewAuthorization() (string, time.Time) { return r.owner, r.expires }
+
+func TestReviewAdmissionIsIsolatedBoundedAndReclaimed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sm := NewSessionManager(testLogger())
+		owner := sm.Generate()
+		if err := sm.UpdateCredentials(owner, &KiteCredentials{UserID: "user", AccessToken: "access", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+		for range maxPendingAuthorizations {
+			if _, err := sm.GeneratePendingAuthorization("oauth"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		review := testReviewAuthorization{owner, time.Now().Add(5 * time.Minute)}
+		var first string
+		for range maxPendingReviewsPerOwner {
+			id, err := sm.GeneratePendingAuthorization(review)
+			if err != nil {
+				t.Fatal("OAuth flood blocked review admission", err)
+			}
+			first = id
+		}
+		if _, err := sm.GeneratePendingAuthorization(review); !errors.Is(err, ErrPendingAuthorizationLimit) {
+			t.Fatal("owner limit not enforced", err)
+		}
+		flow, err := sm.Get(first)
+		if err != nil || !flow.ExpiresAt.Equal(review.expires) {
+			t.Fatal("review lifetime exceeds form deadline", err)
+		}
+		if _, err := sm.Terminate(first); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sm.GeneratePendingAuthorization(review); err != nil {
+			t.Fatal("completed slot not released", err)
+		}
+		time.Sleep(5 * time.Minute)
+		review.expires = time.Now().Add(5 * time.Minute)
+		if _, err := sm.GeneratePendingAuthorization(review); err != nil {
+			t.Fatal("expired reviews not reclaimed", err)
+		}
+		if sm.pendingReviews.Len() != 1 || sm.pendingAuth.Len() != maxPendingAuthorizations {
+			t.Fatal("wrong pool reclaimed")
+		}
+		if _, err := sm.Terminate(owner); err != nil {
+			t.Fatal(err)
+		}
+		sm.CleanupExpiredSessions()
+		if sm.pendingReviews.Len() != 0 {
+			t.Fatal("logout left orphan review sessions")
+		}
+	})
+}
+
+func TestReviewFloodCannotFillOAuthPool(t *testing.T) {
+	sm := NewSessionManager(testLogger())
+	var review testReviewAuthorization
+	for i := 0; i < maxPendingReviewAuthorizations/maxPendingReviewsPerOwner; i++ {
+		owner := sm.Generate()
+		if err := sm.UpdateCredentials(owner, &KiteCredentials{UserID: owner, AccessToken: "access", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+		review = testReviewAuthorization{owner, time.Now().Add(5 * time.Minute)}
+		for range maxPendingReviewsPerOwner {
+			if _, err := sm.GeneratePendingAuthorization(review); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := sm.GeneratePendingAuthorization(review); !errors.Is(err, ErrPendingAuthorizationLimit) {
+		t.Fatal("review capacity unbounded", err)
+	}
+	if _, err := sm.GeneratePendingAuthorization("oauth"); err != nil {
+		t.Fatal("review flood blocked OAuth admission", err)
+	}
+}
+
+func TestReviewAdmissionLimitsAccountAcrossGrants(t *testing.T) {
+	sm := NewSessionManager(testLogger())
+	var review testReviewAuthorization
+	for i := 0; i < maxPendingReviewsPerAccount/maxPendingReviewsPerOwner; i++ {
+		owner := sm.Generate()
+		if err := sm.UpdateCredentials(owner, &KiteCredentials{UserID: "same-user", AccessToken: "access", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+		review = testReviewAuthorization{owner, time.Now().Add(5 * time.Minute)}
+		for range maxPendingReviewsPerOwner {
+			if _, err := sm.GeneratePendingAuthorization(review); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	owner := sm.Generate()
+	if err := sm.UpdateCredentials(owner, &KiteCredentials{UserID: "same-user", AccessToken: "access", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sm.GeneratePendingAuthorization(testReviewAuthorization{owner, time.Now().Add(5 * time.Minute)}); !errors.Is(err, ErrPendingAuthorizationLimit) {
+		t.Fatal("new grant bypassed account quota", err)
+	}
+	if err := sm.UpdateCredentials(owner, &KiteCredentials{UserID: "another-user", AccessToken: "access", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sm.GeneratePendingAuthorization(testReviewAuthorization{owner, time.Now().Add(5 * time.Minute)}); err != nil {
+		t.Fatal("unrelated account blocked", err)
+	}
+}

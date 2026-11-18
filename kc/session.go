@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,10 +17,13 @@ const (
 	// Keep the backing session alive for at least the default OAuth token
 	// lifetime. Callers that configure longer-lived tokens should pass that
 	// duration through NewSessionManagerWithDuration.
-	DefaultSessionDuration        = 7 * 24 * time.Hour
-	DefaultPendingSessionDuration = 10 * time.Minute
-	DefaultCleanupInterval        = 30 * time.Minute
-	maxPendingAuthorizations      = 10000
+	DefaultSessionDuration         = 7 * 24 * time.Hour
+	DefaultPendingSessionDuration  = 10 * time.Minute
+	DefaultCleanupInterval         = 30 * time.Minute
+	maxPendingAuthorizations       = 10000
+	maxPendingReviewAuthorizations = 1024
+	maxPendingReviewsPerOwner      = 8
+	maxPendingReviewsPerAccount    = 32
 
 	// Error messages
 	errSessionNotFound        = "session ID not found"
@@ -29,6 +33,13 @@ const (
 
 // ErrPendingAuthorizationLimit means all pending OAuth flow slots are occupied.
 var ErrPendingAuthorizationLimit = errors.New("too many pending authorizations")
+
+// ReviewAuthorization identifies a short-lived proof for an existing grant.
+// Browser proofs are admitted only after matching-account sign-in succeeds.
+// Their admission pool is separate from unauthenticated OAuth consent flows.
+type ReviewAuthorization interface {
+	ReviewAuthorization() (owner string, expires time.Time)
+}
 
 // Session represents a single, long-lived user/client session.
 type Session struct {
@@ -44,16 +55,18 @@ type Session struct {
 
 // SessionManager manages all active sessions.
 type SessionManager struct {
-	state           storage.State
-	sessions        storage.Records[string, *Session]
-	pendingAuth     storage.Records[string, time.Time]
-	nextAuthExpiry  time.Time
-	mu              sync.RWMutex
-	sessionDuration time.Duration
-	cleanupHooks    []CleanupHook
-	cleanupContext  context.Context
-	cleanupCancel   context.CancelFunc
-	logger          *slog.Logger
+	state                   storage.State
+	sessions                storage.Records[string, *Session]
+	pendingAuth             storage.Records[string, time.Time]
+	pendingReviews          storage.Records[string, time.Time]
+	statelessAuthorizations map[string]func(string) (any, time.Time, error)
+	nextAuthExpiry          time.Time
+	mu                      sync.RWMutex
+	sessionDuration         time.Duration
+	cleanupHooks            []CleanupHook
+	cleanupContext          context.Context
+	cleanupCancel           context.CancelFunc
+	logger                  *slog.Logger
 }
 
 // CleanupHook is called when a session is terminated or expires.
@@ -72,13 +85,15 @@ func NewSessionManagerWithDuration(logger *slog.Logger, sessionDuration time.Dur
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &SessionManager{
-		sessions:        storage.NewMemory[string, *Session](),
-		pendingAuth:     storage.NewMemory[string, time.Time](),
-		sessionDuration: sessionDuration,
-		cleanupHooks:    make([]CleanupHook, 0),
-		cleanupContext:  ctx,
-		cleanupCancel:   cancel,
-		logger:          logger,
+		sessions:                storage.NewMemory[string, *Session](),
+		pendingAuth:             storage.NewMemory[string, time.Time](),
+		pendingReviews:          storage.NewMemory[string, time.Time](),
+		statelessAuthorizations: make(map[string]func(string) (any, time.Time, error)),
+		sessionDuration:         sessionDuration,
+		cleanupHooks:            make([]CleanupHook, 0),
+		cleanupContext:          ctx,
+		cleanupCancel:           cancel,
+		logger:                  logger,
 	}
 }
 
@@ -103,6 +118,40 @@ func (sm *SessionManager) GeneratePendingAuthorization(initialData any) (string,
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	now := time.Now()
+	if review, ok := initialData.(ReviewAuthorization); ok {
+		owner, expires := review.ReviewAuthorization()
+		grant := sm.sessions.Get(owner)
+		if grant == nil || grant.Terminated || grant.Credentials == nil || !now.Before(grant.ExpiresAt) || !now.Before(expires) {
+			return "", errors.New("review grant unavailable")
+		}
+		// Reclaim abandoned reviews at admission, including those whose parent
+		// grant ended. OAuth admission never counts these review slots.
+		if _, err := sm.cleanupExpiredLocked(now, true); err != nil {
+			return "", err
+		}
+		owned, accountOwned := 0, 0
+		for id := range sm.pendingReviews.All() {
+			if pending := sm.sessions.Get(id); pending != nil {
+				if data, ok := pending.OAuthData.(ReviewAuthorization); ok {
+					parent, _ := data.ReviewAuthorization()
+					if parent == owner {
+						owned++
+					}
+					if parentGrant := sm.sessions.Get(parent); parentGrant != nil && parentGrant.Credentials != nil && parentGrant.Credentials.UserID == grant.Credentials.UserID {
+						accountOwned++
+					}
+				}
+			}
+		}
+		if sm.pendingReviews.Len() >= maxPendingReviewAuthorizations || owned >= maxPendingReviewsPerOwner || accountOwned >= maxPendingReviewsPerAccount {
+			return "", ErrPendingAuthorizationLimit
+		}
+		id, err := sm.generateWithDataLocked(initialData)
+		if err == nil {
+			sm.pendingReviews.Set(id, sm.sessions.Get(id).ExpiresAt)
+		}
+		return id, err
+	}
 	if sm.pendingAuth.Len() >= maxPendingAuthorizations && !now.Before(sm.nextAuthExpiry) {
 		if _, err := sm.cleanupExpiredLocked(now, true); err != nil {
 			return "", err
@@ -129,6 +178,15 @@ func (sm *SessionManager) generateWithDataLocked(initialData any) (string, error
 	expiresAt := now.Add(sm.sessionDuration)
 	if initialData != nil {
 		expiresAt = now.Add(DefaultPendingSessionDuration)
+	}
+	if review, ok := initialData.(ReviewAuthorization); ok {
+		owner, deadline := review.ReviewAuthorization()
+		if deadline.Before(expiresAt) {
+			expiresAt = deadline
+		}
+		if grant := sm.sessions.Get(owner); grant != nil && grant.ExpiresAt.Before(expiresAt) {
+			expiresAt = grant.ExpiresAt
+		}
 	}
 
 	session := &Session{
@@ -180,6 +238,7 @@ func (sm *SessionManager) GetOrCreate(sessionID string) (*Session, bool, error) 
 			}
 			sm.sessions.Delete(sessionID)
 			sm.pendingAuth.Delete(sessionID)
+			sm.pendingReviews.Delete(sessionID)
 			// Fall through to create new session
 		} else if session.Terminated {
 			return nil, false, errors.New("session is terminated")
@@ -234,6 +293,7 @@ func (sm *SessionManager) Terminate(sessionID string) (bool, error) {
 	}
 	sm.sessions.Delete(sessionID)
 	sm.pendingAuth.Delete(sessionID)
+	sm.pendingReviews.Delete(sessionID)
 	return true, nil
 }
 
@@ -252,6 +312,18 @@ func (sm *SessionManager) Get(sessionID string) (*Session, error) {
 
 	session, exists := sm.sessions.Lookup(sessionID)
 	if !exists {
+		for prefix, decode := range sm.statelessAuthorizations {
+			if strings.HasPrefix(sessionID, prefix) {
+				data, expires, err := decode(sessionID)
+				if err != nil {
+					return nil, err
+				}
+				if !time.Now().Before(expires) {
+					return nil, errors.New("authorization expired")
+				}
+				return &Session{ID: sessionID, ExpiresAt: expires, OAuthData: data}, nil
+			}
+		}
 		return nil, errors.New(errSessionNotFound)
 	}
 
@@ -348,6 +420,7 @@ func (sm *SessionManager) terminateRejectedRefresh(sessionID string, generation 
 	}
 	sm.sessions.Delete(sessionID)
 	sm.pendingAuth.Delete(sessionID)
+	sm.pendingReviews.Delete(sessionID)
 }
 
 // rejectAccessToken invalidates only the credential version that was rejected.
@@ -462,6 +535,7 @@ func (sm *SessionManager) Validate(sessionID string) (bool, error) {
 		}
 		sm.sessions.Delete(sessionID)
 		sm.pendingAuth.Delete(sessionID)
+		sm.pendingReviews.Delete(sessionID)
 		return true, nil
 	}
 
@@ -498,4 +572,16 @@ func copyCredentials(original *KiteCredentials) *KiteCredentials {
 		ExpiresAt:    original.ExpiresAt,
 		generation:   original.generation,
 	}
+}
+
+// RegisterStatelessAuthorization routes sealed callback state without admitting
+// a pending session. Decoders run under a read lock and must not call managers.
+func (sm *SessionManager) RegisterStatelessAuthorization(prefix string, decode func(string) (any, time.Time, error)) error {
+	if prefix == "" || decode == nil {
+		return errors.New("invalid stateless authorization decoder")
+	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.statelessAuthorizations[prefix] = decode
+	return nil
 }

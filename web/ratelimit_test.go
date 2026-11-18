@@ -55,13 +55,53 @@ func TestPeerFloodDoesNotResetExistingRateLimits(t *testing.T) {
 			t.Fatalf("overflow request rejected before shared burst was used: %d", got)
 		}
 	}
-	if got := request("198.51.100.2"); got != http.StatusTooManyRequests {
-		t.Fatalf("overflow peer acquired a new bucket: %d", got)
+	if got := request("198.51.100.1"); got != http.StatusTooManyRequests {
+		t.Fatalf("overflow peer reset its quota: %d", got)
+	}
+	// An unrelated new peer must not be forced into the exhausted bucket.
+	var independent string
+	for i := 2; i < 255; i++ {
+		ip := fmt.Sprintf("198.51.%d.1", i)
+		if limiter.getLimiter(ip) != limiter.getLimiter("198.51.100.1") {
+			independent = ip
+			break
+		}
+	}
+	if independent == "" || request(independent) != http.StatusNoContent {
+		t.Fatal("all unseen peers share one exhausted bucket")
 	}
 	if got := request("192.0.2.1"); got != http.StatusTooManyRequests {
 		t.Fatalf("peer flood reset the existing client's quota: %d", got)
 	}
 	if got := limiter.limiters.Len(); got != maxRateLimitPeers {
 		t.Fatalf("peer flood grew retained entries to %d", got)
+	}
+}
+
+func TestIPv6PrivacyAddressesShareQuota(t *testing.T) {
+	l := NewRateLimiter()
+	defer l.Shutdown()
+	first := l.getLimiter("2001:db8:1:2::1")
+	for i := 0; i < 10000; i++ {
+		if l.getLimiter(fmt.Sprintf("2001:db8:1:2::%x", i)) != first {
+			t.Fatal("rotating /64 privacy address reset quota")
+		}
+	}
+	for range 5 {
+		if !first.Allow() {
+			t.Fatal("missing initial burst")
+		}
+	}
+	if l.getLimiter("2001:db8:1:2::ffff").Allow() {
+		t.Fatal("privacy address bypass")
+	}
+	if !l.getLimiter("2001:db8:1:3::1").Allow() {
+		t.Fatal("unrelated /64 blocked")
+	}
+	if l.getLimiter("::ffff:192.0.2.1") != l.getLimiter("192.0.2.1") {
+		t.Fatal("IPv4 mapped alias bypass")
+	}
+	if l.limiters.Len() != 3 {
+		t.Fatal("privacy addresses grew table", l.limiters.Len())
 	}
 }

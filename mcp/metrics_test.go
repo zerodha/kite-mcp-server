@@ -160,9 +160,8 @@ func TestBrowserMetricsCountTransitionsNotPollsOrReplays(t *testing.T) {
 	require.EqualValues(t, 1, metricValue(t, m, "kite_mcp_approval_observations_total", map[string]string{"method": "browser", "outcome": "required", "fallback_reason": "form_not_supported"}))
 	csrf := pageCSRF(t, browserPage(t, f.b, id, identity))
 	form := url.Values{"csrf": {csrf}, "decision": {"approve"}, "remember": {"yes"}}
-	for range 2 {
-		require.Equal(t, http.StatusOK, postBrowserDecision(f.b, id, identity, form, "").Code)
-	}
+	require.Equal(t, http.StatusOK, postBrowserDecision(f.b, id, identity, form, "").Code)
+	require.Equal(t, http.StatusForbidden, postBrowserDecision(f.b, id, identity, form, "").Code)
 	for _, event := range []string{"created", "submission_started", "submitted"} {
 		require.EqualValues(t, 1, metricValue(t, m, "kite_mcp_browser_approval_events_total", map[string]string{"operation": "orders_place", "event": event}))
 	}
@@ -172,9 +171,8 @@ func TestBrowserMetricsCountTransitionsNotPollsOrReplays(t *testing.T) {
 	require.EqualValues(t, 1, metricValue(t, m, "kite_mcp_approval_observations_total", map[string]string{"method": "remembered_permission", "outcome": "approved"}))
 	manage := browserPage(t, f.b, "manage/approval-test", identity)
 	revoke := url.Values{"csrf": {pageCSRF(t, manage)}, "decision": {"revoke"}}
-	for range 2 {
-		require.Equal(t, http.StatusOK, postBrowserDecision(f.b, "manage/approval-test", identity, revoke, "").Code)
-	}
+	require.Equal(t, http.StatusOK, postBrowserDecision(f.b, "manage/approval-test", identity, revoke, "").Code)
+	require.Equal(t, http.StatusForbidden, postBrowserDecision(f.b, "manage/approval-test", identity, revoke, "").Code)
 	require.EqualValues(t, 1, metricValue(t, m, "kite_mcp_browser_approval_events_total", map[string]string{"event": "permission_revoked"}))
 	id = browserApprovalID(t, callBrowserOrder(t, cs, browserOrderArgs()))
 	f.b.mu.Lock()
@@ -207,9 +205,8 @@ func TestBrowserMetricsFailedAndDeclinedReviews(t *testing.T) {
 				f.failMutations.Store(true)
 			}
 			form := url.Values{"csrf": {csrf}, "decision": {decision}, "remember": {"yes"}}
-			for range 2 {
-				require.Equal(t, http.StatusOK, postBrowserDecision(f.b, id, identity, form, "").Code)
-			}
+			require.Equal(t, http.StatusOK, postBrowserDecision(f.b, id, identity, form, "").Code)
+			require.Equal(t, http.StatusForbidden, postBrowserDecision(f.b, id, identity, form, "").Code)
 			require.EqualValues(t, 1, metricValue(t, m, "kite_mcp_browser_approval_events_total", map[string]string{"event": scenario}))
 			require.Zero(t, metricValue(t, m, "kite_mcp_browser_approval_events_total", map[string]string{"event": "submitted"}))
 			require.Zero(t, metricValue(t, m, "kite_mcp_browser_approval_events_total", map[string]string{"event": "permission_granted"}))

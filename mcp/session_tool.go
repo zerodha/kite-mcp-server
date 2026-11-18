@@ -46,7 +46,21 @@ func (*SessionTool) Handler(manager *kc.Manager) ToolHandler {
 		case "status":
 			return handleSessionStatus(handler, sessionID)
 		case "logout":
-			return handleSessionLogout(handler, sessionID)
+			result, err := handleSessionLogout(handler, sessionID)
+			if err == nil && !result.IsError {
+				// End review flows and saved approvals before reporting success.
+				// These run after Terminate releases the session-manager lock.
+				handler.manager.SessionManager().CleanupExpiredSessions()
+				if b := browserApprovalsFrom(ctx); b != nil {
+					b.mu.Lock()
+					cleanupErr := b.cleanupLocked(time.Now())
+					b.mu.Unlock()
+					if cleanupErr != nil {
+						return NewToolResultError("Logged out, but approval cleanup could not be saved"), nil
+					}
+				}
+			}
+			return result, err
 		default:
 			return NewToolResultError("Invalid mode. Must be one of: status, logout"), nil
 		}
