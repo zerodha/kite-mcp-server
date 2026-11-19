@@ -143,7 +143,7 @@ func TestUpgradeInvalidatesLegacyReusableReviewProof(t *testing.T) {
 	require.NoError(t, state.Apply(storage.Change{Bucket: "sessions", Key: flowID, Value: encoded}))
 	f.manager.SessionManager().StopCleanupRoutine()
 	require.NoError(t, state.Close())
-	f, state = sqliteApprovalFixture(t, path)
+	f, _ = sqliteApprovalFixture(t, path)
 	_, err = f.manager.SessionManager().Get(flowID)
 	require.Error(t, err, "legacy review state not reclaimed during upgrade")
 	require.Equal(t, http.StatusForbidden, postBrowserDecision(f.b, id, nil, url.Values{"csrf": {proof}, "decision": {"approve"}}, "").Code)
