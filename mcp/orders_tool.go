@@ -151,6 +151,7 @@ func (*OrdersTool) Definition() *mcp.Tool {
 func (*OrdersTool) Handler(manager *kc.Manager) ToolHandler {
 	handler := NewToolHandler(manager)
 	return func(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		ctx = context.WithValue(ctx, approvalManagerKey{}, manager)
 		args := GetArguments(request)
 		mode := SafeAssertString(args["mode"], "")
 		if err := validateOrderArguments(args, mode); err != nil {

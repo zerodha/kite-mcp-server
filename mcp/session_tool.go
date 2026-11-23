@@ -51,6 +51,14 @@ func (*SessionTool) Handler(manager *kc.Manager) ToolHandler {
 				// End review flows and saved approvals before reporting success.
 				// These run after Terminate releases the session-manager lock.
 				handler.manager.SessionManager().CleanupExpiredSessions()
+				if approvals, ok := ctx.Value(approvalContextKey{}).(*tradeApprovals); ok {
+					approvals.Lock()
+					cleanupErr := approvals.cleanupLocked(time.Now(), manager)
+					approvals.Unlock()
+					if cleanupErr != nil {
+						return NewToolResultError("Logged out, but native approval cleanup could not be saved"), nil
+					}
+				}
 				if b := browserApprovalsFrom(ctx); b != nil {
 					b.mu.Lock()
 					cleanupErr := b.cleanupLocked(time.Now())

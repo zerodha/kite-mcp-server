@@ -5,15 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zerodha/kite-mcp-server/internal/storage"
+	"github.com/zerodha/kite-mcp-server/kc"
 )
 
 type approvalContextKey struct{}
+type approvalManagerKey struct{}
 
 const (
 	maxPendingTradeApprovals             = 1024
@@ -32,6 +35,47 @@ type tradeApprovals struct {
 	state storage.State
 	sync.Mutex
 	pending storage.Records[string, pendingTradeApproval]
+}
+
+func nativeApprovalOwnerActive(manager *kc.Manager, owner string, now time.Time) (bool, error) {
+	// stdio and in-memory approvals belong to their transport, not an HTTP grant.
+	if manager == nil || strings.HasPrefix(owner, "transport:") {
+		return true, nil
+	}
+	session, err := manager.SessionManager().Get(owner)
+	if err != nil {
+		if stateErr := storage.Check(manager.StateStore()); stateErr != nil {
+			return false, stateErr
+		}
+		return false, nil
+	}
+	return !session.Terminated && session.Credentials != nil && now.Before(session.ExpiresAt), nil
+}
+
+// The caller holds the approval lock. Session lookups do not renew credentials.
+func (s *tradeApprovals) cleanupLocked(now time.Time, manager *kc.Manager) error {
+	if err := storage.Check(s.state); err != nil {
+		return err
+	}
+	var changes []storage.Change
+	for token, pending := range s.pending.All() {
+		active, err := nativeApprovalOwnerActive(manager, pending.owner, now)
+		if err != nil {
+			return err
+		}
+		if !now.Before(pending.expires) || !active {
+			changes = append(changes, storage.Change{Bucket: "native_approvals", Key: token})
+		}
+	}
+	if s.state != nil && len(changes) != 0 {
+		if err := s.state.Apply(changes...); err != nil {
+			return err
+		}
+	}
+	for _, change := range changes {
+		s.pending.Delete(change.Key)
+	}
+	return nil
 }
 
 func approvalOwner(req *mcp.CallToolRequest) string {
@@ -89,6 +133,17 @@ func approvalFromContext(ctx context.Context, req *mcp.CallToolRequest, operatio
 		return nil, err
 	}
 	now := time.Now()
+	manager, _ := ctx.Value(approvalManagerKey{}).(*kc.Manager)
+	active, err := nativeApprovalOwnerActive(manager, approvalOwner(req), now)
+	if err != nil {
+		return nil, err
+	}
+	if !active {
+		if err := store.cleanupLocked(now, manager); err != nil {
+			return nil, err
+		}
+		return approvalFailure("invalid_state", "Approval session has ended; no transaction was executed."), nil
+	}
 	if token := req.Params.RequestState; token != "" {
 		pending, found := store.pending.Lookup(token)
 		if !found || pending.owner != approvalOwner(req) {
@@ -128,16 +183,14 @@ func approvalFromContext(ctx context.Context, req *mcp.CallToolRequest, operatio
 	if len(req.Params.InputResponses) != 0 {
 		return approvalFailure("invalid_state", "Approval state is required; no transaction was executed."), nil
 	}
+	// Reclaim orphaned persisted approvals before checking admission capacity.
+	// Logout acquires this lock only after releasing the session-manager lock.
+	if err := store.cleanupLocked(now, manager); err != nil {
+		return nil, err
+	}
 	owner := approvalOwner(req)
 	ownerPending := 0
-	for token, pending := range store.pending.All() {
-		if now.After(pending.expires) {
-			if err := storage.Delete(store.state, "native_approvals", token); err != nil {
-				return nil, err
-			}
-			store.pending.Delete(token)
-			continue
-		}
+	for _, pending := range store.pending.All() {
 		if pending.owner == owner {
 			ownerPending++
 		}
